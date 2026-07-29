@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# --- Entornos virtuales ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Datos: nunca subir datos reales de pacientes ni descargas pesadas ---
+# GSE39582, TCGA, Synapse, etc. se descargan localmente, no se versionan.
+data/*
+!data/.gitkeep
+
+# --- Salidas generadas (regenerables corriendo run_pipeline.py) ---
+results/
+figures/*.png
+!figures/.gitkeep
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Editores ---
+.vscode/
+.idea/
+*.swp
+
+# --- Secretos / config local ---
+.env
