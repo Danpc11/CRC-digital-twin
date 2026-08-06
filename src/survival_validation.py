@@ -59,10 +59,16 @@ def validate_survival_by_subtype(
     scored_df: pd.DataFrame,
     duration_col: str = "relapse_free_months",
     event_col: str = "relapse_event",
+    endpoint_label: str = "supervivencia libre de recidiva (RFS)",
 ) -> dict:
     """
     Corre Kaplan-Meier estratificado por subtipo predicho y el test
     log-rank multivariado (equivalente a comparar >2 grupos).
+
+    endpoint_label: descripcion humana del desenlace que se esta
+    validando -- IMPORTANTE especificarlo correctamente (supervivencia
+    global / OS no es lo mismo que supervivencia libre de recidiva /
+    RFS; son desenlaces clinicamente distintos, no intercambiables).
 
     Devuelve un diccionario con el resultado del test estadistico y los
     fitters de KM por grupo (para graficar despues).
@@ -100,6 +106,7 @@ def validate_survival_by_subtype(
         "n_groups": len(groups),
         "n_patients": len(clean),
         "km_fitters": fitters,
+        "endpoint_label": endpoint_label,
     }
 
 
@@ -108,31 +115,37 @@ def interpret_validation_result(result: dict) -> str:
     Traduce el resultado estadistico a una conclusion en lenguaje llano,
     sin sobreclamar. p < 0.05 no es "el modelo funciona"; es evidencia
     de que el subtipo predicho separa curvas de supervivencia en ESTA
-    cohorte, lo cual es necesario pero no suficiente para uso clinico.
+    cohorte para ESTE endpoint especifico, lo cual es necesario pero no
+    suficiente para uso clinico.
     """
     p = result["logrank_p_value"]
     n = result["n_patients"]
+    endpoint = result.get("endpoint_label", "supervivencia (endpoint no especificado)")
     lines = [
-        f"n = {n} pacientes con datos de supervivencia completos, "
+        f"Endpoint: {endpoint}",
+        f"n = {n} pacientes con datos completos, "
         f"{result['n_groups']} grupos de subtipo predicho.",
         f"log-rank p = {p:.4g}",
     ]
     if p < 0.05:
         lines.append(
-            "El subtipo predicho por el modelo separa significativamente las "
-            "curvas de supervivencia en esta cohorte. Esto es evidencia de "
-            "utilidad pronostica -- NO es lo mismo que validacion clinica, "
-            "que requeriria replicacion en cohorte externa independiente "
-            "(ej. GSE17536/GSE17537) antes de cualquier uso mas alla de "
-            "investigacion."
+            f"El subtipo predicho por el modelo separa significativamente las "
+            f"curvas de {endpoint} en esta cohorte. Esto es evidencia de "
+            "utilidad pronostica para ESTE endpoint especificamente -- NO "
+            "generaliza automaticamente a otro desenlace (ej. supervivencia "
+            "global no implica lo mismo que supervivencia libre de recidiva), "
+            "y NO es lo mismo que validacion clinica, que requeriria "
+            "replicacion en cohorte externa independiente (ej. GSE17536/"
+            "GSE17537) antes de cualquier uso mas alla de investigacion."
         )
     else:
         lines.append(
-            "No hay separacion significativa de supervivencia por subtipo "
+            f"No hay separacion significativa de {endpoint} por subtipo "
             "predicho en esta cohorte. Esto no invalida el modelo "
             "necesariamente -- puede reflejar tamano de muestra insuficiente, "
             "calibracion pobre, o que el panel de genes elegido no captura "
-            "senal pronostica -- pero significa que el modelo NO tiene, "
-            "todavia, evidencia de utilidad pronostica."
+            "senal pronostica para este endpoint -- pero significa que el "
+            "modelo NO tiene, todavia, evidencia de utilidad pronostica para "
+            "este desenlace especifico."
         )
     return "\n".join(lines)
