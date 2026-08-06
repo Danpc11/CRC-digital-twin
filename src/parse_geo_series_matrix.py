@@ -26,7 +26,23 @@ MATRIX_PATH = RAW / "GSE39582_series_matrix.txt.gz"
 
 
 def parse_series_matrix(path):
-    metadata_rows = {}
+    """
+    Parsea el series_matrix por CELDA, no por posicion de fila.
+
+    BUG CORREGIDO: la version anterior asumia que todas las muestras
+    tienen sus '!Sample_characteristics_ch1' en el mismo orden, y
+    usaba el nombre de atributo de la PRIMERA muestra para etiquetar
+    toda la fila. En GSE17537 (serie de 2010) esto desalineo datos --
+    la columna 'overall_event' termino mezclando grados de
+    diferenciacion tumoral con death/no death porque distintas
+    muestras tienen sus caracteristicas en distinto orden.
+
+    Este parser en cambio extrae cada celda como su propio par
+    'atributo: valor' y la asigna al atributo correcto para esa
+    muestra especifica, sin asumir alineacion posicional entre
+    muestras.
+    """
+    metadata_per_sample = {}
     sample_ids = None
     table_lines = []
     in_table = False
@@ -48,27 +64,34 @@ def parse_series_matrix(path):
 
             if line.startswith("!Sample_geo_accession"):
                 sample_ids = [x.strip('"') for x in line.split("\t")[1:]]
+                for sid in sample_ids:
+                    metadata_per_sample[sid] = {}
                 continue
 
             if line.startswith("!Sample_characteristics_ch1"):
+                if sample_ids is None:
+                    raise ValueError(
+                        "'!Sample_characteristics_ch1' aparecio antes de "
+                        "'!Sample_geo_accession' -- el archivo no tiene el "
+                        "formato esperado."
+                    )
                 values = [x.strip('"') for x in line.split("\t")[1:]]
-                # cada valor viene como "atributo: valor" -- usar el
-                # nombre del atributo (antes de ":") como clave de fila
-                if values and ":" in values[0]:
-                    attr_name = values[0].split(":")[0].strip()
-                    parsed_values = [
-                        v.split(":", 1)[1].strip() if ":" in v else v
-                        for v in values
-                    ]
-                    key = f"characteristics__{attr_name}"
-                    metadata_rows[key] = parsed_values
+                for sid, v in zip(sample_ids, values):
+                    if ":" in v:
+                        attr_name, attr_value = v.split(":", 1)
+                        metadata_per_sample[sid][attr_name.strip()] = attr_value.strip()
+                    # si una celda no tiene ':' no se puede asociar a un
+                    # atributo con seguridad -- se omite en vez de
+                    # adivinar, para no reintroducir el mismo tipo de bug
+                continue
 
     if sample_ids is None:
         raise ValueError("No se encontro '!Sample_geo_accession' -- verifica el archivo.")
 
-    phenotype = pd.DataFrame(metadata_rows, index=sample_ids)
+    phenotype = pd.DataFrame.from_dict(metadata_per_sample, orient="index")
+    phenotype.columns = [f"characteristics__{c}" for c in phenotype.columns]
+    phenotype = phenotype.reindex(sample_ids)  # preservar orden original de muestras
 
-    # Parsear tabla de expresion
     from io import StringIO
     table_str = "\n".join(table_lines)
     expr = pd.read_csv(StringIO(table_str), sep="\t", index_col=0, quotechar='"')
