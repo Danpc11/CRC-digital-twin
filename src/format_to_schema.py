@@ -108,31 +108,47 @@ def main():
 
     print("Cargando supervivencia clinica (TCGA)...")
     clinical = pd.read_csv(clinical_path, sep="\t", index_col="id")
-    for col in ("dfsMo", "dfsStat"):
+
+    # dfsMo (supervivencia libre de recidiva) esta vacio en TCGA-COAD/READ
+    # (0/603 no-nulos, verificado) -- TCGA curo consistentemente muerte
+    # (overall survival) pero no recidiva especifica. Usamos osMo/osStat
+    # en su lugar, con nombres de columna que dejan explicito que esto es
+    # supervivencia GLOBAL, no libre de recidiva -- son desenlaces
+    # distintos (muerte por cualquier causa vs. recurrencia del cancer)
+    # y no se deben tratar como intercambiables en ningun analisis
+    # posterior.
+    for col in ("osMo", "osStat"):
         if col not in clinical.columns:
             raise ValueError(f"Columna '{col}' no encontrada en {clinical_path.name}")
 
     print("Fusionando...")
     merged = gene_expr.join(tcga_labels[[CMS_LABEL_COLUMN]], how="inner")
     n_before_clinical = len(merged)
-    merged = merged.join(clinical[["dfsMo", "dfsStat"]], how="left")
+    merged = merged.join(clinical[["osMo", "osStat"]], how="left")
 
     merged = merged.rename(columns={
         CMS_LABEL_COLUMN: "cms_label",
-        "dfsMo": "relapse_free_months",
-        "dfsStat": "relapse_event",
+        "osMo": "overall_survival_months",
+        "osStat": "death_event",
     })
     merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
     merged.index.name = "sample_id"
     merged = merged.reset_index()
 
-    n_missing_survival = merged["relapse_free_months"].isna().sum()
+    n_missing_survival = merged["overall_survival_months"].isna().sum()
     print(
         f"\n{n_before_clinical} muestras con expresion + CMS (subset TCGA). "
-        f"{n_missing_survival} sin dato de supervivencia (dfsMo faltante en la fuente "
-        "clinica original) -- estas se excluiran automaticamente en "
-        "survival_validation.py via dropna, no hace falta filtrarlas aqui."
+        f"{n_missing_survival} sin dato de supervivencia global -- estas se "
+        "excluiran automaticamente en survival_validation.py via dropna."
+    )
+    print(
+        "\nNOTA: esto es supervivencia GLOBAL (muerte por cualquier causa), "
+        "NO supervivencia libre de recidiva -- TCGA-COAD/READ no tiene dfsMo "
+        "curado (0/603 no-nulos, verificado). Si mas adelante consigues "
+        "GSE39582 con supervivencia libre de recidiva real, usa nombres de "
+        "columna 'relapse_free_months'/'relapse_event' para ese archivo, "
+        "para no mezclar ambos endpoints bajo el mismo nombre."
     )
     print("\nDistribucion de subtipo CMS en este subset:")
     print(merged["cms_label"].value_counts())
