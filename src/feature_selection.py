@@ -1,4 +1,3 @@
-
 """
 feature_selection.py
 
@@ -141,6 +140,28 @@ def multiclass_anova(expr: np.ndarray, labels: np.ndarray, classes: list) -> np.
     return f
 
 
+def pairwise_auc(expr: np.ndarray, labels: np.ndarray, class_a: str, class_b: str) -> pd.Series:
+    """
+    AUC especifico para separar class_a de class_b (no de "el resto"),
+    solo usando las muestras de esas dos clases. Distinto de
+    one_vs_rest_auc: un gen puede tener AUC mediocre uno-contra-el-resto
+    pero ser excelente separando especificamente dos clases que se
+    confunden entre si (que es justo el problema que se quiere resolver
+    aqui: CMS3 vs CMS1 y CMS4 vs CMS2 se confunden en la cohorte
+    externa, no "CMS3 vs todo lo demas").
+    """
+    mask = (labels == class_a) | (labels == class_b)
+    sub_expr = expr[mask]
+    sub_labels = labels[mask]
+
+    ranks = rankdata(sub_expr, axis=0)
+    pos_mask = sub_labels == class_a
+    n_pos, n_neg = pos_mask.sum(), (~pos_mask).sum()
+    rank_sum_pos = ranks[pos_mask].sum(axis=0)
+    auc = (rank_sum_pos - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+    return pd.Series(auc, name=f"auc_{class_a}_vs_{class_b}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expr", required=True, help="TSV de expresion (probes x muestras)")
@@ -151,6 +172,9 @@ def main():
     parser.add_argument("--top-n-report", type=int, default=15, help="Cuantos candidatos mostrar por subtipo")
     parser.add_argument("--rf-candidate-pool", type=int, default=300,
                          help="Cuantos genes (por AUC maximo) pasan al filtro de Random Forest")
+    parser.add_argument("--pair", action="append", default=[],
+                         help="Par de clases a analizar especificamente, formato 'CMS3_metabolic,CMS1_MSI_immune'. "
+                              "Puede pasarse varias veces para varios pares.")
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -212,6 +236,36 @@ def main():
             marker = " [YA EN PANEL]" if gene in CURRENT_PANEL else " [NUEVO]"
             rf_score = rf_importance.get(gene, 0.0)
             print(f"  {gene:12s} AUC={auc:.3f}  RF_importance={rf_score:.4f}{marker}")
+
+    if args.pair:
+        print(f"\n{'='*70}\nANALISIS PAREADO (pares de clases especificos)\n{'='*70}")
+        pair_results = {}
+        for pair_str in args.pair:
+            class_a, class_b = [p.strip() for p in pair_str.split(",")]
+            if class_a not in classes or class_b not in classes:
+                print(f"AVISO: '{class_a}' o '{class_b}' no estan entre las clases disponibles ({classes}), se omite.")
+                continue
+            pair_auc = pairwise_auc(expr_arr, cms_labels, class_a, class_b)
+            pair_auc.index = gene_names
+            pair_results[f"{class_a}_vs_{class_b}"] = pair_auc
+
+            print(f"\n--- {class_a} vs {class_b} (AUC alto = mas expresado en {class_a}, bajo = mas en {class_b}) ---")
+            # candidatos que separan bien esta pareja especificamente
+            # (AUC lejos de 0.5 en cualquier direccion), ordenado por
+            # distancia a 0.5 -- no por AUC uno-contra-el-resto, que es
+            # una pregunta distinta
+            distance = (pair_auc - 0.5).abs().sort_values(ascending=False)
+            top_pair = distance.head(args.top_n_report)
+            for gene in top_pair.index:
+                auc_val = pair_auc[gene]
+                direction = f"mas alto en {class_a}" if auc_val > 0.5 else f"mas alto en {class_b}"
+                marker = " [YA EN PANEL]" if gene in CURRENT_PANEL else " [NUEVO]"
+                print(f"  {gene:12s} AUC={auc_val:.3f} ({direction}){marker}")
+
+        if pair_results:
+            pair_df = pd.DataFrame(pair_results)
+            pair_df.to_csv(out_dir / "pairwise_gene_ranking.tsv", sep="\t")
+            print(f"\nRanking pareado completo guardado en: {out_dir / 'pairwise_gene_ranking.tsv'}")
 
 
 if __name__ == "__main__":
