@@ -34,6 +34,8 @@ ENTREZ_TO_SYMBOL = {
     "4609": "MYC",
     "8313": "AXIN2",
     "2168": "FABP1",
+    "1373": "CPS1",   # eje CMS3 metabolico -- Yuan et al. 2025, Nat Commun (enterocyte-like diff., CPS1/SI como proteinas de firma)
+    "6476": "SI",     # idem, sucrase-isomaltase
     "7431": "VIM",
     "7040": "TGFB1",
 }
