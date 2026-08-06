@@ -11,10 +11,13 @@ REQUIERE (en este orden):
     1. src/download_synapse_data.py  (trae cms_labels_public_all.txt)
     2. curl del series_matrix de GSE39582 + src/parse_geo_series_matrix.py
        (trae gse39582_phenotype.tsv y gse39582_expression_probes.tsv)
-    3. curl de GPL570.annot.gz (ver comando en la conversacion)
+    3. curl de GPL570.txt (registro propio de la plataforma, texto plano):
+       curl -L -o data/raw_geo/GPL570.txt \\
+         "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?targ=self&acc=GPL570&form=text&view=full"
+       (NO usar GPL570_family.soft.gz -- ese trae TODAS las series
+       historicas de la plataforma, decenas de GB para GPL570)
 """
 
-import gzip
 from pathlib import Path
 
 import pandas as pd
@@ -38,14 +41,18 @@ CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 
 def parse_platform_annotation(path) -> pd.DataFrame:
     """
-    Parsea GPL570.annot.gz -- formato similar al series_matrix: header
-    con lineas '#', '!', '^', luego tabla entre
+    Parsea el registro SOFT propio de la plataforma (texto plano, NO
+    gzip -- descargado via acc.cgi?targ=self&form=text&view=full, no
+    via el .annot.gz deprecado ni el _family.soft.gz que trae TODAS
+    las series historicas de la plataforma -- ese ultimo puede pesar
+    decenas de GB para plataformas populares como GPL570, no es lo que
+    queremos). Misma estructura de tabla que el series_matrix:
     '!platform_table_begin' / '!platform_table_end'.
     """
     table_lines = []
     header = None
     in_table = False
-    with gzip.open(path, "rt", encoding="latin-1") as f:
+    with open(path, "r", encoding="latin-1") as f:
         for line in f:
             line = line.rstrip("\n")
             if line.startswith("!platform_table_begin"):
@@ -71,7 +78,7 @@ def parse_platform_annotation(path) -> pd.DataFrame:
 def main():
     expr_path = RAW_GEO / "gse39582_expression_probes.tsv"
     pheno_path = RAW_GEO / "gse39582_phenotype.tsv"
-    annot_path = RAW_GEO / "GPL570.annot.gz"
+    annot_path = RAW_GEO / "GPL570.txt"
     labels_path = RAW_SYNAPSE / "tcga_cms_labels" / "cms_labels_public_all.txt"
 
     for p in (expr_path, pheno_path, annot_path, labels_path):
