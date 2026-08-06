@@ -94,13 +94,45 @@ def main():
     scored = score_cohort(z, gene_cols, patterns)
     scored.to_csv(out_dir / "scored_cohort.tsv", sep="\t", index=False)
 
-    result = validate_survival_by_subtype(
-        scored, duration_col=duration_col, event_col=event_col, endpoint_label=endpoint_label
+    print("\n[1/2] Reclasificacion del modelo (panel reducido)")
+    result_model = validate_survival_by_subtype(
+        scored, duration_col=duration_col, event_col=event_col,
+        endpoint_label=endpoint_label, group_col="predicted_cms",
     )
-    print(interpret_validation_result(result))
+    report_model = interpret_validation_result(result_model)
+    print(report_model)
+
+    report_full = report_model
+
+    if "cms_label" in scored.columns:
+        print("\n[2/2] Linea base: etiqueta CMS oficial del consorcio")
+        try:
+            result_baseline = validate_survival_by_subtype(
+                scored, duration_col=duration_col, event_col=event_col,
+                endpoint_label=endpoint_label, group_col="cms_label",
+            )
+            report_baseline = interpret_validation_result(result_baseline)
+            print(report_baseline)
+            report_full = report_model + "\n\n" + "=" * 60 + "\n\n" + report_baseline
+
+            p_model = result_model["logrank_p_value"]
+            p_baseline = result_baseline["logrank_p_value"]
+            if p_baseline < 0.05 and p_model >= 0.05:
+                diag = (
+                    "\nDIAGNOSTICO: la etiqueta CMS oficial SI separa supervivencia "
+                    "(p={:.4g}) pero el panel reducido del modelo NO (p={:.4g}). Esto "
+                    "apunta a perdida de senal por reduccion de panel -- no a ausencia "
+                    "real de asociacion CMS-supervivencia en esta cohorte/endpoint. "
+                    "Revisar si los genes sustitutos (fallback) usados en "
+                    "format_to_schema.py capturan bien el eje biologico original."
+                ).format(p_baseline, p_model)
+                print(diag)
+                report_full += "\n" + diag
+        except ValueError as e:
+            print(f"No se pudo correr la linea base: {e}")
 
     with open(out_dir / "validation_report.txt", "w") as f:
-        f.write(interpret_validation_result(result))
+        f.write(report_full)
     print(f"\nReporte guardado en: {out_dir / 'validation_report.txt'}")
 
 
