@@ -38,6 +38,15 @@ ENTREZ_TO_SYMBOL = {
     "7040": "TGFB1",
 }
 
+# Alternativas si el marcador principal no esta en el panel de 5973 genes
+# de formatted_crc_data.txt (interseccion entre plataformas -- algunos
+# genes se pierden aunque el Entrez ID sea correcto). Mismo eje biologico
+# que el marcador que reemplazan.
+FALLBACK_ENTREZ = {
+    "MLH1":  [("4436", "MSH2"), ("2956", "MSH6"), ("5395", "PMS2")],   # otros genes MMR/MSI
+    "GZMB":  [("3001", "GZMA"), ("5551", "PRF1"), ("925", "CD8A")],    # otros marcadores citotoxicos/inmunes
+}
+
 CMS_RENAME = {
     "CMS1": "CMS1_MSI_immune",
     "CMS2": "CMS2_canonical_WNT",
@@ -64,10 +73,25 @@ def main():
 
     missing_entrez = [eid for eid in ENTREZ_TO_SYMBOL if eid not in expr.columns]
     if missing_entrez:
-        raise ValueError(
-            f"Entrez IDs no encontrados en la matriz de expresion: {missing_entrez}. "
-            "Verifica que formatted_crc_data.txt no haya cambiado de formato."
-        )
+        print(f"AVISO: Entrez IDs no encontrados en el panel de 5973 genes: {missing_entrez}")
+        for eid in missing_entrez:
+            symbol = ENTREZ_TO_SYMBOL[eid]
+            resolved = False
+            for fallback_eid, fallback_symbol in FALLBACK_ENTREZ.get(symbol, []):
+                if fallback_eid in expr.columns:
+                    print(f"  {symbol} (Entrez {eid}) no disponible -> usando {fallback_symbol} (Entrez {fallback_eid}) en su lugar")
+                    del ENTREZ_TO_SYMBOL[eid]
+                    ENTREZ_TO_SYMBOL[fallback_eid] = fallback_symbol
+                    resolved = True
+                    break
+            if not resolved:
+                print(f"  {symbol} (Entrez {eid}) no disponible y ningun fallback conocido tampoco -- se omite del panel")
+                del ENTREZ_TO_SYMBOL[eid]
+
+    if len(ENTREZ_TO_SYMBOL) == 0:
+        raise ValueError("Ningun gen del panel (ni sus fallbacks) esta disponible en formatted_crc_data.txt.")
+
+    print(f"\nPanel final ({len(ENTREZ_TO_SYMBOL)} genes): {list(ENTREZ_TO_SYMBOL.values())}")
 
     gene_expr = expr[list(ENTREZ_TO_SYMBOL.keys())].copy()
     gene_expr = gene_expr.rename(columns=ENTREZ_TO_SYMBOL)
@@ -115,11 +139,11 @@ def main():
 
     merged.to_csv(OUTPUT_PATH, sep="\t", index=False)
     print(f"\nGuardado: {OUTPUT_PATH} ({len(merged)} muestras, {len(ENTREZ_TO_SYMBOL)} genes)")
+    print(f"Panel final usado: {list(ENTREZ_TO_SYMBOL.values())}")
     print(
-        "\nNOTA: el panel quedo en 7 genes (sin KRAS_sig, que era un placeholder "
-        "sin gen real detras). Para correr calibration.py/run_pipeline.py con "
-        "este archivo no hace falta ningun cambio -- infiere las columnas de "
-        "genes automaticamente, funciona igual con 7 que con 8."
+        "\nPara correr calibration.py/run_pipeline.py con este archivo no hace "
+        "falta ningun cambio -- infiere las columnas de genes automaticamente, "
+        "funciona con cualquier numero de genes."
     )
 
 
