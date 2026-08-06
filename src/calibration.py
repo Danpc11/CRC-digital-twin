@@ -76,6 +76,7 @@ def infer_gene_columns(df: pd.DataFrame, non_gene_cols: set[str] | None = None) 
     """
     non_gene_cols = non_gene_cols or {
         "sample_id", "cms_label", "relapse_free_months", "relapse_event",
+        "overall_survival_months", "death_event",
         "kras_status", "braf_status", "msi_status", "cohort",
     }
     candidate = [c for c in df.columns if c not in non_gene_cols]
