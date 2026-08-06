@@ -134,13 +134,30 @@ def main():
     })
     merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
-    merged["relapse_event"] = pd.to_numeric(merged["relapse_event"], errors="coerce")
+
+    # relapse_event viene como texto ("recurrence"/"no recurrence"), NO
+    # numerico -- confirmado inspeccionando los valores crudos. Mapear
+    # explicitamente en vez de pd.to_numeric(), que forzaria todo a NaN
+    # silenciosamente (como paso la primera vez: 177/177 NaN sin ningun
+    # error ni aviso -- pd.to_numeric con errors='coerce' NO avisa
+    # cuando falla, solo devuelve NaN).
+    event_map = {"recurrence": 1, "no recurrence": 0}
+    unmapped = set(merged["relapse_event"].dropna().unique()) - set(event_map.keys())
+    if unmapped:
+        raise ValueError(
+            f"Valores inesperados en relapse_event no cubiertos por el mapeo: {unmapped}. "
+            f"Mapeo actual: {event_map}. Verifica los valores crudos y actualiza event_map."
+        )
+    merged["relapse_event"] = merged["relapse_event"].map(event_map)
 
     merged.index.name = "sample_id"
     merged = merged.reset_index()
 
-    n_missing = merged["relapse_free_months"].isna().sum()
-    print(f"\n{n_with_cms} muestras con expresion + CMS. {n_missing} sin dato de DFS.")
+    n_missing_duration = merged["relapse_free_months"].isna().sum()
+    n_missing_event = merged["relapse_event"].isna().sum()
+    print(f"\n{n_with_cms} muestras con expresion + CMS. "
+          f"{n_missing_duration} sin dato de duracion (DFS time), "
+          f"{n_missing_event} sin dato de evento (DFS event).")
     print("\nDistribucion de subtipo CMS:")
     print(merged["cms_label"].value_counts())
 
