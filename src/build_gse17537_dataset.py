@@ -115,24 +115,35 @@ def main():
 
     labels = pd.read_csv(labels_path, sep="\t")
     gse_labels = labels[labels["dataset"] == "gse17537"].set_index("sample")
-    if len(gse_labels) == 0:
-        raise ValueError(
-            "No se encontraron muestras con dataset=='gse17537' en cms_labels_public_all.txt -- "
-            "verifica el nombre exacto del dataset (podria ser 'gse17537' con otra capitalizacion "
-            "o no estar incluido en el dump del consorcio)."
-        )
 
-    print("Fusionando...")
-    merged = gene_expr.join(gse_labels[[CMS_LABEL_COLUMN]], how="inner")
-    n_with_cms = len(merged)
-    merged = merged.join(pheno[[DFS_TIME_COL, DFS_EVENT_COL]], how="left")
+    if len(gse_labels) == 0:
+        print(
+            "\nAVISO: el consorcio CMS no incluyo 'gse17537' en cms_labels_public_all.txt "
+            "(GSE17536 si esta, GSE17537 no -- son dos subseries relacionadas del mismo "
+            "estudio de Smith et al., pero el consorcio solo etiqueto una). Se continua SIN "
+            "etiqueta CMS oficial -- la validacion contra supervivencia real sigue siendo "
+            "valida, solo no habra linea base de comparacion para esta cohorte especifica."
+        )
+        print("Fusionando (sin etiqueta CMS oficial)...")
+        merged = gene_expr.join(pheno[[DFS_TIME_COL, DFS_EVENT_COL]], how="left")
+        n_with_cms = len(merged)
+        # 'none' explicito (no ausencia de columna) -- calibration.py
+        # exige la columna cms_label para cargar el TSV, y "none" es
+        # honesto: no es que sepamos que no tiene subtipo, es que el
+        # consorcio nunca lo etiqueto.
+        merged["cms_label"] = "none"
+    else:
+        print("Fusionando...")
+        merged = gene_expr.join(gse_labels[[CMS_LABEL_COLUMN]], how="inner")
+        n_with_cms = len(merged)
+        merged = merged.join(pheno[[DFS_TIME_COL, DFS_EVENT_COL]], how="left")
+        merged = merged.rename(columns={CMS_LABEL_COLUMN: "cms_label"})
+        merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
     merged = merged.rename(columns={
-        CMS_LABEL_COLUMN: "cms_label",
         DFS_TIME_COL: "relapse_free_months",
         DFS_EVENT_COL: "relapse_event",
     })
-    merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
 
     # relapse_event viene como texto ("recurrence"/"no recurrence"), NO
