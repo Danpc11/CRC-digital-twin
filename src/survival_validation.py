@@ -60,10 +60,20 @@ def validate_survival_by_subtype(
     duration_col: str = "relapse_free_months",
     event_col: str = "relapse_event",
     endpoint_label: str = "supervivencia libre de recidiva (RFS)",
+    group_col: str = "predicted_cms",
 ) -> dict:
     """
-    Corre Kaplan-Meier estratificado por subtipo predicho y el test
-    log-rank multivariado (equivalente a comparar >2 grupos).
+    Corre Kaplan-Meier estratificado por grupo y el test log-rank
+    multivariado (equivalente a comparar >2 grupos).
+
+    group_col: columna a usar para estratificar -- por default el
+    subtipo RECLASIFICADO por el modelo ("predicted_cms"), pero puede
+    pasarse "cms_label" para validar contra la etiqueta CMS OFICIAL del
+    consorcio como linea base. Esto separa dos preguntas distintas: (1)
+    existe asociacion CMS-supervivencia en esta cohorte/endpoint, y (2)
+    el panel reducido del modelo la recupera. Un resultado negativo con
+    predicted_cms y positivo con cms_label apunta a perdida de senal
+    por reduccion de panel, no a ausencia real de asociacion.
 
     endpoint_label: descripcion humana del desenlace que se esta
     validando -- IMPORTANTE especificarlo correctamente (supervivencia
@@ -73,27 +83,27 @@ def validate_survival_by_subtype(
     Devuelve un diccionario con el resultado del test estadistico y los
     fitters de KM por grupo (para graficar despues).
     """
-    required = {duration_col, event_col, "predicted_cms"}
+    required = {duration_col, event_col, group_col}
     missing = required - set(scored_df.columns)
     if missing:
         raise ValueError(f"Faltan columnas requeridas para validacion: {missing}")
 
-    clean = scored_df.dropna(subset=[duration_col, event_col])
-    groups = clean["predicted_cms"].unique()
+    clean = scored_df.dropna(subset=[duration_col, event_col, group_col])
+    groups = clean[group_col].unique()
 
     if len(groups) < 2:
         raise ValueError(
-            "Se necesitan al menos 2 grupos de subtipo predicho con datos "
-            "de supervivencia para correr el log-rank test."
+            "Se necesitan al menos 2 grupos con datos de supervivencia "
+            "para correr el log-rank test."
         )
 
     result = multivariate_logrank_test(
-        clean[duration_col], clean["predicted_cms"], clean[event_col]
+        clean[duration_col], clean[group_col], clean[event_col]
     )
 
     fitters = {}
     for label in groups:
-        subset = clean[clean["predicted_cms"] == label]
+        subset = clean[clean[group_col] == label]
         if len(subset) < 5:
             continue  # muy pocos para un KM fiable
         kmf = KaplanMeierFitter()
@@ -107,6 +117,7 @@ def validate_survival_by_subtype(
         "n_patients": len(clean),
         "km_fitters": fitters,
         "endpoint_label": endpoint_label,
+        "group_col": group_col,
     }
 
 
@@ -121,10 +132,17 @@ def interpret_validation_result(result: dict) -> str:
     p = result["logrank_p_value"]
     n = result["n_patients"]
     endpoint = result.get("endpoint_label", "supervivencia (endpoint no especificado)")
+    group_col = result.get("group_col", "predicted_cms")
+    group_desc = (
+        "etiqueta CMS OFICIAL del consorcio (linea base, no depende del panel reducido)"
+        if group_col == "cms_label"
+        else "subtipo RECLASIFICADO por el panel reducido del modelo"
+    )
     lines = [
         f"Endpoint: {endpoint}",
+        f"Agrupacion: {group_desc}",
         f"n = {n} pacientes con datos completos, "
-        f"{result['n_groups']} grupos de subtipo predicho.",
+        f"{result['n_groups']} grupos.",
         f"log-rank p = {p:.4g}",
     ]
     if p < 0.05:
