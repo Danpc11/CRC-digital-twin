@@ -106,9 +106,16 @@ def main():
 
     if "cms_label" in scored.columns:
         print("\n[2/2] Linea base: etiqueta CMS oficial del consorcio")
+        # Excluir 'none' (muestras no clasificadas por el consorcio) --
+        # no es un grupo biologico, es "sin clasificar", y agrega ruido
+        # a un test multivariado sin aportar nada interpretable.
+        baseline_df = scored[scored["cms_label"] != "none"]
+        n_excluded = len(scored) - len(baseline_df)
+        if n_excluded > 0:
+            print(f"  ({n_excluded} muestras 'none' excluidas de la linea base)")
         try:
             result_baseline = validate_survival_by_subtype(
-                scored, duration_col=duration_col, event_col=event_col,
+                baseline_df, duration_col=duration_col, event_col=event_col,
                 endpoint_label=endpoint_label, group_col="cms_label",
             )
             report_baseline = interpret_validation_result(result_baseline)
