@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 
 import synapseclient
+import synapseutils
 
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "raw_synapse"
 
@@ -54,17 +55,27 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for name, syn_id in SYNAPSE_IDS.items():
+        dest = OUTPUT_DIR / name
+        dest.mkdir(parents=True, exist_ok=True)
         print(f"Descargando {name} ({syn_id})...")
-        entity = syn.get(syn_id, downloadLocation=str(OUTPUT_DIR / name))
-        print(f"  -> guardado en: {entity.path}")
+
+        # syncFromSynapse maneja tanto archivos individuales como
+        # Folders/Projects contenedores con multiples archivos adentro
+        # (que es lo que causaba el AttributeError: 'path' con syn.get()
+        # directo -- syn4961785 es un contenedor, no un archivo suelto).
+        downloaded = synapseutils.syncFromSynapse(syn, syn_id, path=str(dest))
+
+        if not downloaded:
+            print(f"  AVISO: no se descargo ningun archivo para {syn_id}. "
+                  "Verifica el ID y tus permisos de acceso en Synapse.")
+        else:
+            for entity in downloaded:
+                print(f"  -> {entity.path}")
 
     print(
-        "\nDescarga completa. Los archivos crudos de Synapse rara vez vienen "
-        "en el esquema exacto que espera calibration.py -- revisa la "
-        "estructura descargada (probablemente un .tsv/.RData con genes en "
-        "filas, muestras en columnas, y un archivo de metadata clinica "
-        "aparte) y usa scripts/format_to_schema.py como punto de partida "
-        "para convertirlo al TSV requerido."
+        "\nDescarga completa. Revisa la estructura real en data/raw_synapse/ "
+        "y ajusta format_to_schema.py con los nombres de archivo/columnas "
+        "reales que encuentres."
     )
 
 
