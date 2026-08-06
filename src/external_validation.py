@@ -82,20 +82,61 @@ def main():
         return
 
     print(f"\n--- Validacion de supervivencia externa: {args.endpoint_label} ---")
-    result = validate_survival_by_subtype(
+    print("\n[1/2] Reclasificacion del modelo (patrones congelados de GSE39582)")
+    result_model = validate_survival_by_subtype(
         scored, duration_col=args.duration_col, event_col=args.event_col,
         endpoint_label=args.endpoint_label, group_col="predicted_cms",
     )
-    report = interpret_validation_result(result)
-    print(report)
+    report_model = interpret_validation_result(result_model)
+    print(report_model)
     print(
         "\nIMPORTANTE: este resultado es sobre una cohorte que el modelo NUNCA vio "
         "durante la calibracion -- si sale significativo, es evidencia bastante mas "
         "fuerte que la validacion en la misma cohorte de entrenamiento."
     )
 
+    report_full = report_model
+
+    if "cms_label" in scored.columns:
+        print("\n[2/2] Linea base: etiqueta CMS oficial del consorcio (en esta misma cohorte externa)")
+        baseline_df = scored[scored["cms_label"] != "none"]
+        n_excluded = len(scored) - len(baseline_df)
+        if n_excluded > 0:
+            print(f"  ({n_excluded} muestras 'none' excluidas de la linea base)")
+        try:
+            result_baseline = validate_survival_by_subtype(
+                baseline_df, duration_col=args.duration_col, event_col=args.event_col,
+                endpoint_label=args.endpoint_label, group_col="cms_label",
+            )
+            report_baseline = interpret_validation_result(result_baseline)
+            print(report_baseline)
+            report_full = report_model + "\n\n" + "=" * 60 + "\n\n" + report_baseline
+
+            p_model = result_model["logrank_p_value"]
+            p_baseline = result_baseline["logrank_p_value"]
+            if p_baseline >= 0.05 and p_model >= 0.05:
+                diag = (
+                    "\nDIAGNOSTICO: NI la etiqueta oficial (p={:.4g}) NI el panel del modelo "
+                    "(p={:.4g}) separan supervivencia en ESTA cohorte externa. Esto apunta a "
+                    "que GSE17536 especificamente tiene una asociacion CMS-supervivencia mas "
+                    "debil (conocido en la literatura para esta cohorte), no a un fallo de "
+                    "generalizacion especifico del panel reducido."
+                ).format(p_baseline, p_model)
+                print(diag)
+                report_full += "\n" + diag
+            elif p_baseline < 0.05 and p_model >= 0.05:
+                diag = (
+                    "\nDIAGNOSTICO: la etiqueta oficial SI separa supervivencia en esta cohorte "
+                    "externa (p={:.4g}) pero el panel congelado del modelo NO (p={:.4g}). Esto "
+                    "SI apunta a un problema de generalizacion del panel reducido especificamente."
+                ).format(p_baseline, p_model)
+                print(diag)
+                report_full += "\n" + diag
+        except ValueError as e:
+            print(f"No se pudo correr la linea base: {e}")
+
     with open(out_dir / "external_validation_report.txt", "w") as f:
-        f.write(report)
+        f.write(report_full)
     print(f"\nReporte guardado en: {out_dir / 'external_validation_report.txt'}")
 
 
