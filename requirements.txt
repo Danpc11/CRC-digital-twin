@@ -5,3 +5,5 @@ matplotlib
 lifelines
 pytest
 synapseclient
+GEOparse 
+scikit-learn
