@@ -30,8 +30,7 @@ OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "tcga_cms_labeled.t
 
 ENTREZ_TO_SYMBOL = {
     "4292": "MLH1",
-    "10578": "GNLY",   # reemplaza GZMB -- AUC=0.886 vs 0.665 de GZMB, misma familia funcional (granulos citotoxicos)
-    "11274": "USP18",  # eje CMS1 -- AUC=0.888, gen estimulado por interferon tipo I
+    "10578": "GNLY",
     "4609": "MYC",
     "8313": "AXIN2",
     "2168": "FABP1",
