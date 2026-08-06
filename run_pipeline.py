@@ -34,6 +34,24 @@ from survival_validation import (
     validate_survival_by_subtype,
 )
 
+# Pares de columnas de supervivencia reconocidos, en orden de preferencia.
+# RFS (recidiva) es preferible a OS (global) cuando ambos estan
+# disponibles porque es el endpoint mas directamente accionable
+# clinicamente, pero no siempre esta curado en la fuente (ej. TCGA-COAD
+# no tiene dfsMo poblado, solo osMo -- ver format_to_schema.py).
+SURVIVAL_ENDPOINTS = [
+    ("relapse_free_months", "relapse_event", "supervivencia libre de recidiva (RFS)"),
+    ("overall_survival_months", "death_event", "supervivencia global (OS)"),
+]
+
+
+def detect_survival_endpoint(df):
+    """Detecta cual par de columnas de supervivencia esta presente en el TSV."""
+    for duration_col, event_col, label in SURVIVAL_ENDPOINTS:
+        if duration_col in df.columns and event_col in df.columns:
+            return duration_col, event_col, label
+    return None, None, None
+
 
 def main():
     parser = argparse.ArgumentParser(description="Pipeline de calibracion + validacion CRC digital twin")
@@ -61,20 +79,24 @@ def main():
         print("\nValidacion de supervivencia omitida (--skip-survival).")
         return
 
-    if "relapse_free_months" not in df.columns or "relapse_event" not in df.columns:
+    duration_col, event_col, endpoint_label = detect_survival_endpoint(df)
+    if duration_col is None:
         print(
-            "\nAVISO: el TSV no tiene columnas 'relapse_free_months'/'relapse_event' -- "
-            "no se puede correr validacion de supervivencia. Usa --skip-survival para "
-            "silenciar este aviso, o agrega esas columnas."
+            "\nAVISO: el TSV no tiene ninguno de los pares de columnas de "
+            f"supervivencia reconocidos ({[e[:2] for e in SURVIVAL_ENDPOINTS]}) -- "
+            "no se puede correr validacion. Usa --skip-survival para silenciar "
+            "este aviso, o agrega esas columnas."
         )
         return
 
-    print("\n--- Validacion de supervivencia ---")
+    print(f"\n--- Validacion de supervivencia: {endpoint_label} ---")
     z = zscore_genes(df, gene_cols)
     scored = score_cohort(z, gene_cols, patterns)
     scored.to_csv(out_dir / "scored_cohort.tsv", sep="\t", index=False)
 
-    result = validate_survival_by_subtype(scored)
+    result = validate_survival_by_subtype(
+        scored, duration_col=duration_col, event_col=event_col, endpoint_label=endpoint_label
+    )
     print(interpret_validation_result(result))
 
     with open(out_dir / "validation_report.txt", "w") as f:
