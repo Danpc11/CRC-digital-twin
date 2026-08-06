@@ -31,11 +31,12 @@ OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "tcga_cms_labeled.t
 ENTREZ_TO_SYMBOL = {
     "4292": "MLH1",
     "3002": "GZMB",
+    "51192": "CKLF",  # eje CMS1 -- Toustrup et al., marcador especifico de riesgo de recaida en CMS1 (leucocito-derivado)
     "4609": "MYC",
     "8313": "AXIN2",
     "2168": "FABP1",
-    "1373": "CPS1",   # eje CMS3 metabolico -- Yuan et al. 2025, Nat Commun (enterocyte-like diff., CPS1/SI como proteinas de firma)
-    "6476": "SI",     # idem, sucrase-isomaltase
+    "1373": "CPS1",
+    "6476": "SI",
     "7431": "VIM",
     "7040": "TGFB1",
 }
