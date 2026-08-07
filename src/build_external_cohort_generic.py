@@ -186,6 +186,15 @@ def main():
         args.duration_col: "relapse_free_months",
         args.event_col: "relapse_event",
     })
+
+    # GEO a veces codifica valores faltantes como texto literal ("NA",
+    # "N/A", etc.) en vez de celda vacia -- normalizar a NaN real ANTES
+    # de mapear/validar, o el validador de --event-map los marca como
+    # "no cubiertos" y truena innecesariamente.
+    NA_TOKENS = {"NA", "N/A", "n/a", "na", "NaN", "nan", ""}
+    merged["relapse_free_months"] = merged["relapse_free_months"].replace(NA_TOKENS, pd.NA)
+    merged["relapse_event"] = merged["relapse_event"].replace(NA_TOKENS, pd.NA)
+
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
 
     if args.event_map:
