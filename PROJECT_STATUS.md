@@ -46,15 +46,7 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 
 ## Limitaciones
 
-- La magnitud del efecto de tratamiento en `treatment_perturbation.py` no está calibrada
-  contra datos reales de "antes/después de tratamiento" — solo la dirección está
-  fundamentada en literatura. No existen esos datos en el proyecto todavía (ver más abajo).
-- El hazard de `prognosis.py` es ordinal, no probabilidad calibrada (falta dato longitudinal
-  real tipo DYNAMIC/GALAXY — ese tipo de dato, además, mide ctDNA vía NGS, no expresión de
-  ARN vía qPCR, así que ni siquiera calibraría directamente este panel específico; la ruta
-  más realista es un piloto propio con seguimiento post-quirúrgico real)
-- GSE17536 se usó iterativamente para decidir genes — su validez como cohorte "externa" en
-  sentido estadístico estricto está parcialmente comprometida
+- El hazard de `prognosis.py` es ordinal, no probabilidad calibrada.
 - Concordance=0.57 en el Cox combinado es débil — significativo no es lo mismo que buen
   discriminador individual
 - El gate de `anti_egfr` usa un proxy débil por RNA (cercanía a CMS3) cuando no hay estatus
@@ -64,8 +56,5 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 
 1. Sumar más cohortes CRCSC al análisis combinado (`build_external_cohort_generic.py` ya
    soporta esto) antes de tocar el panel otra vez
-2. Diseñar un piloto propio con seguimiento post-quirúrgico real (INMEGEN) para calibrar
-   `prognosis.py` y `treatment_perturbation.py` contra datos reales, no solo dirección
-   fundamentada en literatura
-3. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
+2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
    por RNA en el gate de `anti_egfr`
