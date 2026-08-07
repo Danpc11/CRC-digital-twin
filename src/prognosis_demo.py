@@ -1,24 +1,29 @@
 """
 prognosis_demo.py
 
-Conecta tres piezas que hasta ahora vivian por separado:
+Conecta cuatro piezas que hasta ahora vivian por separado:
     1. attractor_model.py -- la dinamica (ODE tipo Hopfield)
     2. calibration.py -- los patrones REALES calibrados contra GSE39582
        (no los placeholders hechos a mano del esqueleto original)
     3. prognosis.py -- el modulo de trayectoria/alerta de recurrencia
+    4. treatment_perturbation.py -- que tratamientos tienen mecanismo
+       aplicable dado el estado actual del paciente
 
 Simula un escenario clinico post-quirurgico:
     - Paciente sin enfermedad residual detectable en las primeras
       mediciones (vector de estado cerca de cero)
     - En algun punto de seguimiento, aparece senal molecular real
-      (el paciente recae) empujando hacia el atractor de peor
-      pronostico (CMS4, consistente con lo que ya validamos en
-      GSE39582/GSE17536: CMS4 es sistematicamente el peor)
+      (el paciente recae) empujando hacia un atractor especifico
     - Verifica que hazard_from_trajectory + detect_recurrence_signal
       detectan la alerta, y en que punto del seguimiento
+    - Reporta, junto con la alerta: (a) que tan solida es la evidencia
+      externa de ESE atractor especifico (CMS4 fuerte, los otros tres
+      debiles/sin evidencia -- ver PROJECT_STATUS.md) y (b) que
+      tratamientos tienen mecanismo aplicable al estado actual del
+      paciente, con su evidencia citada
 
 USO:
-    python3 src/prognosis_demo.py --patterns results_gse39582_v2/calibrated_patterns.tsv
+    python3 src/prognosis_demo.py --patterns results_gse39582_final/calibrated_patterns.tsv
 """
 
 import argparse
@@ -33,9 +38,61 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
+from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
 from scipy.integrate import solve_ivp
 
 WONG = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
+
+# Fuerza de evidencia externa por atractor -- del Cox estratificado
+# combinando GSE17536+GSE17537+GSE14333 (n=326, ver PROJECT_STATUS.md).
+# Referencia del modelo: CMS2_canonical_WNT (HR=1.0 por definicion).
+EVIDENCE_STRENGTH = {
+    "CMS1_MSI_immune": {
+        "level": "debil",
+        "detail": "HR=1.67 vs. CMS2, p=0.09 -- tendencia, no significativo. "
+                   "Direccion contraintuitiva (peor pronostico), posible comportamiento "
+                   "bifasico de CMS1 real (bueno temprano, malo tras recaida) segun literatura.",
+    },
+    "CMS2_canonical_WNT": {
+        "level": "referencia",
+        "detail": "Subtipo de referencia del modelo Cox -- sin HR propio que reportar.",
+    },
+    "CMS3_metabolic": {
+        "level": "sin evidencia",
+        "detail": "HR=0.87 vs. CMS2, p=0.70 -- no distinguible de CMS2 en supervivencia externa.",
+    },
+    "CMS4_mesenchymal": {
+        "level": "fuerte",
+        "detail": "HR=1.88 vs. CMS2, p=0.03 -- consistente en 3 cohortes externas "
+                  "(GSE17536, GSE17537, GSE14333) y confirmado visualmente en curvas KM.",
+    },
+}
+
+
+def classify_current_state(x_current: np.ndarray, patterns: dict) -> tuple[str, float]:
+    """Correlacion maxima del estado actual con cada patron -- misma logica
+    que risk_score_from_expression en survival_validation.py, reimplementada
+    aqui para no acoplar este script a un dataframe de cohorte completo."""
+    if np.linalg.norm(x_current) < 1e-8:
+        return "none", 0.0
+    correlations = {label: float(np.corrcoef(x_current, p)[0, 1]) for label, p in patterns.items()}
+    best = max(correlations, key=correlations.get)
+    return best, correlations[best]
+
+
+def applicable_treatments(x_current: np.ndarray, gene_order: list, patterns: dict, efficacy_threshold: float = 0.05) -> list:
+    """Lista de tratamientos cuyo mecanismo tiene eficacia no-trivial dado
+    el estado actual del paciente (ver treatment_perturbation.py)."""
+    applicable = []
+    for name in TREATMENT_MECHANISMS:
+        try:
+            I = apply_treatment_perturbation(x_current, gene_order, name, patterns, ras_braf_wildtype=None)
+        except ValueError:
+            continue  # el panel no incluye los genes del mecanismo
+        efficacy = np.linalg.norm(I)
+        if efficacy > efficacy_threshold:
+            applicable.append((name, efficacy))
+    return sorted(applicable, key=lambda pair: -pair[1])
 
 
 def simulate_longitudinal_patient(
@@ -109,8 +166,37 @@ def main():
         print(f"  mes {t:3d}: hazard={h:.3f}{marker}")
 
     if alert:
+        x_at_alert = x_series[:, alert_idx]
+        attractor, corr = classify_current_state(x_at_alert, patterns)
+
         print(f"\nAlerta de recurrencia detectada en el mes {t_checks[alert_idx]} "
               f"(recaida simulada empezo en mes 15).")
+        print(f"\n--- Direccion de la alerta ---")
+        print(f"Estado se dirige hacia: {attractor} (correlacion={corr:.3f})")
+
+        if attractor in EVIDENCE_STRENGTH:
+            ev = EVIDENCE_STRENGTH[attractor]
+            print(f"Fuerza de evidencia externa de este atractor: {ev['level'].upper()}")
+            print(f"  {ev['detail']}")
+
+        print(f"\n--- Tratamientos con mecanismo aplicable a este estado ---")
+        treatments = applicable_treatments(x_at_alert, gene_order, patterns)
+        if treatments:
+            for name, efficacy in treatments:
+                print(f"  [{name}] eficacia relativa={efficacy:.3f}")
+                print(f"    {describe_treatment(name)}")
+                if name == "anti_egfr":
+                    print(
+                        "    AVISO: estatus RAS/BRAF real no disponible en esta simulacion -- "
+                        "este numero usa el proxy debil por RNA (cercania a CMS3), NO sustituye "
+                        "la prueba de mutacion real (qPCR alelo-especifico/HRM)."
+                    )
+        else:
+            print("  Ninguno de los mecanismos modelados tiene eficacia no-trivial en este estado.")
+        print(
+            "\n  RECORDATORIO: direccion de efecto fundamentada en literatura clinica, "
+            "magnitud NO calibrada -- ver treatment_perturbation.py. No usar para decisiones reales."
+        )
     else:
         print("\nNo se detecto alerta -- revisar threshold_sigma o la fuerza del sesgo simulado.")
 
