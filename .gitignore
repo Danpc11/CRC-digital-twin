@@ -22,6 +22,7 @@ data/*
 
 # --- Salidas generadas (regenerables corriendo run_pipeline.py) ---
 results/
+results*/
 figures/*.png
 !figures/.gitkeep
 
