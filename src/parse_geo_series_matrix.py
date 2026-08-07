@@ -27,90 +27,97 @@ MATRIX_PATH = RAW / "GSE39582_series_matrix.txt.gz"
 
 def parse_series_matrix(path):
     """
-    Parsea el series_matrix por CELDA, no por posicion de fila.
+    Parsea el series_matrix por CELDA, no por posicion de fila, y en
+    DOS PASADAS para no depender del orden de las lineas de cabecera.
 
-    BUG CORREGIDO: la version anterior asumia que todas las muestras
-    tienen sus '!Sample_characteristics_ch1' en el mismo orden, y
-    usaba el nombre de atributo de la PRIMERA muestra para etiquetar
-    toda la fila. En GSE17537 (serie de 2010) esto desalineo datos --
-    la columna 'overall_event' termino mezclando grados de
-    diferenciacion tumoral con death/no death porque distintas
-    muestras tienen sus caracteristicas en distinto orden.
+    BUGS CORREGIDOS (dos, encontrados en cohortes reales distintas):
 
-    Este parser en cambio extrae cada celda como su propio par
-    'atributo: valor' y la asigna al atributo correcto para esa
-    muestra especifica, sin asumir alineacion posicional entre
-    muestras.
+    1. La version original asumia que todas las muestras tienen sus
+       '!Sample_characteristics_ch1' en el mismo orden, y usaba el
+       nombre de atributo de la PRIMERA muestra para etiquetar toda la
+       fila. En GSE17537 (serie de 2010) esto desalineo datos -- la
+       columna 'overall_event' termino mezclando grados de
+       diferenciacion tumoral con death/no death porque distintas
+       muestras tienen sus caracteristicas en distinto orden.
+       Corregido: cada celda se parsea como su propio par
+       'atributo: valor', sin asumir alineacion posicional.
+
+    2. La version de una sola pasada asumia que '!Sample_geo_accession'
+       siempre aparece ANTES que '!Sample_title'/'!Sample_description'
+       en el archivo. En GSE33113, '!Sample_title' viene primero -- la
+       version de una pasada silenciosamente descartaba el titulo
+       (que en este caso era el puente de ID necesario: cms_labels_
+       public_all.txt usa 'col001', que solo aparece en Sample_title,
+       no en el GSM). Corregido: dos pasadas, la primera solo para
+       ubicar sample_ids sin importar donde este esa linea.
     """
-    metadata_per_sample = {}
-    sample_ids = None
+    # --- Pasada 1: leer todas las lineas de cabecera (no la tabla de
+    #     expresion, que puede ser enorme) y localizar sample_ids sin
+    #     asumir en que posicion aparece esa linea.
+    header_lines = []
     table_lines = []
     in_table = False
-
     with gzip.open(path, "rt", encoding="latin-1") as f:
         for line in f:
             line = line.rstrip("\n")
-
             if line.startswith("!series_matrix_table_begin"):
                 in_table = True
                 continue
             if line.startswith("!series_matrix_table_end"):
                 in_table = False
                 continue
-
             if in_table:
                 table_lines.append(line)
-                continue
+            else:
+                header_lines.append(line)
 
-            if line.startswith("!Sample_geo_accession"):
-                sample_ids = [x.strip('"') for x in line.split("\t")[1:]]
-                for sid in sample_ids:
-                    metadata_per_sample[sid] = {}
-                continue
-
-            # !Sample_title y !Sample_description a veces traen el ID
-            # interno original del estudio (distinto del GSM de GEO) --
-            # es el puente necesario cuando las etiquetas CMS del
-            # consorcio usan ese ID interno en vez de GSM. Confirmado en
-            # GSE33113: Sample_title trae "col001", pero cms_labels_
-            # public_all.txt usa exactamente ese "col001", no el GSM.
-            if line.startswith("!Sample_title") or line.startswith("!Sample_description"):
-                if sample_ids is None:
-                    continue  # no deberia pasar, pero no reventar por esto
-                field_name = line.split("\t")[0].lstrip("!")
-                values = [x.strip('"') for x in line.split("\t")[1:]]
-                for sid, v in zip(sample_ids, values):
-                    metadata_per_sample[sid][field_name] = v
-                continue
-
-            if line.startswith("!Sample_characteristics_ch1"):
-                if sample_ids is None:
-                    raise ValueError(
-                        "'!Sample_characteristics_ch1' aparecio antes de "
-                        "'!Sample_geo_accession' -- el archivo no tiene el "
-                        "formato esperado."
-                    )
-                values = [x.strip('"') for x in line.split("\t")[1:]]
-                for sid, v in zip(sample_ids, values):
-                    # Una celda puede traer UN solo "atributo: valor"
-                    # (formato de GSE39582/GSE17536/GSE17537) o VARIOS
-                    # empacados con ';' en una sola celda (formato de
-                    # GSE14333: "Location: Right; DukesStage: A;
-                    # DFS_Time: 3.64; DFS_Cens: 1; ..."). Separar por
-                    # ';' primero maneja ambos casos: con un solo
-                    # segmento, el resultado es identico al caso simple.
-                    for segment in v.split(";"):
-                        segment = segment.strip()
-                        if ":" in segment:
-                            attr_name, attr_value = segment.split(":", 1)
-                            metadata_per_sample[sid][attr_name.strip()] = attr_value.strip()
-                        # segmento sin ':' no se puede asociar a un
-                        # atributo con seguridad -- se omite en vez de
-                        # adivinar
-                continue
+    sample_ids = None
+    for line in header_lines:
+        if line.startswith("!Sample_geo_accession"):
+            sample_ids = [x.strip('"') for x in line.split("\t")[1:]]
+            break
 
     if sample_ids is None:
         raise ValueError("No se encontro '!Sample_geo_accession' -- verifica el archivo.")
+
+    metadata_per_sample = {sid: {} for sid in sample_ids}
+
+    # --- Pasada 2: con sample_ids ya conocido, procesar el resto de las
+    #     lineas de cabecera sin importar su orden relativo.
+    for line in header_lines:
+        if line.startswith("!Sample_geo_accession"):
+            continue  # ya procesada en la pasada 1
+
+        if line.startswith("!Sample_title") or line.startswith("!Sample_description"):
+            # A veces trae el ID interno original del estudio (distinto
+            # del GSM de GEO) -- es el puente necesario cuando las
+            # etiquetas CMS del consorcio usan ese ID interno en vez de
+            # GSM. Confirmado en GSE33113: Sample_title trae "col001".
+            field_name = line.split("\t")[0].lstrip("!")
+            values = [x.strip('"') for x in line.split("\t")[1:]]
+            for sid, v in zip(sample_ids, values):
+                metadata_per_sample[sid][field_name] = v
+            continue
+
+        if line.startswith("!Sample_characteristics_ch1"):
+            values = [x.strip('"') for x in line.split("\t")[1:]]
+            for sid, v in zip(sample_ids, values):
+                # Una celda puede traer UN solo "atributo: valor"
+                # (formato de GSE39582/GSE17536/GSE17537) o VARIOS
+                # empacados con ';' en una sola celda (formato de
+                # GSE14333: "Location: Right; DukesStage: A;
+                # DFS_Time: 3.64; DFS_Cens: 1; ..."). Separar por
+                # ';' primero maneja ambos casos: con un solo
+                # segmento, el resultado es identico al caso simple.
+                for segment in v.split(";"):
+                    segment = segment.strip()
+                    if ":" in segment:
+                        attr_name, attr_value = segment.split(":", 1)
+                        metadata_per_sample[sid][attr_name.strip()] = attr_value.strip()
+                    # segmento sin ':' no se puede asociar a un
+                    # atributo con seguridad -- se omite en vez de
+                    # adivinar
+            continue
 
     phenotype = pd.DataFrame.from_dict(metadata_per_sample, orient="index")
     phenotype.columns = [
