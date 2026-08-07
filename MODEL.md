@@ -177,13 +177,3 @@ no un predictor validado de respuesta a tratamiento.
 | $h(t) = \|x(t)\|$ | Riesgo ordinal | `hazard_from_trajectory()` |
 | $I_{\text{tx}} = -\varepsilon(x)\, x$ | Perturbación de tratamiento | `apply_treatment_perturbation()` |
 
-## 9. Lo que este modelo no es
-
-Para que quede explícito, sin necesidad de ir a `PROJECT_STATUS.md`: no es un modelo
-entrenado por optimización (no hay pérdida, no hay gradientes); no es una red neuronal en
-el sentido de tener pesos aprendidos capa por capa (los "pesos" $W$ son una proyección
-algebraica cerrada, determinística dados los patrones); no predice magnitud de respuesta a
-tratamiento (solo dirección); y el riesgo que produce es ordinal, no una probabilidad de
-supervivencia calibrada. Es, en el sentido más preciso, un **sistema dinámico calibrado
-empíricamente contra centroides de datos reales**, con una capa de clasificación por
-correlación y una capa de perturbación gateada por biología conocida.
