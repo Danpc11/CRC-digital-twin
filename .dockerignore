@@ -1,0 +1,25 @@
+# Sin esto, `docker build` envia TODO el directorio como contexto de
+# build -- incluyendo data/raw_geo y data/raw_synapse, que pueden pesar
+# cientos de MB o mas (GPL570.txt solo son 82 MB).
+
+data/
+results*/
+figures/
+*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Git y editores
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# SO
+.DS_Store
