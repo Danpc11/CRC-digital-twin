@@ -110,8 +110,8 @@ def main():
     cph_crude.summary.to_csv(out_dir / "cox_summary_crude.tsv", sep="\t")
 
     # --- Modelo 2: AJUSTADO por estadio (si hay datos) ---
-    cph_adj = lr_adj = None
-    n_adj = 0
+    cph_adj = lr_adj = cph_restr = None
+    n_adj = n_restr = 0
     if args.adjust_stage:
         if "stage" not in pooled.columns:
             print(
@@ -127,37 +127,88 @@ def main():
                 print("\nDemasiados pocos pacientes con estadio utilizable -- se omite el "
                       "modelo ajustado.")
             else:
+                # MODELO 2a -- crudo RESTRINGIDO a la misma muestra del ajustado.
+                # Esta es la comparacion que separa dos explicaciones que de
+                # otro modo se confunden: si el HR cae aqui (sin incluir
+                # estadio), la atenuacion viene de la PERDIDA DE MUESTRA
+                # (menos eventos); si se mantiene aqui y solo cae en el
+                # ajustado, la atenuacion viene del AJUSTE real por estadio.
+                cph_restr, lr_restr, n_restr = fit_cox(
+                    adj_data, [],
+                    "MODELO CRUDO RESTRINGIDO -- misma muestra que el ajustado, SIN estadio")
+                cph_restr.summary.to_csv(out_dir / "cox_summary_crude_restricted.tsv", sep="\t")
+
                 cph_adj, lr_adj, n_adj = fit_cox(
                     adj_data, ["stage_harmonized"],
                     "MODELO AJUSTADO -- subtipo CMS + estadio")
                 cph_adj.summary.to_csv(out_dir / "cox_summary_adjusted.tsv", sep="\t")
 
-    # --- Comparacion crudo vs. ajustado: la pregunta que importa ---
+    # --- Comparacion de los tres modelos: la pregunta que importa ---
     if cph_adj is not None:
-        print(f"\n{'=' * 66}\nCRUDO vs. AJUSTADO POR ESTADIO\n{'=' * 66}")
+        print(f"\n{'=' * 78}\nCOMPARACION DE MODELOS\n{'=' * 78}")
         rows = []
         for cov in cph_crude.summary.index:
-            hr_c = cph_crude.summary.loc[cov, "exp(coef)"]
-            p_c = cph_crude.summary.loc[cov, "p"]
+            row = {"covariable": cov,
+                    "HR_crudo_full": cph_crude.summary.loc[cov, "exp(coef)"],
+                    "p_crudo_full": cph_crude.summary.loc[cov, "p"]}
+            if cph_restr is not None and cov in cph_restr.summary.index:
+                row["HR_crudo_restr"] = cph_restr.summary.loc[cov, "exp(coef)"]
+                row["p_crudo_restr"] = cph_restr.summary.loc[cov, "p"]
             if cov in cph_adj.summary.index:
-                hr_a = cph_adj.summary.loc[cov, "exp(coef)"]
-                p_a = cph_adj.summary.loc[cov, "p"]
-            else:
-                hr_a = p_a = float("nan")
-            rows.append({"covariable": cov, "HR_crudo": hr_c, "p_crudo": p_c,
-                          "HR_ajustado": hr_a, "p_ajustado": p_a})
+                row["HR_ajustado"] = cph_adj.summary.loc[cov, "exp(coef)"]
+                row["p_ajustado"] = cph_adj.summary.loc[cov, "p"]
+            rows.append(row)
         comp = pd.DataFrame(rows)
         print(comp.to_string(index=False, float_format=lambda x: f"{x:.4g}"))
-        comp.to_csv(out_dir / "cox_crude_vs_adjusted.tsv", sep="\t", index=False)
+        comp.to_csv(out_dir / "cox_model_comparison.tsv", sep="\t", index=False)
 
-        print(f"\nn crudo = {n_crude}, n ajustado = {n_adj} "
-              f"(la diferencia son pacientes sin estadio utilizable o en estadio IV).")
+        ev_full = int(cph_crude.event_observed.sum())
+        ev_adj = int(cph_adj.event_observed.sum())
+        print(f"\nn crudo completo = {n_crude} ({ev_full} eventos)")
+        print(f"n restringido/ajustado = {n_adj} ({ev_adj} eventos, "
+              f"{100*(ev_full-ev_adj)/ev_full:.0f}% menos que el completo)")
+
+        # --- Diagnostico automatico por covariable ---
+        if cph_restr is not None:
+            print(f"\n{'-' * 78}\nDIAGNOSTICO: origen de la atenuacion\n{'-' * 78}")
+            for cov in cph_crude.summary.index:
+                if cov not in cph_restr.summary.index or cov not in cph_adj.summary.index:
+                    continue
+                hr_f = cph_crude.summary.loc[cov, "exp(coef)"]
+                hr_r = cph_restr.summary.loc[cov, "exp(coef)"]
+                hr_a = cph_adj.summary.loc[cov, "exp(coef)"]
+
+                d_restr = hr_r - hr_f     # cambio por restriccion de muestra
+                d_adj = hr_a - hr_r       # cambio por el ajuste en si
+                d_total = hr_a - hr_f
+
+                # cambio relativo respecto al efecto crudo, para no
+                # sobreinterpretar movimientos triviales
+                rel = abs(d_total) / max(abs(hr_f - 1.0), 1e-9)
+                if rel < 0.15:
+                    verdict = "el HR practicamente no cambia -- robusto al ajuste y a la restriccion"
+                elif abs(d_adj) > abs(d_restr) * 1.5:
+                    direction = "se atenua" if abs(hr_a - 1) < abs(hr_r - 1) else "se refuerza"
+                    verdict = (f"el efecto {direction} sobre todo por el AJUSTE POR ESTADIO "
+                               f"(cambio por ajuste: {d_adj:+.2f} vs. por restriccion: {d_restr:+.2f})")
+                elif abs(d_restr) > abs(d_adj) * 1.5:
+                    direction = "se atenua" if abs(hr_r - 1) < abs(hr_f - 1) else "se refuerza"
+                    verdict = (f"el efecto {direction} sobre todo por la RESTRICCION DE MUESTRA, "
+                               f"no por el ajuste (cambio por restriccion: {d_restr:+.2f} vs. "
+                               f"por ajuste: {d_adj:+.2f})")
+                else:
+                    verdict = (f"el cambio se reparte entre restriccion ({d_restr:+.2f}) "
+                               f"y ajuste ({d_adj:+.2f})")
+
+                print(f"\n{cov}")
+                print(f"  HR: {hr_f:.2f} (completo) -> {hr_r:.2f} (restringido) -> {hr_a:.2f} (ajustado)")
+                print(f"  {verdict}")
+
         print(
-            "\nCOMO LEER ESTO: si un subtipo mantiene su HR y su significancia al ajustar "
-            "por estadio, aporta informacion pronostica INDEPENDIENTE de la estadificacion "
-            "clinica -- que es lo que justifica hacer una prueba molecular adicional. Si el "
-            "efecto desaparece, el panel podria estar detectando indirectamente el estadio, "
-            "no valor pronostico propio."
+            "\nCOMO LEER ESTO: comparar el crudo COMPLETO con el ajustado confunde dos "
+            "efectos (menos pacientes y control por estadio). El crudo RESTRINGIDO usa "
+            "exactamente la misma muestra que el ajustado, asi que la diferencia entre "
+            "esos dos se debe UNICAMENTE al ajuste por estadio."
         )
 
     cph, lr_test, summary = cph_crude, lr_crude, cph_crude.summary
