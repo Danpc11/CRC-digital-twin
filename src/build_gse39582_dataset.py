@@ -37,6 +37,8 @@ CMS_RENAME = {
 }
 
 CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
+# Estadio clinico -- para el modelo de Cox ajustado (--adjust-stage)
+STAGE_COL = "characteristics__tnm.stage"
 
 
 def parse_platform_annotation(path) -> pd.DataFrame:
@@ -73,6 +75,16 @@ def parse_platform_annotation(path) -> pd.DataFrame:
     from io import StringIO
     annot = pd.read_csv(StringIO("\n".join(table_lines)), sep="\t", names=header)
     return annot
+
+
+def _keep_cols(pheno):
+    """Columnas de fenotipo a conservar: supervivencia + estadio si existe."""
+    cols = ["characteristics__rfs.delay", "characteristics__rfs.event"]
+    if STAGE_COL in pheno.columns:
+        cols.append(STAGE_COL)
+    else:
+        print(f"AVISO: no se encontro '{STAGE_COL}' -- sin ajuste por estadio.")
+    return cols
 
 
 def main():
@@ -136,12 +148,13 @@ def main():
     n_with_cms = len(merged)
 
     merged = merged.join(
-        pheno[["characteristics__rfs.delay", "characteristics__rfs.event"]], how="left"
+        pheno[_keep_cols(pheno)], how="left"
     )
     merged = merged.rename(columns={
         CMS_LABEL_COLUMN: "cms_label",
         "characteristics__rfs.delay": "relapse_free_months",
         "characteristics__rfs.event": "relapse_event",
+        STAGE_COL: "stage",
     })
     merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
