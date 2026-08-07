@@ -15,19 +15,73 @@ Para el historial de cambios, ver `CHANGELOG.md`.
 pip install -r requirements.txt
 ```
 
+Las versiones están fijadas en `requirements.txt` para reproducibilidad — son las verificadas
+con la suite de regresión completa (41 tests).
+
+### Con Docker (recomendado para reproducibilidad)
+
+El `Dockerfile` vive en `docker/`, pero **el contexto de build es la raíz del repositorio** —
+correr siempre desde la raíz con `-f`:
+
+```bash
+docker build -f docker/Dockerfile -t coloq:latest .
+
+docker run --rm coloq:latest test                          # suite de regresión
+docker run --rm -v "$(pwd)/results:/app/results_demo" coloq:latest demo
+docker run --rm -p 8501:8501 coloq:latest app              # interfaz web
+```
+
+O con `docker compose`:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm coloq test
+docker compose -f docker/docker-compose.yml run --rm coloq demo
+docker compose -f docker/docker-compose.yml up app         # http://localhost:8501
+```
+
+La imagen corre la suite de tests durante el build: si algo falla, la imagen no se construye.
+
+## Uso
+
+Todo el pipeline se opera desde un solo punto de entrada:
+
+```bash
+python3 cli.py --help
+python3 cli.py demo                  # pipeline completo sobre datos sintéticos
+python3 cli.py app                   # interfaz web (Streamlit)
+python3 cli.py test                  # suite de regresión
+```
+
+Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
+`prognosis`, `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
+de `src/` — el CLI solo orquesta, no duplica lógica.
+
+### Interfaz web
+
+`python3 cli.py app` levanta una aplicación con cuatro pestañas: clasificar muestras contra
+patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuerza de evidencia
+del atractor y tratamientos aplicables), simulación contrafactual de tratamiento, y una
+pestaña de documentación con el panel, la evidencia acumulada y las limitaciones.
+
 ## Estructura
 
 ```
-run_pipeline.py                      CLI: calibración + validación (cohorte de entrenamiento)
+cli.py                               punto de entrada único (todos los subcomandos)
+app.py                               interfaz web (Streamlit)
+run_pipeline.py                      calibración + validación (invocado por `cli.py calibrate`)
+requirements.txt                     dependencias con versiones fijadas
+.dockerignore                        (en la raíz: Docker lo lee del contexto de build)
+
+docker/
+  Dockerfile                         imagen reproducible
+  docker-compose.yml                 orquestación (contexto de build = raíz)
 
 src/
   attractor_model.py                 modelo de atractores (dinámica ODE tipo Hopfield)
   calibration.py                     calibración contra datos reales etiquetados
   survival_validation.py             Kaplan-Meier / log-rank
   prognosis.py                       trayectoria/pronóstico longitudinal
-  prognosis_demo.py                  demo end-to-end con patrones calibrados reales (evidencia por atractor + tratamientos aplicables)
-  treatment_perturbation.py          perturbación farmacodinámica (simulación de intervención)
-  treatment_simulation_demo.py       demo contrafactual: trayectoria con y sin tratamiento
+  prognosis_demo.py                  demo end-to-end con patrones calibrados reales
   external_validation.py             aplica patrones YA calibrados a cohorte externa (sin recalibrar)
   pooled_cox_validation.py           Cox estratificado combinando múltiples cohortes externas
   concordance_analysis.py            matriz de concordancia modelo vs. etiqueta oficial
@@ -49,6 +103,12 @@ figures/          salidas gráficas
 ```
 
 ## Quickstart (datos sintéticos, sin credenciales)
+
+```bash
+python3 cli.py demo
+```
+
+Equivalente ejecutando los scripts por separado:
 
 ```bash
 python3 src/synthetic_data.py
@@ -166,34 +226,11 @@ TCGA-02     CMS2_canonical_WNT   -0.88   3.55    ...  12.1                 1
 
 Convierte una serie temporal de mediciones post-quirúrgicas en una señal de riesgo ordinal:
 vector de estado cerca de cero = sin enfermedad residual; vector que se aleja hacia un
-atractor = alerta de recurrencia. La demo (`prognosis_demo.py`) reporta, junto con cada
-alerta: hacia qué atractor se dirige el paciente, qué tan sólida es la evidencia externa de
-*ese* atractor específicamente (CMS4 fuerte, los otros tres débiles/sin evidencia — ver
-`PROJECT_STATUS.md`), y qué tratamientos tienen mecanismo aplicable a ese estado:
+atractor = alerta de recurrencia. Demo end-to-end con patrones calibrados reales:
 
 ```bash
 python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.tsv
 ```
-
-## Simulación de intervención (`treatment_perturbation.py`)
-
-Tres mecanismos de tratamiento (inmunoterapia anti-PD1, anti-EGFR, quimioterapia citotóxica),
-cada uno gateado por la biología del paciente y con evidencia clínica citada (KEYNOTE-177,
-Karapetis/Douillard/Di Nicolantonio). Un tratamiento efectivo se representa como una fuerza
-que jala el estado de vuelta hacia el origen (reduce carga tumoral), no como un empuje sobre
-genes específicos. Demo contrafactual (misma trayectoria, con y sin tratamiento):
-
-```bash
-python3 src/treatment_simulation_demo.py \
-  --patterns results_gse39582/calibrated_patterns.tsv \
-  --treatment immunotherapy_antiPD1 \
-  --recurrence-target CMS1_MSI_immune
-```
-
-**Importante**: la dirección del efecto está fundamentada en literatura clínica real; la
-magnitud NO está calibrada contra datos reales de tratamiento (no existen en este proyecto
-todavía). Solo para exploración in silico, nunca para decisiones clínicas — ver el docstring
-de `treatment_perturbation.py` para el detalle completo de evidencia y limitaciones.
 
 ## Licencia
 
