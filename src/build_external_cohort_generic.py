@@ -191,8 +191,44 @@ def main():
         merged = gene_expr.join(pheno[keep_cols()], how="left")
         merged["cms_label"] = "none"
     else:
+        direct_overlap = len(set(gene_expr.index) & set(gse_labels.index))
+        pheno_for_join = pheno  # por default, pheno sigue indexado por GSM
+
+        if direct_overlap > 0:
+            print(f"Cruce directo por GSM: {direct_overlap}/{len(gse_labels)} coinciden.")
+        else:
+            # El GSM de GEO no coincide con el ID que usa el consorcio --
+            # visto en GSE33113: cms_labels usa 'col001' mientras la
+            # expresion viene indexada por 'GSM820048'. El puente esta en
+            # Sample_title o Sample_description (confirmado en GSE33113:
+            # Sample_title = 'col001'). Probar ambos campos antes de
+            # rendirse.
+            print("AVISO: 0 coincidencias por GSM directo -- probando puente via "
+                  "Sample_title / Sample_description...")
+            bridge_col = None
+            for candidate in ("Sample_title", "Sample_description"):
+                if candidate not in pheno.columns:
+                    continue
+                bridge_overlap = len(set(pheno[candidate]) & set(gse_labels.index))
+                print(f"  {candidate}: {bridge_overlap}/{len(gse_labels)} coincidencias")
+                if bridge_overlap > 0:
+                    bridge_col = candidate
+                    break
+
+            if bridge_col is None:
+                raise ValueError(
+                    f"No se encontro ningun puente de ID entre la expresion (GSM) y las "
+                    f"etiquetas CMS de '{dataset_name}'. Revisa manualmente los campos "
+                    f"disponibles en el fenotipo: {list(pheno.columns)}"
+                )
+
+            print(f"  Usando '{bridge_col}' como puente de ID.")
+            gsm_to_bridge = pheno[bridge_col].to_dict()
+            gene_expr = gene_expr.rename(index=gsm_to_bridge)
+            pheno_for_join = pheno.rename(index=gsm_to_bridge)
+
         merged = gene_expr.join(gse_labels[[CMS_LABEL_COLUMN]], how="inner")
-        merged = merged.join(pheno[keep_cols()], how="left")
+        merged = merged.join(pheno_for_join[keep_cols()], how="left")
         merged = merged.rename(columns={CMS_LABEL_COLUMN: "cms_label"})
         merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
