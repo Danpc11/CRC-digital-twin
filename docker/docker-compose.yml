@@ -1,0 +1,39 @@
+# IMPORTANTE: el contexto de build es la RAIZ del repositorio, no este
+# directorio. Correr siempre desde la raiz con -f:
+#
+#   docker compose -f docker/docker-compose.yml run --rm coloq test
+#   docker compose -f docker/docker-compose.yml run --rm coloq demo
+#   docker compose -f docker/docker-compose.yml up app     # http://localhost:8501
+#
+# Los volumenes montan data/ y results/ del host, para que los datos
+# descargados y los resultados persistan fuera del contenedor.
+
+services:
+  coloq:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: coloq:latest
+    volumes:
+      - ../data:/app/data
+      - ../results:/app/results
+      - ../figures:/app/figures
+    environment:
+      - MPLBACKEND=Agg
+      # Para los scripts de descarga de Synapse, exportar en el host:
+      #   export SYNAPSE_AUTH_TOKEN=...
+      - SYNAPSE_AUTH_TOKEN=${SYNAPSE_AUTH_TOKEN:-}
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: coloq:latest
+    command: ["app", "--port", "8501", "--address", "0.0.0.0"]
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../data:/app/data
+      - ../results:/app/results
+    environment:
+      - MPLBACKEND=Agg
