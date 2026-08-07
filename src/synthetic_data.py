@@ -18,13 +18,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-GENES = ["MLH1", "GZMB", "MYC", "AXIN2", "FABP1", "KRAS_sig", "VIM", "TGFB1"]
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
 
 TRUE_CENTROIDS = {
-    "CMS1_MSI_immune":    np.array([2.0, 2.0, -1.0, -1.0, -0.8, -1.0, -1.0, -0.8]),
-    "CMS2_canonical_WNT": np.array([-1.0, -0.8, 2.0, 2.0, -0.8, -0.6, -1.0, -0.8]),
-    "CMS3_metabolic":     np.array([-0.8, -0.6, -0.8, -0.6, 2.0, 2.0, -0.8, -0.6]),
-    "CMS4_mesenchymal":   np.array([-1.0, -0.8, -1.0, -0.8, -0.6, -0.6, 2.0, 2.0]),
+    "CMS1_MSI_immune":    np.array([-2.0, 2.0, 2.0, -1.0, -1.0, -0.8, -0.8, -0.8, -1.0, -0.8]),
+    "CMS2_canonical_WNT": np.array([-1.0, -0.8, -0.8, 2.0, 2.0, -0.8, -0.6, -0.6, -1.0, -0.8]),
+    "CMS3_metabolic":     np.array([-0.8, -0.6, -0.6, -0.8, -0.6, 2.0, 2.0, 2.0, -0.8, -0.6]),
+    "CMS4_mesenchymal":   np.array([-1.0, -0.8, -0.8, -1.0, -0.8, -0.6, -0.6, -0.6, 2.0, 2.0]),
 }
 
 # Parametros de supervivencia sinteticos por subtipo (mediana en meses,
