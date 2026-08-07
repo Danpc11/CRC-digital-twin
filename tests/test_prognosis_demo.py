@@ -13,7 +13,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from prognosis_demo import simulate_longitudinal_patient
+from prognosis_demo import (
+    simulate_longitudinal_patient,
+    classify_current_state,
+    applicable_treatments,
+    EVIDENCE_STRENGTH,
+)
 from calibration import calibrate_patterns_from_data
 from attractor_model import build_model_from_patterns
 from synthetic_data import generate_synthetic_cohort
@@ -90,3 +95,54 @@ def test_different_recurrence_targets_produce_different_trajectories(real_calibr
         n_timepoints=8, months_between_checks=3, recurrence_onset_month=15,
     )
     assert not np.allclose(x_cms4[:, -1], x_cms1[:, -1], atol=0.1)
+
+
+def test_evidence_strength_covers_all_four_cms():
+    expected = {"CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_mesenchymal"}
+    assert set(EVIDENCE_STRENGTH.keys()) == expected
+
+
+def test_cms4_has_strong_evidence_others_do_not():
+    assert EVIDENCE_STRENGTH["CMS4_mesenchymal"]["level"] == "fuerte"
+    assert EVIDENCE_STRENGTH["CMS1_MSI_immune"]["level"] != "fuerte"
+    assert EVIDENCE_STRENGTH["CMS3_metabolic"]["level"] != "fuerte"
+
+
+def test_classify_current_state_zero_vector_returns_none(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    x_zero = np.zeros(len(gene_order))
+    label, corr = classify_current_state(x_zero, patterns)
+    assert label == "none"
+    assert corr == 0.0
+
+
+def test_classify_current_state_matches_own_pattern(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    for expected_label, pattern in patterns.items():
+        label, corr = classify_current_state(pattern, patterns)
+        assert label == expected_label
+        assert corr > 0.99
+
+
+def test_applicable_treatments_includes_immunotherapy_near_cms1(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    x_cms1 = patterns["CMS1_MSI_immune"] * 0.8
+    treatments = applicable_treatments(x_cms1, gene_order, patterns)
+    names = [name for name, _ in treatments]
+    assert "immunotherapy_antiPD1" in names
+
+
+def test_applicable_treatments_excludes_immunotherapy_far_from_cms1(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    x_cms4 = patterns["CMS4_mesenchymal"] * 0.8
+    treatments = applicable_treatments(x_cms4, gene_order, patterns)
+    names = [name for name, _ in treatments]
+    assert "immunotherapy_antiPD1" not in names
+
+
+def test_applicable_treatments_sorted_by_efficacy_descending(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    x_cms1 = patterns["CMS1_MSI_immune"] * 0.8
+    treatments = applicable_treatments(x_cms1, gene_order, patterns)
+    efficacies = [eff for _, eff in treatments]
+    assert efficacies == sorted(efficacies, reverse=True)
