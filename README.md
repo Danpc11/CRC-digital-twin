@@ -1,4 +1,4 @@
-# crc-digital-twin
+# CRC-digital-twin
 
 Gemelo digital mecanicista de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados (CMS1-4) como atractores de una red tipo Hopfield continua, calibrable contra
