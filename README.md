@@ -25,7 +25,9 @@ src/
   calibration.py                     calibración contra datos reales etiquetados
   survival_validation.py             Kaplan-Meier / log-rank
   prognosis.py                       trayectoria/pronóstico longitudinal
-  prognosis_demo.py                  demo end-to-end con patrones calibrados reales
+  prognosis_demo.py                  demo end-to-end con patrones calibrados reales (evidencia por atractor + tratamientos aplicables)
+  treatment_perturbation.py          perturbación farmacodinámica (simulación de intervención)
+  treatment_simulation_demo.py       demo contrafactual: trayectoria con y sin tratamiento
   external_validation.py             aplica patrones YA calibrados a cohorte externa (sin recalibrar)
   pooled_cox_validation.py           Cox estratificado combinando múltiples cohortes externas
   concordance_analysis.py            matriz de concordancia modelo vs. etiqueta oficial
@@ -164,11 +166,34 @@ TCGA-02     CMS2_canonical_WNT   -0.88   3.55    ...  12.1                 1
 
 Convierte una serie temporal de mediciones post-quirúrgicas en una señal de riesgo ordinal:
 vector de estado cerca de cero = sin enfermedad residual; vector que se aleja hacia un
-atractor = alerta de recurrencia. Demo end-to-end con patrones calibrados reales:
+atractor = alerta de recurrencia. La demo (`prognosis_demo.py`) reporta, junto con cada
+alerta: hacia qué atractor se dirige el paciente, qué tan sólida es la evidencia externa de
+*ese* atractor específicamente (CMS4 fuerte, los otros tres débiles/sin evidencia — ver
+`PROJECT_STATUS.md`), y qué tratamientos tienen mecanismo aplicable a ese estado:
 
 ```bash
 python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.tsv
 ```
+
+## Simulación de intervención (`treatment_perturbation.py`)
+
+Tres mecanismos de tratamiento (inmunoterapia anti-PD1, anti-EGFR, quimioterapia citotóxica),
+cada uno gateado por la biología del paciente y con evidencia clínica citada (KEYNOTE-177,
+Karapetis/Douillard/Di Nicolantonio). Un tratamiento efectivo se representa como una fuerza
+que jala el estado de vuelta hacia el origen (reduce carga tumoral), no como un empuje sobre
+genes específicos. Demo contrafactual (misma trayectoria, con y sin tratamiento):
+
+```bash
+python3 src/treatment_simulation_demo.py \
+  --patterns results_gse39582/calibrated_patterns.tsv \
+  --treatment immunotherapy_antiPD1 \
+  --recurrence-target CMS1_MSI_immune
+```
+
+**Importante**: la dirección del efecto está fundamentada en literatura clínica real; la
+magnitud NO está calibrada contra datos reales de tratamiento (no existen en este proyecto
+todavía). Solo para exploración in silico, nunca para decisiones clínicas — ver el docstring
+de `treatment_perturbation.py` para el detalle completo de evidencia y limitaciones.
 
 ## Licencia
 
