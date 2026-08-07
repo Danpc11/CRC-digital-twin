@@ -11,12 +11,26 @@ Para el historial de cambios, ver `CHANGELOG.md`.
 
 ## Instalación
 
+Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
+de regresión completa (41 tests).
+
+### pip
+
 ```bash
 pip install -r requirements.txt
 ```
 
-Las versiones están fijadas en `requirements.txt` para reproducibilidad — son las verificadas
-con la suite de regresión completa (41 tests).
+### conda
+
+```bash
+conda env create -f environment.yml
+conda activate coloq
+python3 cli.py test          # verificar que el entorno quedó sano
+```
+
+Se recomienda `conda config --set channel_priority strict` antes de crearlo. El archivo usa
+dos canales: `conda-forge` para casi todo, y `bioconda` para `synapseclient`, que solo existe
+ahí.
 
 ### Con Docker (recomendado para reproducibilidad)
 
@@ -69,7 +83,8 @@ pestaña de documentación con el panel, la evidencia acumulada y las limitacion
 cli.py                               punto de entrada único (todos los subcomandos)
 app.py                               interfaz web (Streamlit)
 run_pipeline.py                      calibración + validación (invocado por `cli.py calibrate`)
-requirements.txt                     dependencias con versiones fijadas
+requirements.txt                     dependencias con versiones fijadas (pip)
+environment.yml                      entorno conda equivalente (mismas versiones)
 .dockerignore                        (en la raíz: Docker lo lee del contexto de build)
 
 docker/
