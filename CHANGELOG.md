@@ -3,6 +3,31 @@
 Formato: más reciente primero. No sigue versionado semántico estricto (proyecto de
 investigación, no paquete distribuido) — cada entrada es un hito de desarrollo.
 
+## Cuarta cohorte externa (GSE33113) y modelo ajustado por estadio robusto
+
+- **Bug de parser encontrado y corregido**: `!Sample_title` (que en GSE33113 trae el ID
+  interno `col001` usado por las etiquetas CMS del consorcio, distinto del GSM de GEO) venía
+  ANTES de `!Sample_geo_accession` en el archivo, orden contrario al asumido por el parser de
+  una sola pasada. Se descartaba en silencio. Corregido con parser de dos pasadas: primero
+  localiza `sample_ids` sin importar su posición, luego procesa el resto de los campos.
+- **Puente de ID agregado a `build_external_cohort_generic.py`**: cuando el cruce directo por
+  GSM da cero coincidencias, prueba automáticamente `Sample_title`/`Sample_description` como
+  puente antes de fallar (con mensaje claro si tampoco funciona, listando los campos
+  disponibles para inspección manual).
+- **`STAGE_MAP` extendido** con el formato `"AJCC stage X CRC"` (visto en el campo
+  `disease status` de GSE33113, cohorte diseñada como estadio II homogéneo).
+- `pooled_cox_validation.py` extendido con **modelo crudo restringido a la misma muestra del
+  ajustado** (separa "atenuación por ajuste real" de "pérdida de poder por menos eventos") y
+  diagnóstico automático por covariable.
+- **Resultado con las 4 cohortes (n=415, 100 eventos)**: modelo ajustado por estadio
+  significativo globalmente (p<0.001, n=388). CMS4 HR=2.06 (p=0.018), robusto al ajuste
+  (apenas se mueve entre crudo restringido y ajustado) — a diferencia de la ronda anterior con
+  3 cohortes, donde el efecto de CMS4 sí se atenuaba y perdía significancia al ajustar. CMS1
+  también resultó significativo (HR=2.09, p=0.016) — resultado nuevo, no replicado antes de
+  esta cohorte, tratar con cautela.
+- `power_analysis.py`: poder de CMS4 subió de 58% a 76% con la cuarta cohorte; CMS1 de
+  subpotenciado a 75%. CMS3 sigue en 45%.
+
 ## Simulación de tratamiento y reporte de evidencia por atractor
 
 - `treatment_perturbation.py`: tres mecanismos de tratamiento (inmunoterapia anti-PD1,
