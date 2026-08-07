@@ -68,6 +68,21 @@ def parse_series_matrix(path):
                     metadata_per_sample[sid] = {}
                 continue
 
+            # !Sample_title y !Sample_description a veces traen el ID
+            # interno original del estudio (distinto del GSM de GEO) --
+            # es el puente necesario cuando las etiquetas CMS del
+            # consorcio usan ese ID interno en vez de GSM. Confirmado en
+            # GSE33113: Sample_title trae "col001", pero cms_labels_
+            # public_all.txt usa exactamente ese "col001", no el GSM.
+            if line.startswith("!Sample_title") or line.startswith("!Sample_description"):
+                if sample_ids is None:
+                    continue  # no deberia pasar, pero no reventar por esto
+                field_name = line.split("\t")[0].lstrip("!")
+                values = [x.strip('"') for x in line.split("\t")[1:]]
+                for sid, v in zip(sample_ids, values):
+                    metadata_per_sample[sid][field_name] = v
+                continue
+
             if line.startswith("!Sample_characteristics_ch1"):
                 if sample_ids is None:
                     raise ValueError(
@@ -98,7 +113,10 @@ def parse_series_matrix(path):
         raise ValueError("No se encontro '!Sample_geo_accession' -- verifica el archivo.")
 
     phenotype = pd.DataFrame.from_dict(metadata_per_sample, orient="index")
-    phenotype.columns = [f"characteristics__{c}" for c in phenotype.columns]
+    phenotype.columns = [
+        c if c in ("Sample_title", "Sample_description") else f"characteristics__{c}"
+        for c in phenotype.columns
+    ]
     phenotype = phenotype.reindex(sample_ids)  # preservar orden original de muestras
 
     from io import StringIO
