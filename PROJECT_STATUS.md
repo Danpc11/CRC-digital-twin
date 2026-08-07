@@ -1,4 +1,4 @@
-# Estado del proyecto — ColoQ / crc-digital-twin
+# Estado del proyecto
 
 **Última actualización:** agosto 2026. Historial detallado en `CHANGELOG.md`.
 
