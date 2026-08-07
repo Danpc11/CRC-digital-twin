@@ -117,10 +117,10 @@ def main():
             if p_baseline >= 0.05 and p_model >= 0.05:
                 diag = (
                     "\nDIAGNOSTICO: NI la etiqueta oficial (p={:.4g}) NI el panel del modelo "
-                    "(p={:.4g}) separan supervivencia en ESTA cohorte externa. Esto apunta a "
-                    "que GSE17536 especificamente tiene una asociacion CMS-supervivencia mas "
-                    "debil (conocido en la literatura para esta cohorte), no a un fallo de "
-                    "generalizacion especifico del panel reducido."
+                    "(p={:.4g}) separan supervivencia en esta cohorte externa. Esto apunta a "
+                    "que esta cohorte especificamente tiene una asociacion CMS-supervivencia "
+                    "mas debil o un tamano de muestra insuficiente, no necesariamente a un "
+                    "fallo de generalizacion especifico del panel reducido."
                 ).format(p_baseline, p_model)
                 print(diag)
                 report_full += "\n" + diag
