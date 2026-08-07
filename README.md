@@ -13,7 +13,8 @@ longitudinal para seguimiento post-quirúrgico — diseñado para operar sobre p
 por **qPCR/RT-qPCR únicamente** (sin ddPCR, sin NGS, sin secuenciación de exosomas).
 
 Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md`.
-Para el historial de cambios, ver `CHANGELOG.md`.
+Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
+(la dinámica, por qué regla de proyección y no Hebb, cómo se calibra), ver `MODELO.md`.
 
 ## Instalación
 
@@ -265,4 +266,4 @@ python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.ts
 
 ## Licencia
 
-See [`LICENSE`](LICENSE).
+Ver [`LICENSE`](LICENSE).
