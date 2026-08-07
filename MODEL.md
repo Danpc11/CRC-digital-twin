@@ -1,12 +1,9 @@
 # Modelo — fundamento teórico
 
-Este documento describe la formulación matemática del gemelo digital: la dinámica de
-atractores, cómo se calibra contra datos reales, y cómo se extiende a pronóstico
-longitudinal y simulación de tratamiento. Para el estado empírico del proyecto (qué tan
-bien funciona, con qué evidencia), ver `PROJECT_STATUS.md`. Este documento es sobre **qué es
-el modelo**, no sobre qué tan bueno es.
+Este documento describe la dinámica de atractores, cómo se realiza la calibración con datos reales, y cómo se realiza la simulación del tratamiento y el pronóstico
+longitudinal.
 
-## 1. Formulación del espacio de estado
+## 1. Formulación del espacio fase
 
 Un paciente se representa como un vector $x \in \mathbb{R}^N$, donde cada componente es la
 expresión normalizada (z-score) de uno de los $N$ genes del panel ($N=10$ en la versión
