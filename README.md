@@ -2,9 +2,10 @@
 
 [![Tests](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml/badge.svg)](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
-![Tests count](https://img.shields.io/badge/tests-41%20passing-brightgreen)
+[![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
+![Tests count](https://img.shields.io/badge/tests-42%20passing-brightgreen)
 
 Gemelo digital mecanicista de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados (CMS1-4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -40,8 +41,18 @@ ahí.
 
 ### Con Docker (recomendado para reproducibilidad)
 
-El `Dockerfile` vive en `docker/`, pero **el contexto de build es la raíz del repositorio** —
-correr siempre desde la raíz con `-f`:
+Imagen publicada en Docker Hub — no hace falta construir nada localmente:
+
+```bash
+docker pull pipelinesinmegen/coloq:latest
+
+docker run --rm pipelinesinmegen/coloq:latest test                          # suite de regresión
+docker run --rm -v "$(pwd)/results:/app/results_demo" pipelinesinmegen/coloq:latest demo
+docker run --rm -p 8501:8501 pipelinesinmegen/coloq:latest app              # interfaz web
+```
+
+O construir la imagen localmente desde el `Dockerfile` en `docker/` — **el contexto de build
+es la raíz del repositorio**, correr siempre desde ahí con `-f`:
 
 ```bash
 docker build -f docker/Dockerfile -t coloq:latest .
@@ -51,7 +62,7 @@ docker run --rm -v "$(pwd)/results:/app/results_demo" coloq:latest demo
 docker run --rm -p 8501:8501 coloq:latest app              # interfaz web
 ```
 
-O con `docker compose`:
+O con `docker compose` (construye localmente, no usa la imagen de Docker Hub):
 
 ```bash
 docker compose -f docker/docker-compose.yml run --rm coloq test
