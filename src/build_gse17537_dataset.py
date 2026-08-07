@@ -45,6 +45,8 @@ CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 # GSE39582 -- no asumir que son iguales entre cohortes)
 DFS_TIME_COL = "characteristics__dfs_time"
 DFS_EVENT_COL = "characteristics__dfs_event (disease free survival; cancer recurrence)"
+# Estadio clinico -- para el modelo de Cox ajustado (--adjust-stage)
+STAGE_COL = "characteristics__ajcc_stage"
 
 
 def parse_platform_annotation(path) -> pd.DataFrame:
@@ -125,7 +127,12 @@ def main():
             "valida, solo no habra linea base de comparacion para esta cohorte especifica."
         )
         print("Fusionando (sin etiqueta CMS oficial)...")
-        merged = gene_expr.join(pheno[[DFS_TIME_COL, DFS_EVENT_COL]], how="left")
+        keep_cols = [DFS_TIME_COL, DFS_EVENT_COL]
+        if STAGE_COL in pheno.columns:
+            keep_cols.append(STAGE_COL)
+        else:
+            print(f"AVISO: no se encontro '{STAGE_COL}' -- sin ajuste por estadio.")
+        merged = gene_expr.join(pheno[keep_cols], how="left")
         n_with_cms = len(merged)
         # 'none' explicito (no ausencia de columna) -- calibration.py
         # exige la columna cms_label para cargar el TSV, y "none" es
@@ -136,13 +143,17 @@ def main():
         print("Fusionando...")
         merged = gene_expr.join(gse_labels[[CMS_LABEL_COLUMN]], how="inner")
         n_with_cms = len(merged)
-        merged = merged.join(pheno[[DFS_TIME_COL, DFS_EVENT_COL]], how="left")
+        keep_cols2 = [DFS_TIME_COL, DFS_EVENT_COL]
+        if STAGE_COL in pheno.columns:
+            keep_cols2.append(STAGE_COL)
+        merged = merged.join(pheno[keep_cols2], how="left")
         merged = merged.rename(columns={CMS_LABEL_COLUMN: "cms_label"})
         merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
     merged = merged.rename(columns={
         DFS_TIME_COL: "relapse_free_months",
         DFS_EVENT_COL: "relapse_event",
+        STAGE_COL: "stage",
     })
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
 
