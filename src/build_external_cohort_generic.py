@@ -95,6 +95,9 @@ def main():
                          help="Valor de la columna 'dataset' en cms_labels_public_all.txt (default: gse en minusculas)")
     parser.add_argument("--duration-col", default=None)
     parser.add_argument("--event-col", default=None)
+    parser.add_argument("--stage-col", default=None,
+                         help="Columna de estadio clinico (Dukes/TNM/AJCC). Necesaria para el "
+                              "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
     parser.add_argument("--event-map", default=None,
                          help="Mapeo texto->numero si event-col no es ya 0/1, formato 'valorA=1,valorB=0'")
     parser.add_argument("--output", default=None)
@@ -141,6 +144,17 @@ def main():
         Path(__file__).resolve().parents[1] / "data" / f"{dataset_name}_cms_labeled.tsv"
     )
 
+    def keep_cols():
+        cols = [args.duration_col, args.event_col]
+        if args.stage_col:
+            if args.stage_col in pheno.columns:
+                cols.append(args.stage_col)
+            else:
+                raise ValueError(
+                    f"--stage-col '{args.stage_col}' no existe en el fenotipo. "
+                    f"Corre con --diagnose para ver las columnas disponibles.")
+        return cols
+
     print("\nCargando anotacion de plataforma...")
     annot = parse_platform_annotation(annot_path)
     symbol_col_candidates = [c for c in annot.columns if "symbol" in c.lower()]
@@ -174,18 +188,19 @@ def main():
 
     if len(gse_labels) == 0:
         print("AVISO: sin etiqueta CMS oficial -- se continua con cms_label='none' para todas las muestras.")
-        merged = gene_expr.join(pheno[[args.duration_col, args.event_col]], how="left")
+        merged = gene_expr.join(pheno[keep_cols()], how="left")
         merged["cms_label"] = "none"
     else:
         merged = gene_expr.join(gse_labels[[CMS_LABEL_COLUMN]], how="inner")
-        merged = merged.join(pheno[[args.duration_col, args.event_col]], how="left")
+        merged = merged.join(pheno[keep_cols()], how="left")
         merged = merged.rename(columns={CMS_LABEL_COLUMN: "cms_label"})
         merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
-    merged = merged.rename(columns={
-        args.duration_col: "relapse_free_months",
-        args.event_col: "relapse_event",
-    })
+    rename_map = {args.duration_col: "relapse_free_months",
+                  args.event_col: "relapse_event"}
+    if args.stage_col:
+        rename_map[args.stage_col] = "stage"
+    merged = merged.rename(columns=rename_map)
 
     # GEO a veces codifica valores faltantes como texto literal ("NA",
     # "N/A", etc.) en vez de celda vacia -- normalizar a NaN real ANTES
