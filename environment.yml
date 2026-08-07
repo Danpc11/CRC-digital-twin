@@ -1,0 +1,55 @@
+# Entorno conda para ColoQ / crc-digital-twin
+#
+# Crear:
+#   conda env create -f environment.yml
+#   conda activate coloq
+#
+# (mamba es bastante mas rapido resolviendo, si lo tienes:)
+#   mamba env create -f environment.yml
+#
+# Verificar que el entorno quedo sano:
+#   python3 cli.py test        # deben pasar 41 tests
+#
+# Actualizar tras cambiar este archivo:
+#   conda env update -f environment.yml --prune
+#
+# NOTA SOBRE CANALES: el orden importa. conda-forge tiene la mayoria de
+# los paquetes; synapseclient solo esta en bioconda. Se recomienda
+# channel_priority strict para evitar mezclas inconsistentes entre
+# canales (que es la causa mas comun de entornos rotos):
+#   conda config --set channel_priority strict
+#
+# Las versiones estan fijadas igual que en requirements.txt -- son las
+# verificadas con la suite de regresion completa (41 tests).
+
+name: coloq
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  - python=3.12
+
+  # --- nucleo (requerido para todo el pipeline) ---
+  - numpy=2.4.4
+  - scipy=1.17.1
+  - pandas=2.3.3
+  - matplotlib=3.10.8
+  - lifelines=0.30.3
+
+  # --- app web ---
+  - streamlit=1.61.1
+
+  # --- seleccion de features (feature_selection.py) ---
+  - scikit-learn=1.8.0
+
+  # --- descarga de datos (solo para los scripts de download_*) ---
+  # geoparse esta en conda-forge; synapseclient solo en bioconda.
+  - geoparse=2.0.4
+  - synapseclient=4.13.0
+
+  # --- desarrollo ---
+  - pytest=9.1.1
+
+  - pip
