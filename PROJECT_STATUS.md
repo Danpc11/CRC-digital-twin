@@ -90,7 +90,7 @@ completo de 4 grupos). Concordance = 0.58.
 
 ---
 
-## 5. Interpretación honesta
+## 5. Interpretación
 
 - **El eje CMS4 es la señal más consistente de todo el proyecto.** Peor pronóstico
   confirmado visualmente en curvas Kaplan-Meier, en cada cohorte, con cada versión del
