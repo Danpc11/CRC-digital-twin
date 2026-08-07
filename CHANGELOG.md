@@ -3,6 +3,41 @@
 Formato: más reciente primero. No sigue versionado semántico estricto (proyecto de
 investigación, no paquete distribuido) — cada entrada es un hito de desarrollo.
 
+## Simulación de tratamiento y reporte de evidencia por atractor
+
+- `treatment_perturbation.py`: tres mecanismos de tratamiento (inmunoterapia anti-PD1,
+  anti-EGFR, quimioterapia citotóxica), gateados por biología del paciente, evidencia
+  clínica citada por mecanismo:
+  - Inmunoterapia: KEYNOTE-177 (Andre et al. 2020 NEJM; actualización 2024 Ann Oncol),
+    HR=0.60-0.73 en MSI-H/dMMR. Sin beneficio basal fuera de CMS1 (tumores MSS
+    "inmunológicamente fríos" — sin piso artificial de eficacia).
+  - Anti-EGFR: Karapetis et al. 2008 NEJM; Douillard et al. 2013 NEJM; Di Nicolantonio
+    et al. 2008 JCO — requiere RAS/BRAF wild-type. Sin estatus real disponible, usa
+    proxy débil por cercanía a CMS3 (penalizado por incertidumbre), nunca sustituye la
+    prueba de mutación real.
+  - Quimioterapia citotóxica: eficacia reducida (no nula) en pacientes cerca de CMS4,
+    consistente con la evidencia empírica propia del proyecto.
+- **Bug de diseño encontrado y corregido durante la construcción**: la primera versión
+  empujaba genes específicos del mecanismo hacia arriba (ej. reforzar GNLY/USP18 en
+  inmunoterapia), lo cual hundía al paciente más en su propio atractor en vez de
+  simular limpieza tumoral — el hazard subía con tratamiento "efectivo" en vez de
+  bajar. Corregido: un tratamiento efectivo ahora se representa como una fuerza de
+  amortiguamiento que jala el vector de estado hacia el origen, proporcional a la
+  eficacia gateada, no como un empuje sobre genes del propio atractor.
+- `treatment_simulation_demo.py`: simulación contrafactual (misma trayectoria de
+  recaída, con y sin tratamiento), demuestra divergencia real cuando el mecanismo
+  aplica al subtipo del paciente.
+- `prognosis_demo.py` extendido: cada alerta de recurrencia ahora reporta (a) hacia
+  qué atractor se dirige el paciente, (b) fuerza de evidencia externa de ESE atractor
+  específico (`EVIDENCE_STRENGTH`, derivado del Cox combinado de 3 cohortes — CMS4
+  fuerte, CMS1 tendencia no significativa, CMS3 sin evidencia), y (c) qué tratamientos
+  tienen mecanismo aplicable a ese estado, con aviso explícito cuando `anti_egfr` solo
+  se apoya en el proxy débil de RNA.
+- Bug encontrado y corregido en `synthetic_data.py`: seguía con el panel viejo de 8
+  genes (`GZMB`, `KRAS_sig`) en vez de los 10 genes actuales — causaba fallos en 3
+  tests nuevos. Corregido, incluyendo `MLH1` con signo negativo en el centroide CMS1
+  (consistente con la dirección real descubierta: baja expresión, no alta).
+
 ## Validación combinada de 3 cohortes externas
 
 - `pooled_cox_validation.py`: Cox de riesgos proporcionales estratificado por cohorte,
