@@ -62,6 +62,10 @@ STAGE_MAP = {
     # Romanos
     "i": 1, "ii": 2, "iii": 3, "iv": 4,
     "stage i": 1, "stage ii": 2, "stage iii": 3, "stage iv": 4,
+    # Formato "AJCC stage X CRC" -- visto en GSE33113 (disease status:
+    # "AJCC stage II CRC"), cohorte diseñada como estadio II homogeneo.
+    "ajcc stage i crc": 1, "ajcc stage ii crc": 2,
+    "ajcc stage iii crc": 3, "ajcc stage iv crc": 4,
     # Subdivisiones AJCC -- se colapsan al estadio principal
     "iia": 2, "iib": 2, "iic": 2,
     "iiia": 3, "iiib": 3, "iiic": 3,
