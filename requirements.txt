@@ -1,9 +1,23 @@
-numpy
-scipy
-pandas
-matplotlib
-lifelines
-pytest
-synapseclient
-GEOparse 
-scikit-learn
+# Versiones fijadas para reproducibilidad -- son las verificadas con la
+# suite de regresion completa (41 tests). Para actualizar, cambiar aqui
+# y confirmar que `python3 cli.py test` sigue en verde.
+
+# --- nucleo (requerido para todo el pipeline) ---
+numpy==2.4.4
+scipy==1.17.1
+pandas==2.3.3
+matplotlib==3.10.8
+lifelines==0.30.3
+
+# --- app web ---
+streamlit==1.61.1
+
+# --- seleccion de features (feature_selection.py) ---
+scikit-learn==1.8.0
+
+# --- descarga de datos (solo para los scripts de download_*) ---
+synapseclient==4.13.0
+GEOparse==2.0.4
+
+# --- desarrollo ---
+pytest==9.1.1
