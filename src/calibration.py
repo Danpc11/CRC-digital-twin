@@ -72,12 +72,28 @@ def infer_gene_columns(df: pd.DataFrame, non_gene_cols: set[str] | None = None) 
     """
     Infiere las columnas de genes como todas las columnas numericas que
     no son metadata conocida (sample_id, cms_label, columnas de
-    supervivencia, mutaciones, etc).
+    supervivencia, covariables clinicas, etc).
+
+    CUIDADO -- ESTA LISTA ES CRITICA: cualquier columna numerica que NO
+    este aqui se tratara como un gen, se z-scoreara y entrara a la
+    calibracion como un rasgo mas del panel. Eso ya paso una vez con
+    'stage' (estadio clinico numerico en GSE17536/17537): contamino los
+    patrones calibrados sin ningun error visible, solo p-valores que
+    cambiaban sin explicacion. Al agregar cualquier covariable clinica
+    nueva a los datasets, agregarla TAMBIEN aqui.
     """
     non_gene_cols = non_gene_cols or {
-        "sample_id", "cms_label", "relapse_free_months", "relapse_event",
+        "sample_id", "cms_label", "cohort",
+        # supervivencia
+        "relapse_free_months", "relapse_event",
         "overall_survival_months", "death_event",
-        "kras_status", "braf_status", "msi_status", "cohort",
+        # covariables clinicas
+        "stage", "stage_harmonized", "age", "sex", "gender",
+        "tumor_location", "adjuvant_chemo",
+        # estatus molecular (no expresion)
+        "kras_status", "braf_status", "msi_status",
+        # salidas del propio pipeline
+        "predicted_cms", "classification_confidence",
     }
     candidate = [c for c in df.columns if c not in non_gene_cols]
     numeric = [c for c in candidate if pd.api.types.is_numeric_dtype(df[c])]
