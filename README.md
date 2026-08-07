@@ -249,4 +249,4 @@ python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.ts
 
 ## Licencia
 
-Apache License 2.0 — ver `LICENSE`.
+MIT License — ver `LICENSE`.
