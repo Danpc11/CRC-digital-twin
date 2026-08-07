@@ -145,9 +145,9 @@ lo hundiría más en ese atractor, el opuesto biológico de lo que hace un trata
 funciona. En cambio, un tratamiento efectivo se representa como una fuerza de
 amortiguamiento proporcional al estado actual, que jala de vuelta hacia el origen:
 
-$$I_{\text{tx}}(t) = -\varepsilon(x, \text{mecanismo}) \cdot x(t)$$
+ $$I_{\text{tx}}(t) = -\varepsilon(x, \text{mecanismo}) \cdot x(t)$$
 
-donde $\varepsilon \in [0, \text{base\_strength}]$ es una **eficacia gateada** por la
+donde  $\varepsilon \in [0, \text{base\_strength}]$  es una **eficacia gateada** por la
 biología del paciente — no un valor fijo. Tres mecanismos implementados, cada uno con su
 propia función de gate y evidencia clínica citada (ver docstring de
 `treatment_perturbation.py`):
