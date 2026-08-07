@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 es el minimo real: numpy 2.4.4, scipy 1.17.1 y
+        # lifelines 0.30.3 declaran requires_python >=3.11.
+        # 3.12 es la version de referencia (Dockerfile y environment.yml).
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Correr suite de regresion
+        env:
+          MPLBACKEND: Agg
+        run: pytest tests/ -v
+
+      - name: Verificar que el CLI arranca
+        run: python cli.py --help
+
+      - name: Correr demo end-to-end (datos sinteticos)
+        env:
+          MPLBACKEND: Agg
+        run: python cli.py demo --output results_ci
