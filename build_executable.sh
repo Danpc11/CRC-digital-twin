@@ -24,10 +24,10 @@ echo "=== Instalando PyInstaller ==="
 # bloquea la instalacion directa por PEP 668 ("externally-managed-
 # environment"). Si el usuario ya esta en un venv/conda, esto no pasa
 # y el primer intento basta.
-pip install --quiet pyinstaller 2>/tmp/pip_err.log || {
+pip install --quiet pyinstaller==6.21.0 2>/tmp/pip_err.log || {
     if grep -q "externally-managed-environment" /tmp/pip_err.log; then
         echo "  (entorno Python gestionado por el sistema -- reintentando con --break-system-packages)"
-        pip install --quiet --break-system-packages pyinstaller
+        pip install --quiet --break-system-packages pyinstaller==6.21.0
     else
         cat /tmp/pip_err.log
         exit 1
