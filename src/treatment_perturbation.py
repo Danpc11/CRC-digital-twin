@@ -61,7 +61,8 @@ son la base biologica del gate de eficacia, no la direccion de la fuerza:
      consistentemente menos eficaz en tumores CMS4 -- patron
      establecido en literatura CMS y confirmado empiricamente en este
      mismo proyecto (CMS4 es el eje de peor pronostico mas robusto en
-     las 3 cohortes de validacion externa, ver PROJECT_STATUS.md).
+     las 4 cohortes de validacion externa, HR=2.06 ajustado por
+     estadio, ver PROJECT_STATUS.md).
 """
 
 import numpy as np
@@ -88,8 +89,9 @@ TREATMENT_MECHANISMS = {
         "target_genes": ["VIM", "TGFB1"],
         "gate": "reduced_efficacy_cms4",
         "evidence": (
-            "CMS4 = peor pronostico consistente en las 3 cohortes externas de "
-            "este proyecto + literatura CMS general de quimiorresistencia relativa."
+            "CMS4 = peor pronostico consistente en las 4 cohortes externas de "
+            "este proyecto (HR=2.06 ajustado por estadio, p=0.018) + literatura "
+            "CMS general de quimiorresistencia relativa."
         ),
     },
 }
