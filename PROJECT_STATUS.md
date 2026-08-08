@@ -52,10 +52,10 @@ poder general, no necesariamente evidencia nueva específica de CMS1. CMS3 sigue
 evidencia de valor pronóstico independiente, y con 45% de poder no se puede todavía
 descartar que sí lo tenga.
 
-## Simulación de tratamiento (nuevo)
+## Simulación de tratamiento
 
 `treatment_perturbation.py` implementa tres mecanismos (inmunoterapia anti-PD1, anti-EGFR,
-quimioterapia citotóxica), gateados por biología del paciente, con evidencia clínica citada
+quimioterapia citotóxica), condicionados por biología del paciente, con evidencia clínica citada
 (KEYNOTE-177 HR=0.60-0.73 en MSI-H/dMMR; requisito RAS/BRAF wild-type para anti-EGFR).
 `prognosis_demo.py` ahora reporta, junto con cada alerta de recurrencia: fuerza de evidencia
 del atractor hacia el que se dirige el paciente, y qué tratamientos tienen mecanismo
@@ -65,14 +65,14 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 ## Limitaciones
 
 - El hazard de `prognosis.py` es ordinal, no probabilidad calibrada.
-- CMS3 sigue sin evidencia de efecto (p=0.11 ajustado), pero con solo 45% de poder — no se
-  puede concluir ausencia de efecto, solo que la muestra actual no alcanza para verlo.
-- El gate de `anti_egfr` usa un proxy débil por RNA (cercanía a CMS3) cuando no hay estatus
-  RAS/BRAF real — nunca debe sustituir la prueba de mutación (qPCR alelo-específico/HRM)
+- CMS3 sigue sin evidencia de efecto (p=0.11 ajustado), pero con solo 45% de poder estadístico — no se
+  puede concluir la ausencia del efecto, solo que el conjunto de muestra actual no alcanza para verlo.
+- El criterio de activación de `anti_egfr` usa un proxy débil por RNA (cercanía a CMS3) cuando no hay estatus
+  RAS/BRAF real — no debe sustituir la prueba de mutación (qPCR alelo-específico/HRM)
 
 ## Próximos pasos
 
 1. Sumar una quinta cohorte externa para confirmar (o no) el hallazgo nuevo de CMS1, y
    para cerrar la brecha de poder restante en CMS4 (76%→80%) y CMS3 (45%→80%)
 2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
-   por RNA en el gate de `anti_egfr`
+   por RNA en el criterio de activación de `anti_egfr`
