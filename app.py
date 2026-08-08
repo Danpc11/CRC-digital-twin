@@ -449,12 +449,15 @@ with tab_metodo:
         st.markdown('<div class="eyebrow" style="margin-top:1.4rem">Cohortes</div>',
                     unsafe_allow_html=True)
         st.dataframe(pd.DataFrame({
-            "Cohorte": ["GSE39582", "GSE17536", "GSE17537", "GSE14333"],
-            "Rol": ["Entrenamiento", "Externa", "Externa (intacta)", "Externa"],
-            "n": [557, 145, 55, 126],
-            "p": ["0.00039", "0.090", "0.71", "0.59"],
+            "Cohorte": ["GSE39582", "GSE17536", "GSE17537", "GSE14333", "GSE33113"],
+            "Rol": ["Entrenamiento", "Externa (iterativa)", "Externa (intacta)",
+                    "Externa", "Externa (estadio II)"],
+            "n": [557, 145, 55, 126, 89],
+            "p": ["0.00039", "0.090", "0.71", "0.59", "0.031"],
         }), hide_index=True, use_container_width=True)
-        st.caption("Cox estratificado combinando las tres externas (n=326): p = 0.045 global. "
+        st.caption("Cox estratificado combinando las cuatro externas (n=415), ajustado por "
+                   "estadio (n=388): p < 0.001 global. CMS4 HR=2.06 (p=0.018), robusto al "
+                   "ajuste; CMS1 HR=2.09 (p=0.016), resultado nuevo por confirmar. "
                    "Concordancia con la clasificación del consorcio: kappa = 0.679.")
 
     with c2:

@@ -11,7 +11,7 @@ REQUIERE:
 
 USO:
     export SYNAPSE_AUTH_TOKEN="tu_token_aqui"
-    python3 scripts/download_synapse_data.py
+    python3 src/download_synapse_data.py
 
 NOTA: este script NO se ha podido probar en este entorno porque el
 sandbox de desarrollo no tiene acceso de red a synapse.org (solo

@@ -23,12 +23,13 @@ from pathlib import Path
 
 GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
 
-# Paleta Wong (daltónica) para los 4 subtipos
+# Paleta Wong (daltónica) para los 4 subtipos -- la MISMA asignación de
+# colores que usa el resto del proyecto (app.py, plot_survival_curves.py)
 COLORS = {
-    "CMS1_MSI_immune":      "#E69F00",
-    "CMS2_canonical_WNT":   "#56B4E9",
+    "CMS1_MSI_immune":      "#0072B2",
+    "CMS2_canonical_WNT":   "#E69F00",
     "CMS3_metabolic":       "#009E73",
-    "CMS4_mesenchymal":     "#CC79A7",
+    "CMS4_mesenchymal":     "#D55E00",
 }
 SHORT = {
     "CMS1_MSI_immune":    "CMS1",
@@ -246,9 +247,10 @@ def summary(df: pd.DataFrame, best_threshold: pd.Series):
     print()
     print("  Error más frecuente: CMS1→CMS4  (6/31 CMS1 = 19.4%)")
     print("  Interpretación: CMS1 y CMS4 comparten baja expresión de")
-    print("  marcadores WNT/metabolic; MLH1/GZMB son los genes que")
-    print("  los separan — revisar si estos pacientes tienen MLH1/GZMB")
-    print("  bajos para ser CMS1 genuinos vs casos MSS-mesenquimales.")
+    print("  marcadores WNT/metabólicos; MLH1 y el eje inmune (GNLY/USP18)")
+    print("  son los genes que los separan — revisar si estos pacientes")
+    print("  tienen MLH1/GNLY/USP18 bajos para ser CMS1 genuinos vs")
+    print("  casos MSS-mesenquimales.")
     print("=" * 65)
 
 

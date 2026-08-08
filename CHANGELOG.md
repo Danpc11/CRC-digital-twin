@@ -4,6 +4,39 @@
 No sigue versionado semántico estricto (proyecto de investigación) 
 — cada entrada es un hito de desarrollo.
 
+## Ronda de coherencia: panel y números de evidencia alineados en todo el código
+
+- **`attractor_model.py` seguía con el panel placeholder viejo de 8 genes** (`GZMB`,
+  `KRAS_sig`) pese a que el panel congelado es de 10 — actualizado a los 10 genes
+  actuales, con `MLH1` con signo **negativo** en CMS1 (baja expresión por silenciamiento
+  epigenético, consistente con el descubrimiento documentado abajo y con
+  `synthetic_data.py`). El self-check del módulo sigue convergiendo a los 4 atractores
+  correctos (r ≥ 0.986).
+- **`prognosis_demo.py::EVIDENCE_STRENGTH` tenía los números del Cox de 3 cohortes**
+  (n=326, CMS4 HR=1.88 p=0.03, CMS1 p=0.09 "tendencia") — actualizado al modelo
+  ajustado por estadio de las 4 cohortes (n=388): CMS4 HR=2.06 (p=0.018, robusto al
+  ajuste), CMS1 HR=2.09 (p=0.016 — significativo por primera vez, marcado
+  explícitamente como resultado provisional pendiente de confirmación), CMS3 p=0.11
+  con la salvedad de poder (45%).
+- **`app.py`** (pestaña Método): la tabla de cohortes no incluía GSE33113 y el pie
+  citaba el Cox viejo (n=326, p=0.045) — actualizado a las 4 cohortes externas
+  (n=415/388, p<0.001). El medidor de evidencia por atractor se actualiza solo
+  vía `EVIDENCE_STRENGTH`.
+- **Tests**: `test_state_dimension_matches_gene_panel` esperaba N=8 — ahora N=10 con
+  nota apuntando a los archivos que hay que tocar si el panel cambia. El test de
+  drivers era tautológico (`or True` lo hacía pasar siempre) — reescrito para
+  verificar forma, magnitud y alineación real con los patrones.
+- **Referencias "41 tests"** en `requirements.txt` y `environment.yml` — la suite ya
+  tiene 42 (el badge del README estaba correcto).
+- **`feature_selection.py::CURRENT_PANEL`** incluía `GZMB` y omitía `GNLY`/`USP18` —
+  corregido; el reporte de candidatos marcaba mal qué genes son "nuevos".
+- **`error_analysis.py`**: paleta de colores CMS distinta del resto del proyecto
+  (CMS4 en rosa en vez de bermellón) — unificada a la asignación estándar de
+  `app.py`/`plot_survival_curves.py`; texto interpretativo que mencionaba `GZMB`
+  actualizado al eje inmune actual (`GNLY`/`USP18`).
+- **`download_synapse_data.py`**: el docstring apuntaba a `scripts/` — la carpeta
+  es `src/`.
+
 ## Cuarta cohorte externa (GSE33113) y modelo ajustado por estadio robusto
 
 - **Bug de parser encontrado y corregido**: `!Sample_title` (que en GSE33113 trae el ID
