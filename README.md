@@ -14,12 +14,12 @@ por **qPCR/RT-qPCR únicamente** (sin ddPCR, sin NGS, sin secuenciación de exos
 
 Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md`.
 Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
-(la dinámica, por qué regla de proyección y no Hebb, cómo se calibra), ver `MODELO.md`.
+(la dinámica, por qué regla de proyección y no Hebb, cómo se calibra), ver `MODEL.md`.
 
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-de regresión completa (41 tests).
+de regresión completa (42 tests).
 
 ### pip
 
@@ -94,11 +94,32 @@ patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuer
 del atractor y tratamientos aplicables), simulación contrafactual de tratamiento, y una
 pestaña de documentación con el panel, la evidencia acumulada y las limitaciones.
 
+### Ejecutable de un solo archivo (sin instalar Python)
+
+Para alguien que solo quiere abrir la app sin instalar nada — construye un ejecutable
+independiente con la interfaz web ya empacada:
+
+```bash
+bash build_executable.sh      # construye dist/ColoQ (~170 MB, primera vez tarda varios minutos)
+./dist/ColoQ                  # doble clic en el explorador de archivos hace lo mismo
+```
+
+Abre el navegador automáticamente. No requiere Python, `pip`, ni conexión a internet más
+allá de la primera construcción. El build es específico de la plataforma donde se corre
+(un ejecutable hecho en Linux no corre en Windows/Mac) — hay que construirlo una vez en cada
+sistema operativo que se quiera soportar. El `.spec` usado
+(`ColoQ.spec`) está documentado con los flags exactos que hacen falta para que Streamlit
+empaque correctamente (no es un `pyinstaller app.py` directo — a Streamlit le faltan sus
+assets estáticos sin flags adicionales).
+
 ## Estructura
 
 ```
 cli.py                               punto de entrada único (todos los subcomandos)
 app.py                               interfaz web (Streamlit)
+launcher.py                          arranque para el ejecutable de un solo archivo
+ColoQ.spec                           spec de PyInstaller (flags ya resueltos, ver comentarios)
+build_executable.sh                  construye dist/ColoQ (ejecutable independiente)
 run_pipeline.py                      calibración + validación (invocado por `cli.py calibrate`)
 requirements.txt                     dependencias con versiones fijadas (pip)
 environment.yml                      entorno conda equivalente (mismas versiones)
@@ -140,7 +161,7 @@ figures/          salidas gráficas
 python3 cli.py demo
 ```
 
-Equivalente ejecutando los scripts por separado:
+Equivalente corriendo los scripts uno por uno:
 
 ```bash
 python3 src/synthetic_data.py
@@ -266,4 +287,4 @@ python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.ts
 
 ## Licencia
 
-Ver [`LICENSE`](LICENSE).
+MIT — ver [`LICENSE`](LICENSE).
