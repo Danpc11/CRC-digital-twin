@@ -1,7 +1,7 @@
-# Changelog
+# Historial de cambios
 
 **Formato:** más reciente primero. 
-No sigue versionado semántico estricto (proyecto de investigación) 
+No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
 
 ## Cuarta cohorte externa (GSE33113) y modelo ajustado por estadio robusto
@@ -26,8 +26,8 @@ No sigue versionado semántico estricto (proyecto de investigación)
   3 cohortes, donde el efecto de CMS4 sí se atenuaba y perdía significancia al ajustar. CMS1
   también resultó significativo (HR=2.09, p=0.016) — resultado nuevo, no replicado antes de
   esta cohorte, tratar con cautela.
-- `power_analysis.py`: poder de CMS4 subió de 58% a 76% con la cuarta cohorte; CMS1 de
-  subpotenciado a 75%. CMS3 sigue en 45%.
+- `power_analysis.py`: el poder de CMS4 subió de 58% a 76% con la cuarta cohorte; CMS1 pasó
+  de estar subpotenciado a 75%. CMS3 sigue en 45%.
 
 ## Simulación de tratamiento y reporte de evidencia por atractor
 

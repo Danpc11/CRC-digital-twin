@@ -1,19 +1,22 @@
 # Modelo — fundamento teórico
 
-Este documento describe la dinámica de atractores del modelo, cómo se calibra contra los datos reales, y cómo se extiende a pronóstico
+Este documento describe la dinámica de atractores del modelo, cómo se calibra contra los datos reales y cómo se extiende al pronóstico
 longitudinal y simulación de tratamiento. Para el estado empírico del proyecto (qué tan bien funciona, con qué evidencia), ver `PROJECT_STATUS.md`. 
 
 ## 1. Formulación del espacio de fase
 
 Un paciente se representa como un vector $x \in \mathbb{R}^N$, donde cada componente es la
-expresión normalizada (z-score) de uno de los $N$ genes del panel ($N=10$ en la versión
-actual: `MLH1`, `GNLY`, `USP18`, `MYC`, `AXIN2`, `FABP1`, `CPS1`, `SI`, `VIM`, `TGFB1`).
+expresión normalizada (puntuación z) de uno de los $N$ genes del panel ($N=10$ en el pipeline
+calibrado actual: `MLH1`, `GNLY`, `USP18`, `MYC`, `AXIN2`, `FABP1`, `CPS1`, `SI`, `VIM`,
+`TGFB1`). El modelo conceptual predeterminado de `attractor_model.py` mantiene un panel
+histórico de ocho genes para demostraciones y pruebas unitarias; no se usa con cohortes reales.
 
 El origen $x = \mathbf{0}$ representa un estado de referencia sin señal molecular distintiva
 — en el contexto de seguimiento post-quirúrgico, esto se interpreta como ausencia de
 enfermedad residual detectable.
 
-Cada uno de los cuatro subtipos moleculares consensuados (CMS1–4) se representa como un
+Cada uno de los cuatro subtipos moleculares consensuados de cáncer colorrectal (*Consensus
+Molecular Subtypes*, CMS1–CMS4) se representa como un
 **patrón objetivo** $p^\mu \in \mathbb{R}^N$, $\mu = 1, \dots, 4$ — un atractor del sistema
 dinámico descrito abajo.
 
@@ -35,7 +38,7 @@ queda congelado: la validación externa (`external_validation.py`) nunca vuelve 
 ## 3. La matriz de acoplamiento
 
 La dinámica (sección 4) necesita una matriz $W \in \mathbb{R}^{N \times N}$ que defina cómo
-interactúan las componentes del espacio fase (estados). La elección de cómo construir $W$ a partir de los
+interactúan los componentes del espacio de fase. La elección de cómo construir $W$ a partir de los
 patrones es la decisión de diseño central del modelo.
 
 **Por qué no la regla de Hebb clásica.** La construcción "obvia" para una red asociativa
@@ -72,7 +75,7 @@ $$\frac{dx}{dt} = -x + W \tanh(\beta x) + I(t)$$
 - $-x$: término de relajación lineal hacia el origen (decaimiento natural, en ausencia de
   cualquier señal, el sistema vuelve a "sin enfermedad residual")
 - $W\tanh(\beta x)$: acoplamiento no lineal entre componentes, con $\beta$ controlando la
-  nitidez de la no linealidad ($\beta=2.0$ por default)
+  nitidez de la no linealidad ($\beta=2.0$ de forma predeterminada)
 - $I(t)$: término de forzamiento externo — representa un proceso biológico que empuja el
   estado en una dirección particular (recaída, tratamiento; ver secciones 6–7)
 
@@ -90,8 +93,8 @@ Se usa correlación, no distancia, porque es invariante a escala — robusta a d
 normalización entre plataformas (microarreglo vs. RT-qPCR vs. distintos lotes). La
 correlación máxima ($r$) se reporta como una confianza de clasificación informal: en la
 validación externa, las muestras con confianza baja concentran la mayoría de los errores
-(ver el barrido de umbral en `error_analysis.py`, no incluido en `src/` por ser una
-herramienta de análisis puntual, no parte del pipeline).
+(ver el barrido de umbral en `src/error_analysis.py`, una herramienta de análisis puntual que
+no forma parte del pipeline principal).
 
 Si $\|x\| \approx 0$ (estado en el origen), no se asigna ningún subtipo — se reporta como
 `"none"` ("sin enfermedad residual detectable", no un quinto subtipo).
@@ -149,8 +152,8 @@ propio criterio de activación y evidencia clínica citada (ver docstring de
 
 | Mecanismo | Criterio de eficacia | Evidencia |
 |---|---|---|
-| Inmunoterapia anti-PD1 | $\varepsilon \propto \max(\mathrm{corr}(x, p^{\text{CMS1}}), 0)$ — sin piso basal fuera de CMS1 | KEYNOTE-177: HR=0.60–0.73 en MSI-H/dMMR |
-| Anti-EGFR | $\varepsilon = 0$ si RAS/BRAF mutante; completo si wild-type; proxy débil por CMS3 si desconocido | Karapetis 2008, Douillard 2013, Di Nicolantonio 2008 |
+| Inmunoterapia anti-PD1 | $\varepsilon \propto \max(\mathrm{corr}(x, p^{\text{CMS1}}), 0)$ — sin eficacia basal fuera de CMS1 | KEYNOTE-177: razón de riesgos instantáneos (HR)=0.60–0.73 en tumores con alta inestabilidad de microsatélites (MSI-H) o deficiencia en la reparación de errores de apareamiento (dMMR) |
+| Anti-EGFR | $\varepsilon = 0$ si RAS/BRAF es mutante; completo si es de tipo silvestre; proxy débil por CMS3 si se desconoce | Karapetis 2008, Douillard 2013, Di Nicolantonio 2008 |
 | Quimioterapia citotóxica | $\varepsilon$ reducido (no nulo) cerca de CMS4 | Consistente con quimiorresistencia relativa de CMS4 en este proyecto |
 
 **Alcance explícito**: la *dirección* de cada criterio está fundamentada en mecanismo de acción
