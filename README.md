@@ -7,10 +7,10 @@
 ![Tests count](https://img.shields.io/badge/tests-42%20passing-brightgreen)
 
 Gemelo digital mecanicista de cáncer colorrectal: modela los cuatro subtipos moleculares
-consensuados (CMS1-4) como atractores de una red tipo Hopfield continua, calibrable contra
+consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
 datos reales, con validación contra desenlaces de supervivencia y un módulo de pronóstico
 longitudinal para seguimiento post-quirúrgico — diseñado para operar sobre paneles medibles
-por **qPCR/RT-qPCR únicamente** (sin ddPCR, sin NGS, sin secuenciación de exosomas).
+únicamente mediante **qPCR/RT-qPCR** (reacción en cadena de la polimerasa cuantitativa o con transcripción inversa), sin PCR digital por gotículas (ddPCR), secuenciación de nueva generación (NGS) ni secuenciación de exosomas.
 
 Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md`.
 Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
@@ -19,7 +19,8 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-de regresión completa (42 tests).
+completa de regresión (42 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+3.11 o versiones posteriores.
 
 ### pip
 
@@ -89,10 +90,10 @@ de `src/` — el CLI solo orquesta, no duplica lógica.
 
 ### Interfaz web
 
-`python3 cli.py app` levanta una aplicación con cuatro pestañas: clasificar muestras contra
+`python3 cli.py app` inicia una aplicación con cuatro pestañas: clasificación de muestras contra
 patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuerza de evidencia
-del atractor y tratamientos aplicables), simulación contrafactual de tratamiento, y una
-pestaña de documentación con el panel, la evidencia acumulada y las limitaciones.
+del atractor y tratamientos aplicables), simulación contrafactual de tratamiento y una
+pestaña de método con el panel, la evidencia acumulada y las limitaciones.
 
 ### Ejecutable de un solo archivo (sin instalar Python)
 
@@ -130,7 +131,7 @@ docker/
   docker-compose.yml                 orquestación (contexto de build = raíz)
 
 src/
-  attractor_model.py                 modelo de atractores (dinámica ODE tipo Hopfield)
+  attractor_model.py                 modelo de atractores (ecuación diferencial ordinaria tipo Hopfield)
   calibration.py                     calibración contra datos reales etiquetados
   survival_validation.py             Kaplan-Meier / log-rank
   prognosis.py                       trayectoria/pronóstico longitudinal
@@ -148,14 +149,23 @@ src/
   build_gse39582_dataset.py          construye dataset GSE39582 (entrenamiento)
   build_gse17536_dataset.py          construye dataset GSE17536 (validación externa)
   build_gse17537_dataset.py          construye dataset GSE17537 (validación externa)
-  build_external_cohort_generic.py   construye cualquier otra cohorte CRCSC con etiqueta CMS oficial
+  build_external_cohort_generic.py   construye cualquier otra cohorte del Consorcio de Subtipificación del Cáncer Colorrectal (CRCSC) con etiqueta CMS oficial
+  clinical_covariates.py             normaliza covariables clínicas, incluido el estadio
+  batch_add_cohorts.py               descarga y prepara un lote de cohortes externas
+  diagnose_id_mapping.py             diagnostica correspondencias entre identificadores de muestras
+  download_geo_gse39582.py           descarga los datos de GSE39582 desde GEO
+  error_analysis.py                  analiza errores y umbrales de clasificación
+  pooled_cox_validation.py           ejecuta análisis de Cox estratificado entre cohortes
+  power_analysis.py                  estima el poder estadístico del análisis de supervivencia
+  treatment_perturbation.py          define las perturbaciones de tratamiento
+  treatment_simulation_demo.py       simula trayectorias con y sin tratamiento
 
 tests/            suite de regresión (pytest)
 data/             datos (no versionados, ver .gitignore)
 figures/          salidas gráficas
 ```
 
-## Quickstart (datos sintéticos, sin credenciales)
+## Inicio rápido (datos sintéticos, sin credenciales)
 
 ```bash
 python3 cli.py demo
@@ -173,6 +183,9 @@ python3 -m pytest tests/ -v
 
 `MLH1`, `GNLY`, `USP18` (eje CMS1) · `MYC`, `AXIN2` (eje CMS2) · `FABP1`, `CPS1`, `SI` (eje
 CMS3) · `VIM`, `TGFB1` (eje CMS4). Ver `PROJECT_STATUS.md` para la justificación de cada gen.
+Este es el panel del pipeline calibrado. El modelo conceptual predeterminado de
+`src/attractor_model.py` conserva un panel histórico de ocho genes para sus demostraciones y
+pruebas unitarias; no se utiliza para calibrar ni validar cohortes reales.
 
 ## Cómo descargar los datos reales
 
@@ -234,7 +247,11 @@ python3 src/pooled_cox_validation.py \
   --output results_pooled_cox/
 ```
 
-### Agregar una cohorte CRCSC nueva
+Para ajustar el análisis por estadio clínico, indique primero `--stage-col` al construir cada
+cohorte y después use `--adjust-stage` en `pooled-cox`. Consulte la ayuda de ambos comandos
+para conocer los nombres de columna y las opciones disponibles.
+
+### Agregar una cohorte nueva del CRCSC
 
 Flujo de dos pasos — diagnosticar antes de construir, nunca asumir nombres de columna:
 
@@ -266,14 +283,14 @@ TCGA-02     CMS2_canonical_WNT   -0.88   3.55    ...  12.1                 1
 - `relapse_free_months` / `relapse_event`: opcionales, solo necesarias para
   `survival_validation.py` / `external_validation.py`
 
-## Panel PCR-compatible (restricción de diseño)
+## Panel compatible con PCR (restricción de diseño)
 
 | Capa | Técnica | Qué mide |
 |---|---|---|
 | Expresión (subtipo CMS) | RT-qPCR relativa | pronóstico basal por subtipo |
-| Mutación conductora (BRAF/KRAS) | qPCR alelo-específico (ARMS-PCR) o HRM | marcador pronóstico independiente |
-| Estatus MSI | HRM de marcadores mononucleotídicos (BAT-25/BAT-26) | favorable en estadio II |
-| Seguimiento longitudinal (MRD) | qPCR alelo-específico dirigido a la mutación ya identificada en el tumor primario del paciente | vigilancia post-quirúrgica sin NGS |
+| Mutación conductora (BRAF/KRAS) | qPCR alelo-específico (sistema de mutación refractaria a amplificación, ARMS-PCR) o análisis de alta resolución de curvas de fusión (HRM) | marcador pronóstico independiente |
+| Estatus MSI (inestabilidad de microsatélites) | HRM de marcadores mononucleotídicos (BAT-25/BAT-26) | favorable en estadio II |
+| Seguimiento longitudinal (enfermedad residual mínima, MRD) | qPCR alelo-específico dirigido a la mutación ya identificada en el tumor primario del paciente | vigilancia post-quirúrgica sin NGS |
 
 ## Módulo de pronóstico longitudinal (`prognosis.py`)
 
