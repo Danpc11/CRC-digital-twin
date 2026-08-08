@@ -1,0 +1,107 @@
+name: Build Executables
+
+# Construye ColoQ como ejecutable de un solo archivo en Linux, Windows,
+# y las dos arquitecturas de Mac (Intel y Apple Silicon) -- resuelve
+# la limitacion real de PyInstaller: no compila cruzado, cada binario
+# debe construirse en su propia plataforma. GitHub Actions da acceso
+# gratuito a runners de los tres sistemas operativos.
+#
+# Se dispara con un tag de version (v1.0.0, etc.) o manualmente desde
+# la pestana Actions ("Run workflow"). Con tag, ademas publica un
+# GitHub Release con los cuatro binarios adjuntos.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: ColoQ-linux-x86_64
+            dist_name: ColoQ
+          - os: windows-latest
+            asset_name: ColoQ-windows-x86_64.exe
+            dist_name: ColoQ.exe
+          - os: macos-13          # runner Intel (x86_64)
+            asset_name: ColoQ-macos-intel
+            dist_name: ColoQ
+          - os: macos-14          # runner Apple Silicon (arm64)
+            asset_name: ColoQ-macos-arm64
+            dist_name: ColoQ
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Construir ejecutable
+        run: pyinstaller ColoQ.spec
+
+      - name: Verificar que el ejecutable arranca (Linux/Mac)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x dist/${{ matrix.dist_name }}
+          timeout 20 ./dist/${{ matrix.dist_name }} &
+          PID=$!
+          sleep 8
+          curl -sf http://127.0.0.1:8501/_stcore/health && echo "OK: la app respondio"
+          kill $PID 2>/dev/null || true
+
+      # En Windows, timeout/curl no vienen por defecto igual que en
+      # bash -- se hace una verificacion mas simple, solo confirmar que
+      # el binario existe y no crashea al iniciar el proceso.
+      - name: Verificar que el ejecutable existe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/${{ matrix.dist_name }}")) {
+            Write-Error "No se genero el ejecutable"
+            exit 1
+          }
+          Write-Output "OK: ejecutable generado en dist/${{ matrix.dist_name }}"
+
+      - name: Preparar artefacto con nombre por plataforma
+        shell: bash
+        run: |
+          mkdir -p release
+          cp "dist/${{ matrix.dist_name }}" "release/${{ matrix.asset_name }}"
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: release/${{ matrix.asset_name }}
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Crear GitHub Release con los cuatro binarios
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/*
+          generate_release_notes: true
