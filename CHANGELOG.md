@@ -1,7 +1,8 @@
 # Changelog
 
-Formato: más reciente primero. No sigue versionado semántico estricto (proyecto de
-investigación, no paquete distribuido) — cada entrada es un hito de desarrollo.
+**Formato:** más reciente primero. 
+No sigue versionado semántico estricto (proyecto de investigación) 
+— cada entrada es un hito de desarrollo.
 
 ## Cuarta cohorte externa (GSE33113) y modelo ajustado por estadio robusto
 
@@ -31,7 +32,7 @@ investigación, no paquete distribuido) — cada entrada es un hito de desarroll
 ## Simulación de tratamiento y reporte de evidencia por atractor
 
 - `treatment_perturbation.py`: tres mecanismos de tratamiento (inmunoterapia anti-PD1,
-  anti-EGFR, quimioterapia citotóxica), gateados por biología del paciente, evidencia
+  anti-EGFR, quimioterapia citotóxica), condicionados por biología del paciente, evidencia
   clínica citada por mecanismo:
   - Inmunoterapia: KEYNOTE-177 (Andre et al. 2020 NEJM; actualización 2024 Ann Oncol),
     HR=0.60-0.73 en MSI-H/dMMR. Sin beneficio basal fuera de CMS1 (tumores MSS
@@ -48,7 +49,7 @@ investigación, no paquete distribuido) — cada entrada es un hito de desarroll
   simular limpieza tumoral — el hazard subía con tratamiento "efectivo" en vez de
   bajar. Corregido: un tratamiento efectivo ahora se representa como una fuerza de
   amortiguamiento que jala el vector de estado hacia el origen, proporcional a la
-  eficacia gateada, no como un empuje sobre genes del propio atractor.
+  eficacia condicionada, no como un empuje sobre genes del propio atractor.
 - `treatment_simulation_demo.py`: simulación contrafactual (misma trayectoria de
   recaída, con y sin tratamiento), demuestra divergencia real cuando el mecanismo
   aplica al subtipo del paciente.
