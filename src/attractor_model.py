@@ -22,12 +22,12 @@ Formalismo:
     I_noise es ruido gaussiano opcional (dinamica de Langevin) para
     estudiar transiciones estocasticas entre cuencas de atraccion.
 
-NOTA DE ALCANCE: este es un esqueleto conceptual. Los patrones p_mu
-codificados abajo son PLACEHOLDERS basados en biologia conocida de cada
-subtipo (ver docstring de CMS_PATTERNS), NO estan calibrados contra
-datos reales de TCGA-COAD/READ todavia. Ese es el siguiente paso natural
-(el modelo se calibra fitteando p_mu a los centroides de expresion por
-subtipo en cohortes reales).
+NOTA DE ALCANCE: los patrones p_mu de CMS_PATTERNS abajo son
+PLACEHOLDERS cualitativos sobre el panel actual de 10 genes (ver
+docstring de CMS_PATTERNS), pensados para demos y tests de la
+dinamica. Para cualquier analisis real se usan los patrones
+CALIBRADOS contra GSE39582 (calibration.py), cargados con
+load_calibrated_patterns() -- nunca estos placeholders.
 """
 
 from __future__ import annotations
@@ -39,19 +39,28 @@ from scipy.integrate import solve_ivp
 # 1. Definicion del espacio de estado: genes marcadores por subtipo
 # ---------------------------------------------------------------------
 
-GENES = ["MLH1", "GZMB", "MYC", "AXIN2", "FABP1", "KRAS_sig", "VIM", "TGFB1"]
+# Panel actual de 10 genes, todos medibles por RT-qPCR (congelado, ver
+# PROJECT_STATUS.md). MLH1 va PRIMERO y con signo negativo en CMS1: la
+# senal real es BAJA expresion (silenciamiento epigenetico de MLH1 como
+# causa de MSI esporadica, ver CHANGELOG) -- no alta.
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
 N = len(GENES)
 
 CMS_LABELS = ["CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_mesenchymal"]
 
-# Patrones objetivo (placeholder, por calibrar contra TCGA-COAD/READ).
+# Patrones objetivo (placeholders cualitativos -- para analisis real se
+# usan los patrones calibrados de calibration.py, nunca estos).
 # Orden de columnas = GENES. Cada fila = patron atractor de un subtipo.
-# Valores en [-1, 1]: +1 = marcador propio sobreexpresado, -1 = suprimido.
+# Signos por eje, consistentes con los centroides de synthetic_data.py:
+#   CMS1: MLH1 BAJO (silenciamiento -> MSI), GNLY/USP18 altos (inmune)
+#   CMS2: MYC/AXIN2 altos (WNT)
+#   CMS3: FABP1/CPS1/SI altos (metabolico)
+#   CMS4: VIM/TGFB1 altos (mesenquimal)
 CMS_PATTERNS = {
-    "CMS1_MSI_immune":    np.array([ 0.9,  0.9, -0.6, -0.5, -0.4, -0.5, -0.6, -0.4]),
-    "CMS2_canonical_WNT": np.array([-0.5, -0.4,  0.9,  0.9, -0.4, -0.3, -0.5, -0.4]),
-    "CMS3_metabolic":     np.array([-0.4, -0.3, -0.4, -0.3,  0.9,  0.9, -0.4, -0.3]),
-    "CMS4_mesenchymal":   np.array([-0.5, -0.4, -0.5, -0.4, -0.3, -0.3,  0.9,  0.9]),
+    "CMS1_MSI_immune":    np.array([-0.9,  0.9,  0.9, -0.6, -0.5, -0.4, -0.4, -0.4, -0.6, -0.4]),
+    "CMS2_canonical_WNT": np.array([-0.5, -0.4, -0.4,  0.9,  0.9, -0.4, -0.3, -0.3, -0.5, -0.4]),
+    "CMS3_metabolic":     np.array([-0.4, -0.3, -0.3, -0.4, -0.3,  0.9,  0.9,  0.9, -0.4, -0.3]),
+    "CMS4_mesenchymal":   np.array([-0.5, -0.4, -0.4, -0.5, -0.4, -0.3, -0.3, -0.3,  0.9,  0.9]),
 }
 
 P = np.stack([CMS_PATTERNS[label] for label in CMS_LABELS], axis=1)  # (N, 4)
