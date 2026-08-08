@@ -28,10 +28,15 @@ jobs:
           - os: windows-latest
             asset_name: ColoQ-windows-x86_64.exe
             dist_name: ColoQ.exe
-          - os: macos-13          # runner Intel (x86_64)
+          - os: macos-15-intel    # runner Intel (x86_64) -- reemplazo oficial de
+                                    # macos-13, retirado en dic. 2025. Soportado
+                                    # hasta 2027 (ultima imagen Intel de GitHub).
             asset_name: ColoQ-macos-intel
             dist_name: ColoQ
-          - os: macos-14          # runner Apple Silicon (arm64)
+          - os: macos-latest       # Apple Silicon (arm64) -- floating tag a
+                                    # proposito (no macos-14 fijo): GitHub la
+                                    # actualiza sola cuando retiren la version
+                                    # actual, evitando este mismo problema otra vez.
             asset_name: ColoQ-macos-arm64
             dist_name: ColoQ
 
@@ -49,7 +54,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller==6.21.0
 
       - name: Construir ejecutable
         run: pyinstaller ColoQ.spec
