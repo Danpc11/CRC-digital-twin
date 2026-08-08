@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
 ![Tests count](https://img.shields.io/badge/tests-42%20passing-brightgreen)
 
-Gemelo digital mecanicista de cáncer colorrectal: modela los cuatro subtipos moleculares
+Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
 datos reales, con validación contra desenlaces de supervivencia y un módulo de pronóstico
 longitudinal para seguimiento post-quirúrgico — diseñado para operar sobre paneles medibles
