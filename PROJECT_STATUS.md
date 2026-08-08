@@ -32,7 +32,7 @@ n=415, 100 eventos):**
   estadio, no un artefacto de confusión. Con las 3 cohortes originales (antes de sumar
   GSE33113) esto no se sostenía (HR caía de 1.87 a 1.60, no significativo) — la cohorte
   adicional, con 89 pacientes de estadio homogéneo, fue la que permitió esta conclusión.
-- **Análisis de poder**: con 4 covariables (subtipo + estadio), CMS4 alcanza 76% de poder
+- **Poder estadístico**: con 4 covariables (subtipo + estadio), CMS4 alcanza 76% de poder
   (era 58% con 3 cohortes) y CMS1 75% (era subpotenciado). CMS3 sigue en 45%, sin evidencia
   suficiente para concluir ausencia de efecto.
 
