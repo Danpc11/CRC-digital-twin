@@ -1,9 +1,9 @@
 # Modelo — fundamento teórico
 
-Este documento describe la dinámica de atractores, cómo se realiza la calibración con datos reales, y cómo se realiza la simulación del tratamiento y el pronóstico
-longitudinal.
+Este documento describe la dinámica de atractores del modelo, cómo se calibra contra los datos reales, y cómo se extiende a pronóstico
+longitudinal y simulación de tratamiento. Para el estado empírico del proyecto (qué tan bien funciona, con qué evidencia), ver `PROJECT_STATUS.md`. 
 
-## 1. Formulación del espacio fase
+## 1. Formulación del espacio de fase
 
 Un paciente se representa como un vector $x \in \mathbb{R}^N$, donde cada componente es la
 expresión normalizada (z-score) de uno de los $N$ genes del panel ($N=10$ en la versión
@@ -17,10 +17,9 @@ Cada uno de los cuatro subtipos moleculares consensuados (CMS1–4) se represent
 **patrón objetivo** $p^\mu \in \mathbb{R}^N$, $\mu = 1, \dots, 4$ — un atractor del sistema
 dinámico descrito abajo.
 
-## 2. Calibración: de dónde salen los patrones
+## 2. Calibración
 
-Los patrones **no** son parámetros ajustados por optimización iterativa. Son centroides
-empíricos: dado un conjunto de pacientes con etiqueta CMS conocida (la clasificación oficial
+Los patrones son centroides empíricos: dado un conjunto de pacientes con etiqueta CMS conocida (la clasificación oficial
 del consorcio CMS, aplicada a una cohorte de entrenamiento — GSE39582), el patrón de cada
 subtipo es simplemente la media de los vectores de expresión (ya z-scoreados) de los
 pacientes con esa etiqueta:
@@ -30,15 +29,13 @@ $$p^\mu = \frac{1}{|\mathcal{C}_\mu|} \sum_{i \in \mathcal{C}_\mu} x_i$$
 donde $\mathcal{C}_\mu$ es el conjunto de pacientes de entrenamiento con etiqueta $\mu$.
 
 Implementado en `calibration.py::calibrate_patterns_from_data()`. Es la única "fase de
-aprendizaje" del sistema — no hay descenso de gradiente, no hay épocas, no hay función de
-pérdida. El resultado se guarda en `calibrated_patterns.tsv` y de ahí en adelante el modelo
-queda congelado: la validación externa (`external_validation.py`) nunca vuelve a tocar estos
-valores.
+aprendizaje" del sistema. El resultado se guarda en `calibrated_patterns.tsv` y de ahí en adelante el modelo
+queda congelado: la validación externa (`external_validation.py`) nunca vuelve a tocar estos valores.
 
-## 3. La matriz de acoplamiento — regla de proyección, no Hebb
+## 3. La matriz de acoplamiento
 
 La dinámica (sección 4) necesita una matriz $W \in \mathbb{R}^{N \times N}$ que defina cómo
-interactúan las componentes del estado. La elección de cómo construir $W$ a partir de los
+interactúan las componentes del espacio fase (estados). La elección de cómo construir $W$ a partir de los
 patrones es la decisión de diseño central del modelo.
 
 **Por qué no la regla de Hebb clásica.** La construcción "obvia" para una red asociativa
@@ -132,7 +129,7 @@ estándar, no calibrado específicamente para este contexto clínico.
 Implementado en `prognosis.py::hazard_from_trajectory()` / `detect_recurrence_signal()`,
 orquestado en `prognosis_demo.py::simulate_longitudinal_patient()`.
 
-## 7. Simulación de tratamiento: perturbación gateada
+## 7. Simulación de tratamiento: perturbación condicionada
 
 La pieza que distingue a este modelo de un clasificador estático: simular el efecto
 contrafactual de una intervención. La decisión de diseño clave (y un error de la primera
@@ -144,19 +141,19 @@ amortiguamiento proporcional al estado actual, que jala de vuelta hacia el orige
 
 $$I_{\text{tx}}(t) = -\varepsilon(x, \text{mecanismo}) \cdot x(t)$$
 
-donde $\varepsilon \in [0, \varepsilon_{\max}]$ es una **eficacia gateada** por la
+donde $\varepsilon \in [0, \varepsilon_{\max}]$ es una **eficacia condicionada** por la
 biología del paciente — no un valor fijo ($\varepsilon_{\max}$ corresponde al parámetro
 `base_strength` en el código). Tres mecanismos implementados, cada uno con su
-propia función de gate y evidencia clínica citada (ver docstring de
+propio criterio de activación y evidencia clínica citada (ver docstring de
 `treatment_perturbation.py`):
 
-| Mecanismo | Gate de eficacia | Evidencia |
+| Mecanismo | Criterio de eficacia | Evidencia |
 |---|---|---|
 | Inmunoterapia anti-PD1 | $\varepsilon \propto \max(\mathrm{corr}(x, p^{\text{CMS1}}), 0)$ — sin piso basal fuera de CMS1 | KEYNOTE-177: HR=0.60–0.73 en MSI-H/dMMR |
 | Anti-EGFR | $\varepsilon = 0$ si RAS/BRAF mutante; completo si wild-type; proxy débil por CMS3 si desconocido | Karapetis 2008, Douillard 2013, Di Nicolantonio 2008 |
 | Quimioterapia citotóxica | $\varepsilon$ reducido (no nulo) cerca de CMS4 | Consistente con quimiorresistencia relativa de CMS4 en este proyecto |
 
-**Alcance explícito**: la *dirección* de cada gate está fundamentada en mecanismo de acción
+**Alcance explícito**: la *dirección* de cada criterio está fundamentada en mecanismo de acción
 clínico real. La *magnitud* (`base_strength`, los coeficientes de escalamiento) es
 arbitraria — no hay datos de "antes/después de tratamiento" en el proyecto contra los
 cuales calibrarla. Es una herramienta de exploración in silico y generación de hipótesis,
@@ -173,4 +170,3 @@ no un predictor validado de respuesta a tratamiento.
 | $\hat\mu = \arg\max_\mu \mathrm{corr}(x, p^\mu)$ | Clasificación | `classify_current_state()` / `risk_score_from_expression()` |
 | $h(t) = \|x(t)\|$ | Riesgo ordinal | `hazard_from_trajectory()` |
 | $I_{\text{tx}} = -\varepsilon(x)\, x$ | Perturbación de tratamiento | `apply_treatment_perturbation()` |
-
