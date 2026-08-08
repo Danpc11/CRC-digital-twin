@@ -56,7 +56,7 @@ CMS_RENAME = {
 CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 
 # Genes ya en el panel actual (para marcar en el reporte que candidatos son "nuevos")
-CURRENT_PANEL = {"MLH1", "GZMB", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"}
+CURRENT_PANEL = {"MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"}
 
 
 def parse_platform_annotation(path) -> pd.DataFrame:

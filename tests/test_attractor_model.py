@@ -29,7 +29,10 @@ from attractor_model import (
 
 
 def test_state_dimension_matches_gene_panel():
-    assert N == 8
+    # Panel congelado de 10 genes (ver PROJECT_STATUS.md) -- si este
+    # test falla tras agregar/quitar un gen, hay que actualizar TAMBIEN
+    # synthetic_data.py y los scripts build_*_dataset.py.
+    assert N == 10
     assert P.shape == (N, 4)
 
 
@@ -72,7 +75,16 @@ def test_no_driver_state_remains_bounded():
 
 
 def test_all_driver_keys_map_to_valid_cms_or_none():
-    valid = set(CMS_LABELS) | {"none"}
-    for driver in DRIVER_BIAS:
-        assert driver in {"MSI_high", "APC_mut", "KRAS_mut", "SMAD4_loss", "none"}
-        assert driver == "none" or any(cms.startswith(driver.split("_")[0]) or True for cms in valid)
+    # Cada driver (menos 'none') empuja hacia exactamente UN patron CMS,
+    # con magnitud positiva y signo consistente con ese patron.
+    expected = {"MSI_high", "APC_mut", "KRAS_mut", "SMAD4_loss", "none"}
+    assert set(DRIVER_BIAS) == expected
+    for driver, bias in DRIVER_BIAS.items():
+        assert bias.shape == (N,)
+        if driver == "none":
+            assert np.allclose(bias, 0.0)
+        else:
+            assert np.linalg.norm(bias) > 0
+            aligned = [label for label in CMS_LABELS
+                       if np.dot(bias, CMS_PATTERNS[label]) > 0]
+            assert len(aligned) >= 1, f"{driver} no empuja hacia ningun atractor"

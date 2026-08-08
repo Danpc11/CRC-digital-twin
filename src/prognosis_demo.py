@@ -17,10 +17,11 @@ Simula un escenario clinico post-quirurgico:
     - Verifica que hazard_from_trajectory + detect_recurrence_signal
       detectan la alerta, y en que punto del seguimiento
     - Reporta, junto con la alerta: (a) que tan solida es la evidencia
-      externa de ESE atractor especifico (CMS4 fuerte, los otros tres
-      debiles/sin evidencia -- ver PROJECT_STATUS.md) y (b) que
-      tratamientos tienen mecanismo aplicable al estado actual del
-      paciente, con su evidencia citada
+      externa de ESE atractor especifico (CMS4 solido y robusto al
+      ajuste por estadio; CMS1 significativo por primera vez pero
+      pendiente de confirmacion; CMS3 sin evidencia -- ver
+      PROJECT_STATUS.md) y (b) que tratamientos tienen mecanismo
+      aplicable al estado actual del paciente, con su evidencia citada
 
 USO:
     python3 src/prognosis_demo.py --patterns results_gse39582_final/calibrated_patterns.tsv
@@ -44,14 +45,17 @@ from scipy.integrate import solve_ivp
 WONG = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
 
 # Fuerza de evidencia externa por atractor -- del Cox estratificado
-# combinando GSE17536+GSE17537+GSE14333 (n=326, ver PROJECT_STATUS.md).
+# combinando las 4 cohortes externas GSE17536+GSE17537+GSE14333+GSE33113
+# (n=415, 100 eventos; ajustado por estadio: n=388, 80 eventos --
+# ver PROJECT_STATUS.md, actualizado agosto 2026).
 # Referencia del modelo: CMS2_canonical_WNT (HR=1.0 por definicion).
 EVIDENCE_STRENGTH = {
     "CMS1_MSI_immune": {
         "level": "debil",
-        "detail": "HR=1.67 vs. CMS2, p=0.09 -- tendencia, no significativo. "
-                   "Direccion contraintuitiva (peor pronostico), posible comportamiento "
-                   "bifasico de CMS1 real (bueno temprano, malo tras recaida) segun literatura.",
+        "detail": "HR=2.09 vs. CMS2, p=0.016 (ajustado por estadio) -- significativo "
+                  "por primera vez tras sumar GSE33113, pero resultado NUEVO sin "
+                  "replicacion previa (antes rondaba p=0.07-0.09): tratar con cautela "
+                  "hasta confirmarlo en una cohorte adicional.",
     },
     "CMS2_canonical_WNT": {
         "level": "referencia",
@@ -59,12 +63,16 @@ EVIDENCE_STRENGTH = {
     },
     "CMS3_metabolic": {
         "level": "sin evidencia",
-        "detail": "HR=0.87 vs. CMS2, p=0.70 -- no distinguible de CMS2 en supervivencia externa.",
+        "detail": "HR sin efecto significativo, p=0.11 (ajustado) -- no distinguible de "
+                  "CMS2 en supervivencia externa. Poder estadistico de solo 45%: tampoco "
+                  "se puede concluir ausencia de efecto.",
     },
     "CMS4_mesenchymal": {
         "level": "fuerte",
-        "detail": "HR=1.88 vs. CMS2, p=0.03 -- consistente en 3 cohortes externas "
-                  "(GSE17536, GSE17537, GSE14333) y confirmado visualmente en curvas KM.",
+        "detail": "HR=2.06 vs. CMS2, p=0.018 (ajustado por estadio; modelo global "
+                  "p<0.001) -- consistente en las 4 cohortes externas (GSE17536, "
+                  "GSE17537, GSE14333, GSE33113) y robusto al ajuste: el HR apenas "
+                  "cambia entre el modelo crudo restringido (2.34) y el ajustado (2.06).",
     },
 }
 

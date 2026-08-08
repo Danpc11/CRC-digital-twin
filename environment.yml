@@ -8,7 +8,7 @@
 #   mamba env create -f environment.yml
 #
 # Verificar que el entorno quedo sano:
-#   python3 cli.py test        # deben pasar 42 pruebas
+#   python3 cli.py test        # deben pasar 42 tests
 #
 # Actualizar tras cambiar este archivo:
 #   conda env update -f environment.yml --prune
@@ -20,7 +20,7 @@
 #   conda config --set channel_priority strict
 #
 # Las versiones estan fijadas igual que en requirements.txt -- son las
-# verificadas con la suite de regresión completa (42 pruebas).
+# verificadas con la suite de regresion completa (42 tests).
 
 name: coloq
 

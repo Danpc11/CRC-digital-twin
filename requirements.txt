@@ -1,5 +1,5 @@
 # Versiones fijadas para reproducibilidad -- son las verificadas con la
-# suite de regresion completa (42 pruebas). Para actualizar, cambiar aquí
+# suite de regresion completa (42 tests). Para actualizar, cambiar aqui
 # y confirmar que `python3 cli.py test` sigue en verde.
 
 # --- nucleo (requerido para todo el pipeline) ---
