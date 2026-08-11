@@ -46,7 +46,7 @@ datas += copy_metadata('streamlit')
 # Cada paquete cientifico usado en tiempo de ejecucion por app.py y su
 # cadena de imports (src/*.py) se declara explicitamente, sin confiar
 # en la deteccion automatica -- es lo que fallo con lifelines en Mac.
-for pkg in ['streamlit', 'lifelines', 'numpy', 'scipy', 'pandas', 'matplotlib']:
+for pkg in ['streamlit', 'lifelines', 'numpy', 'scipy', 'pandas', 'matplotlib', 'reportlab']:
     tmp_ret = collect_all(pkg)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
