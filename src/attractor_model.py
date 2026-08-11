@@ -77,11 +77,19 @@ def projection_weight_matrix(patterns: np.ndarray) -> np.ndarray:
     de proyeccion de Personnaz-Guyon-Dreyfus (Kohonen, 1972).
 
     patterns: array (N, M) con M patrones como columnas.
+
+    Usa pseudo-inversa (Moore-Penrose), no solve exacto -- si los M
+    patrones no son linealmente independientes (puede pasar con
+    cohortes de calibracion chicas/desbalanceadas, donde dos
+    centroides empiricos terminan casi colineales), gram = P^T P sale
+    singular o numericamente mal condicionada, y np.linalg.solve
+    revienta con LinAlgError. La formula P(P^T P)^+ P^T sigue siendo
+    el proyector ortogonal correcto sobre el subespacio generado por
+    los patrones incluso cuando son dependientes -- preserva W @ p_mu
+    = p_mu exactamente para cada patron, sin importar el rango.
     """
-    # W = P (P^T P)^-1 P^T  -> proyector ortogonal sobre el subespacio
-    # generado por los patrones. Es simetrico y cada p_mu es punto fijo.
     gram = patterns.T @ patterns
-    W = patterns @ np.linalg.solve(gram, patterns.T)
+    W = patterns @ np.linalg.pinv(gram) @ patterns.T
     return W
 
 
