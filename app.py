@@ -23,6 +23,7 @@ ALCANCE: herramienta de investigacion. No es un dispositivo medico ni
 una ayuda a la decision clinica validada -- ver pestana "Metodo".
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -175,6 +176,27 @@ with st.sidebar:
         '<div class="scope" style="border:0;margin:0;padding:0">'
         'Herramienta de investigación. No es un dispositivo médico ni una ayuda '
         'a la decisión clínica validada.</div>', unsafe_allow_html=True)
+
+    # Boton de salida -- cerrar la pestana del navegador NO detiene el
+    # servidor (queda corriendo en segundo plano). Esto si lo mata:
+    # os._exit(0) es una terminacion dura del proceso completo, la
+    # unica forma confiable de "cerrar la app" desde dentro de la UI
+    # cuando se corre como ejecutable de un solo archivo (sin consola
+    # visible con la que interactuar en Windows/Mac empacado).
+    st.divider()
+    if st.session_state.get("confirm_exit", False):
+        st.warning("¿Cerrar ColoQ? Se pierde cualquier resultado no descargado.")
+        col_yes, col_no = st.columns(2)
+        if col_yes.button("Sí, salir", type="primary", use_container_width=True):
+            st.markdown("Cerrando ColoQ...")
+            os._exit(0)
+        if col_no.button("Cancelar", use_container_width=True):
+            st.session_state["confirm_exit"] = False
+            st.rerun()
+    else:
+        if st.button("⏻  Salir de ColoQ", use_container_width=True):
+            st.session_state["confirm_exit"] = True
+            st.rerun()
 
 
 # ======================================================================
