@@ -25,12 +25,21 @@ una ayuda a la decision clinica validada -- ver pestana "Metodo".
 
 import os
 import sys
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+)
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -105,6 +114,17 @@ st.markdown("""
 
   section[data-testid="stSidebar"] { border-right: 1px solid #E3E6EA; }
   div[data-testid="stMetricValue"] { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* Vista de impresion -- para cuando un medico imprime el resumen del
+     paciente directo desde el navegador (Ctrl+P), sin la barra
+     lateral, pestanas ni controles interactivos que no aplican en
+     papel. */
+  @media print {
+    section[data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stTabs"] [role="tablist"] { display: none !important; }
+    .stButton, .stDownloadButton, .stSlider, .stSelectbox, .stRadio { display: none !important; }
+    .readout { break-inside: avoid; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,6 +152,145 @@ def readout(eyebrow: str, value: str, unit: str = "", accent: str = "#4A5058") -
             f'<div class="eyebrow">{eyebrow}</div>'
             f'<div class="value" style="color:{accent}">{value} '
             f'<span class="unit">{unit}</span></div></div>')
+
+
+# --- simulacion cacheada -- sin esto, cada interaccion con un slider
+# (arrastrar, no solo soltar) vuelve a integrar las ODEs desde cero.
+# Se siente lento/entrecortado. st.cache_data hashea los argumentos
+# (arrays de numpy y diccionarios de patrones incluidos) y reusa el
+# resultado si nada cambio -- verificado que invalida correctamente
+# cuando el vector del paciente o los patrones cambian, no solo
+# cuando cambian los parametros "cosmeticos" (onset, n_checks).
+@st.cache_data(show_spinner=False)
+def cached_trajectory(W, gene_order, driver_vector, n_genes, n_timepoints, recurrence_onset_month):
+    return simulate_longitudinal_patient(
+        W, gene_order, driver_vector, n_genes,
+        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+
+
+@st.cache_data(show_spinner=False)
+def cached_treatment_sim(W, n_genes, gene_order, driver_vector, patterns, treatment,
+                          treatment_onset_month, ras_braf_wildtype, n_timepoints,
+                          recurrence_onset_month):
+    return simulate_with_optional_treatment(
+        W, n_genes, gene_order, driver_vector, patterns, treatment=treatment,
+        treatment_onset_month=treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
+        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+
+
+def evaluate_all_treatments(W, n_genes, gene_order, driver_vector, patterns,
+                             recurrence_onset_month=15, treatment_onset_month=18,
+                             ras_braf_wildtype=None):
+    """
+    Corre los mecanismos de tratamiento disponibles contra el vector de
+    UN paciente, devuelve un resumen ordenado de mayor a menor
+    beneficio simulado. Es la logica central de la pestana "Paciente"
+    y del PDF -- responde "de estos mecanismos, cual (si alguno) tiene
+    efecto no trivial para este paciente especifico" en un solo lugar,
+    en vez de que el usuario tenga que probar cada tratamiento a mano
+    uno por uno en la pestana Intervencion.
+    """
+    _, x_base = cached_treatment_sim(
+        W, n_genes, gene_order, driver_vector, patterns, None,
+        treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month)
+    h_base = hazard_from_trajectory(x_base)[-1]
+
+    results = []
+    for name in TREATMENT_MECHANISMS:
+        _, x_tx = cached_treatment_sim(
+            W, n_genes, gene_order, driver_vector, patterns, name,
+            treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month)
+        h_tx = hazard_from_trajectory(x_tx)[-1]
+        results.append({
+            "treatment": name, "h_base": h_base, "h_tx": h_tx,
+            "delta": h_base - h_tx, "aplica": abs(h_base - h_tx) > 0.01,
+        })
+    return sorted(results, key=lambda r: -r["delta"])
+
+
+def build_patient_pdf(sample_id, predicted_cms, confidence, evidence, t_checks, hazard,
+                       alert, alert_idx, treatment_results, gene_order) -> bytes:
+    """
+    Arma el PDF de reporte de un paciente: clasificacion, evidencia,
+    grafica de riesgo, y tabla de tratamientos evaluados. Usa reportlab
+    (puro Python, sin dependencias de sistema -- compatible con Docker
+    y con el ejecutable de PyInstaller, a diferencia de herramientas
+    HTML-a-PDF como weasyprint que necesitan cairo/pango).
+    """
+    styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    body_style = styles["Normal"]
+    caution_style = ParagraphStyle(
+        "caution", parent=body_style, fontSize=8, textColor=colors.HexColor("#6C737F"))
+
+    # grafica de riesgo como imagen embebida
+    fig, ax = plt.subplots(figsize=(6.5, 3))
+    ax.plot(t_checks, hazard, color=CMS_COLOR.get(predicted_cms, "#D55E00"),
+            marker="o", markersize=4, linewidth=2)
+    if alert:
+        ax.axvline(t_checks[alert_idx], color="#B03A2E", linestyle=":", linewidth=1.5)
+    ax.set_xlabel("Meses desde la cirugía")
+    ax.set_ylabel("Riesgo (ordinal)")
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    fig.tight_layout()
+    img_buf = BytesIO()
+    fig.savefig(img_buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    img_buf.seek(0)
+
+    story = [
+        Paragraph("ColoQ &mdash; Reporte de paciente", title_style),
+        Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}", caution_style),
+        Spacer(1, 14),
+        Paragraph(f"<b>Paciente:</b> {sample_id}", body_style),
+        Paragraph(f"<b>Subtipo predicho:</b> {CMS_SHORT.get(predicted_cms, predicted_cms)} "
+                  f"(confianza {confidence:.2f})", body_style),
+        Paragraph(f"<b>Respaldo de evidencia externa de este eje:</b> "
+                  f"{evidence.get('level', 'desconocida').upper()}", body_style),
+        Paragraph(evidence.get("detail", ""), caution_style),
+        Spacer(1, 10),
+    ]
+
+    if alert:
+        story.append(Paragraph(
+            f"<b>Alerta de recurrencia simulada en el mes {t_checks[alert_idx]}.</b>", body_style))
+    else:
+        story.append(Paragraph("Sin alerta en la ventana simulada.", body_style))
+    story.append(Spacer(1, 8))
+    story.append(Image(img_buf, width=15 * cm, height=7 * cm))
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Tratamientos evaluados</b>", styles["Heading3"]))
+    table_data = [["Mecanismo", "Riesgo sin tx", "Riesgo con tx", "Diferencia", "Efecto"]]
+    for r in treatment_results:
+        table_data.append([
+            r["treatment"], f"{r['h_base']:.2f}", f"{r['h_tx']:.2f}",
+            f"{r['delta']:+.2f}", "Aplica" if r["aplica"] else "Sin efecto",
+        ])
+    tbl = Table(table_data, hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E3E6EA")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5F6F7")),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 16))
+
+    story.append(Paragraph(
+        "Herramienta de investigacion. No es un dispositivo medico ni una ayuda a la "
+        "decision clinica validada. El riesgo mostrado es ordinal (ordena momentos "
+        "dentro de la misma trayectoria), no una probabilidad calibrada de recurrencia. "
+        "La direccion del efecto de tratamiento esta fundamentada en literatura clinica; "
+        "la magnitud NO esta calibrada contra datos reales de tratamiento. "
+        "Panel de referencia: " + ", ".join(gene_order) + ".",
+        caution_style))
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=1.8 * cm, bottomMargin=1.8 * cm)
+    doc.build(story)
+    return buf.getvalue()
 
 
 # ======================================================================
@@ -217,8 +376,8 @@ if not patterns:
 W, _labels, _ = build_model_from_patterns(patterns)
 n_genes = len(gene_order)
 
-tab_muestras, tab_traj, tab_tx, tab_metodo = st.tabs(
-    ["Muestras", "Trayectoria", "Intervención", "Método"]
+tab_muestras, tab_paciente, tab_traj, tab_tx, tab_metodo = st.tabs(
+    ["Muestras", "Paciente", "Trayectoria", "Intervención", "Método"]
 )
 
 # ======================================================================
@@ -314,7 +473,123 @@ with tab_muestras:
                                 file_name="scored_cohort.tsv")
 
 # ======================================================================
-# 2. TRAYECTORIA
+# 2. PACIENTE -- vista clinica consolidada: un paciente, una pantalla.
+# No requiere que el usuario entienda "atractor" ni "vector de
+# estado" para llegar a una respuesta accionable.
+# ======================================================================
+with tab_paciente:
+    if "scored_cohort" not in st.session_state:
+        st.info("Sube y clasifica una cohorte en la pestaña **Muestras** primero "
+                "para ver el resumen de un paciente aquí.")
+    else:
+        cohort_p = st.session_state["scored_cohort"]
+        cohort_genes_p = st.session_state["scored_cohort_gene_order"]
+
+        sel_id_p = st.selectbox("Paciente", cohort_p["sample_id"].tolist(), key="paciente_sel")
+        fila = cohort_p[cohort_p["sample_id"] == sel_id_p].iloc[0]
+        driver_p = fila[cohort_genes_p].to_numpy(dtype=float)
+        pred_p = fila["predicted_cms"]
+        conf_p = float(fila["classification_confidence"])
+
+        with st.spinner("Simulando trayectoria..."):
+            t_p, x_p = cached_trajectory(W, cohort_genes_p, driver_p, n_genes, 10, 15)
+            hazard_p = hazard_from_trajectory(x_p)
+            alert_p, idx_p = detect_recurrence_signal(hazard_p, baseline_window=2, threshold_sigma=3.0)
+
+        h1, h2, h3 = st.columns([2, 1, 1])
+        h1.markdown(
+            f'<div class="eyebrow">Paciente</div>'
+            f'<div class="mono" style="font-size:1.3rem;font-weight:600">{sel_id_p}</div>',
+            unsafe_allow_html=True)
+        h2.markdown(readout("Subtipo predicho", CMS_SHORT.get(pred_p, pred_p),
+                             accent=CMS_COLOR.get(pred_p, "#4A5058")), unsafe_allow_html=True)
+        h3.markdown(readout("Confianza", f"{conf_p:.2f}"), unsafe_allow_html=True)
+
+        ev_p = EVIDENCE_STRENGTH.get(pred_p, {})
+        st.markdown(evidence_meter(ev_p.get("level", "sin evidencia")), unsafe_allow_html=True)
+        st.markdown(f'<div class="ev-note">{ev_p.get("detail", "")}</div>', unsafe_allow_html=True)
+
+        st.divider()
+
+        st.markdown('<div class="eyebrow">Riesgo simulado en el tiempo</div>', unsafe_allow_html=True)
+        fig_p, ax_p = plt.subplots(figsize=(8, 3))
+        ax_p.plot(t_p, hazard_p, color=CMS_COLOR.get(pred_p, "#D55E00"), marker="o",
+                  markersize=4, linewidth=2)
+        if alert_p:
+            ax_p.axvline(t_p[idx_p], color="#B03A2E", linestyle=":", linewidth=1.6)
+        ax_p.set_xlabel("Meses desde la cirugía", fontsize=9)
+        ax_p.set_ylabel("Riesgo (ordinal)", fontsize=9)
+        ax_p.tick_params(labelsize=8)
+        for s in ("top", "right"):
+            ax_p.spines[s].set_visible(False)
+        fig_p.tight_layout()
+        st.pyplot(fig_p)
+
+        if alert_p:
+            st.error(f"Alerta de recurrencia simulada en el mes {t_p[idx_p]}.")
+        else:
+            st.success("Sin alerta en la ventana simulada.")
+
+        with st.expander("Ver detalle molecular (10 genes)"):
+            fig_g, ax_g = plt.subplots(figsize=(8, 3))
+            for i, gene in enumerate(cohort_genes_p):
+                ax_g.plot(t_p, x_p[i], color=WONG[i % len(WONG)], marker="o",
+                         markersize=2.5, linewidth=1.2, label=gene)
+            ax_g.legend(fontsize=6, ncol=5, loc="upper left", frameon=False)
+            ax_g.set_ylabel("Expresión (z-score)", fontsize=9)
+            ax_g.tick_params(labelsize=8)
+            for s in ("top", "right"):
+                ax_g.spines[s].set_visible(False)
+            fig_g.tight_layout()
+            st.pyplot(fig_g)
+
+        st.divider()
+
+        st.markdown('<div class="eyebrow">¿Qué tratamientos tienen efecto simulado para este paciente?</div>',
+                    unsafe_allow_html=True)
+        with st.spinner("Evaluando mecanismos de tratamiento..."):
+            resultados_tx = evaluate_all_treatments(W, n_genes, cohort_genes_p, driver_p, patterns)
+
+        aplican = [r for r in resultados_tx if r["aplica"]]
+        if aplican:
+            for r in aplican:
+                st.markdown(
+                    f'<div class="readout" style="border-left-color:#1B7F5A">'
+                    f'<div class="eyebrow">{r["treatment"]}</div>'
+                    f'<div class="value" style="color:#1B7F5A">Δ {r["delta"]:+.2f} '
+                    f'<span class="unit">riesgo {r["h_base"]:.2f} → {r["h_tx"]:.2f}</span></div>'
+                    f'</div>', unsafe_allow_html=True)
+                st.caption(describe_treatment(r["treatment"]))
+        else:
+            st.info("Ninguno de los mecanismos modelados muestra efecto no trivial para "
+                    "este paciente, según su clasificación actual.")
+
+        sin_efecto = [r["treatment"] for r in resultados_tx if not r["aplica"]]
+        if sin_efecto:
+            st.caption(f"Sin efecto simulado: {', '.join(sin_efecto)}.")
+
+        st.markdown(
+            '<div class="scope">Dirección de efecto fundamentada en literatura clínica; '
+            'magnitud NO calibrada contra datos reales de tratamiento. Exploración in '
+            'silico, no una recomendación clínica.</div>', unsafe_allow_html=True)
+
+        st.divider()
+
+        col_pdf, col_print = st.columns(2)
+        pdf_bytes = build_patient_pdf(
+            sel_id_p, pred_p, conf_p, ev_p, t_p, hazard_p, alert_p, idx_p,
+            resultados_tx, cohort_genes_p)
+        col_pdf.download_button(
+            "📄 Descargar reporte (PDF)", pdf_bytes,
+            file_name=f"coloq_reporte_{sel_id_p}.pdf", mime="application/pdf",
+            use_container_width=True)
+        col_print.caption("También puedes imprimir esta pestaña directo desde el "
+                          "navegador (Ctrl+P / Cmd+P) — los controles se ocultan "
+                          "automáticamente en la vista de impresión.")
+
+
+# ======================================================================
+# 3. TRAYECTORIA
 # ======================================================================
 with tab_traj:
     st.markdown("Simula el seguimiento post-quirúrgico: el estado parte del origen "
@@ -439,7 +714,7 @@ with tab_traj:
             st.caption("El estado permanece cerca del origen durante toda la ventana simulada.")
 
 # ======================================================================
-# 3. INTERVENCION
+# 4. INTERVENCION
 # ======================================================================
 with tab_tx:
     st.markdown("Compara la misma trayectoria de recaída con y sin intervención — "
@@ -547,7 +822,7 @@ with tab_tx:
         'reales de tratamiento. Exploración in silico.</div>', unsafe_allow_html=True)
 
 # ======================================================================
-# 4. METODO
+# 5. METODO
 # ======================================================================
 with tab_metodo:
     c1, c2 = st.columns([1, 1])
