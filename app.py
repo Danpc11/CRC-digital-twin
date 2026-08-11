@@ -236,6 +236,22 @@ with tab_muestras:
                 st.stop()
 
             scored = score_cohort(z, gene_order, patterns)
+
+            # sample_id ya viene incluida en 'scored' si el archivo la
+            # traia (zscore_genes/score_cohort hacen df.copy(), preservan
+            # todas las columnas originales) -- solo agregar un
+            # identificador de respaldo si de verdad falta.
+            if "sample_id" not in scored.columns:
+                scored.insert(0, "sample_id", [f"muestra_{i+1}" for i in range(len(scored))])
+            else:
+                scored["sample_id"] = scored["sample_id"].astype(str)
+
+            # Persistir para las pestanas de Trayectoria e Intervencion --
+            # permite elegir un paciente real de la cohorte cargada en vez
+            # de simular solo hacia un atractor puro generico.
+            st.session_state["scored_cohort"] = scored
+            st.session_state["scored_cohort_gene_order"] = gene_order
+
             counts = scored["predicted_cms"].value_counts()
             conf = scored["classification_confidence"]
 
@@ -268,7 +284,7 @@ with tab_muestras:
                 )
 
             st.dataframe(
-                scored[["predicted_cms", "classification_confidence"] + gene_order],
+                scored[["sample_id", "predicted_cms", "classification_confidence"] + gene_order],
                 use_container_width=True, height=280,
             )
             st.download_button("Descargar tabla clasificada",
@@ -283,15 +299,54 @@ with tab_traj:
                 "(sin enfermedad residual) y se detecta el momento en que la señal "
                 "molecular reaparece.")
 
-    c1, c2, c3 = st.columns(3)
-    target = c1.selectbox("Atractor de la recaída", list(patterns.keys()),
-                           index=len(patterns) - 1,
-                           format_func=lambda x: CMS_SHORT.get(x, x))
-    onset = c2.slider("Inicio de la recaída (mes)", 3, 24, 15, step=3)
-    n_checks = c3.slider("Chequeos de seguimiento", 4, 16, 10)
+    has_cohort = "scored_cohort" in st.session_state
+    modo = st.radio(
+        "Fuente de la trayectoria", ["Atractor genérico", "Paciente de mi cohorte"],
+        horizontal=True, key="traj_modo",
+        help="'Paciente de mi cohorte' usa la expresión medida de un paciente real "
+             "(subido en la pestaña Muestras) como dirección hipotética de recaída, "
+             "en vez de un centroide CMS puro." if has_cohort else None,
+    )
+
+    driver_vector = None
+    target_color_key = None
+
+    if modo == "Paciente de mi cohorte":
+        if not has_cohort:
+            st.info("Sube y clasifica una cohorte en la pestaña **Muestras** primero "
+                     "para poder elegir un paciente aquí.")
+        else:
+            cohort = st.session_state["scored_cohort"]
+            cohort_genes = st.session_state["scored_cohort_gene_order"]
+            sel_id = st.selectbox("Paciente", cohort["sample_id"].tolist())
+            paciente = cohort[cohort["sample_id"] == sel_id].iloc[0]
+            driver_vector = paciente[cohort_genes].to_numpy(dtype=float)
+            target_color_key = paciente["predicted_cms"]
+
+            st.markdown(
+                f'{cms_tag(target_color_key)} <span class="mono" style="font-size:.85rem">'
+                f'clasificado con confianza {paciente["classification_confidence"]:.2f} · '
+                f'la trayectoria usa la expresión MEDIDA de este paciente como dirección '
+                f'hipotética de recaída, no un centroide puro</span>',
+                unsafe_allow_html=True)
+
+    if driver_vector is None:
+        # modo generico -- atractor puro (comportamiento original)
+        c1, c2, c3 = st.columns(3)
+        target = c1.selectbox("Atractor de la recaída", list(patterns.keys()),
+                               index=len(patterns) - 1,
+                               format_func=lambda x: CMS_SHORT.get(x, x))
+        onset = c2.slider("Inicio de la recaída (mes)", 3, 24, 15, step=3)
+        n_checks = c3.slider("Chequeos de seguimiento", 4, 16, 10)
+        driver_vector = patterns[target]
+        target_color_key = target
+    else:
+        c2, c3 = st.columns(2)
+        onset = c2.slider("Inicio de la recaída (mes)", 3, 24, 15, step=3)
+        n_checks = c3.slider("Chequeos de seguimiento", 4, 16, 10)
 
     t_checks, x_series = simulate_longitudinal_patient(
-        W, gene_order, patterns[target], n_genes,
+        W, gene_order, driver_vector, n_genes,
         n_timepoints=n_checks, recurrence_onset_month=onset)
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
@@ -311,7 +366,7 @@ with tab_traj:
         for s in ("top", "right"):
             ax1.spines[s].set_visible(False)
 
-        ax2.plot(t_checks, hazard, color=CMS_COLOR.get(target, "#D55E00"), marker="o",
+        ax2.plot(t_checks, hazard, color=CMS_COLOR.get(target_color_key, "#D55E00"), marker="o",
                  markersize=3.5, linewidth=2)
         ax2.axvline(onset, color="#9AA0A6", linestyle="--", linewidth=1)
         if alert:
@@ -366,11 +421,45 @@ with tab_traj:
 # ======================================================================
 with tab_tx:
     st.markdown("Compara la misma trayectoria de recaída con y sin intervención — "
-                "el contrafactual que un score estático no puede producir.")
+                "el contrafactual que un score estático no puede producir. Útil para "
+                "explorar si un mecanismo de tratamiento (ej. quimioterapia) tiene "
+                "efecto no trivial para un paciente dado, según su propia expresión medida.")
 
-    c1, c2, c3, c4 = st.columns(4)
-    tx_target = c1.selectbox("Atractor de la recaída", list(patterns.keys()),
-                              key="tx_t", format_func=lambda x: CMS_SHORT.get(x, x))
+    has_cohort = "scored_cohort" in st.session_state
+    modo_tx = st.radio(
+        "Fuente de la trayectoria", ["Atractor genérico", "Paciente de mi cohorte"],
+        horizontal=True, key="tx_modo",
+        help="'Paciente de mi cohorte' usa la expresión medida de un paciente real "
+             "como dirección hipotética de recaída." if has_cohort else None,
+    )
+
+    tx_driver_vector = None
+    tx_color_key = None
+
+    if modo_tx == "Paciente de mi cohorte":
+        if not has_cohort:
+            st.info("Sube y clasifica una cohorte en la pestaña **Muestras** primero "
+                     "para poder elegir un paciente aquí.")
+        else:
+            cohort = st.session_state["scored_cohort"]
+            cohort_genes = st.session_state["scored_cohort_gene_order"]
+            sel_id_tx = st.selectbox("Paciente", cohort["sample_id"].tolist(), key="tx_patient")
+            paciente_tx = cohort[cohort["sample_id"] == sel_id_tx].iloc[0]
+            tx_driver_vector = paciente_tx[cohort_genes].to_numpy(dtype=float)
+            tx_color_key = paciente_tx["predicted_cms"]
+            st.markdown(
+                f'{cms_tag(tx_color_key)} <span class="mono" style="font-size:.85rem">'
+                f'clasificado con confianza {paciente_tx["classification_confidence"]:.2f}</span>',
+                unsafe_allow_html=True)
+
+    if tx_driver_vector is None:
+        c1 = st.columns(1)[0]
+        tx_target = c1.selectbox("Atractor de la recaída", list(patterns.keys()),
+                                  key="tx_t", format_func=lambda x: CMS_SHORT.get(x, x))
+        tx_driver_vector = patterns[tx_target]
+        tx_color_key = tx_target
+
+    c2, c3, c4 = st.columns(3)
     treatment = c2.selectbox("Tratamiento", list(TREATMENT_MECHANISMS.keys()))
     tx_onset = c3.slider("Inicio del tratamiento (mes)", 3, 30, 18, step=3)
     ras = c4.selectbox("Estatus RAS/BRAF", ["desconocido", "wild-type", "mutante"],
@@ -378,10 +467,10 @@ with tab_tx:
 
     ras_map = {"wild-type": True, "mutante": False, "desconocido": None}
     _, x_base = simulate_with_optional_treatment(
-        W, n_genes, gene_order, patterns[tx_target], patterns,
+        W, n_genes, gene_order, tx_driver_vector, patterns,
         treatment=None, n_timepoints=10, recurrence_onset_month=15)
     t_checks, x_tx = simulate_with_optional_treatment(
-        W, n_genes, gene_order, patterns[tx_target], patterns, treatment=treatment,
+        W, n_genes, gene_order, tx_driver_vector, patterns, treatment=treatment,
         treatment_onset_month=tx_onset, ras_braf_wildtype=ras_map[ras],
         n_timepoints=10, recurrence_onset_month=15)
     h_base, h_tx = hazard_from_trajectory(x_base), hazard_from_trajectory(x_tx)
@@ -392,12 +481,12 @@ with tab_tx:
         fig, ax = plt.subplots(figsize=(7.5, 3.6))
         ax.plot(t_checks, h_base, color="#8A8F98", marker="o", markersize=3.5,
                 linewidth=2, label="Sin tratamiento")
-        ax.plot(t_checks, h_tx, color=CMS_COLOR.get(tx_target, "#0072B2"), marker="o",
+        ax.plot(t_checks, h_tx, color=CMS_COLOR.get(tx_color_key, "#0072B2"), marker="o",
                 markersize=3.5, linewidth=2, label=f"Con {treatment}")
         ax.fill_between(t_checks, h_tx, h_base, where=(h_base >= h_tx),
-                        color=CMS_COLOR.get(tx_target, "#0072B2"), alpha=0.10)
+                        color=CMS_COLOR.get(tx_color_key, "#0072B2"), alpha=0.10)
         ax.axvline(15, color="#9AA0A6", linestyle="--", linewidth=1)
-        ax.axvline(tx_onset, color=CMS_COLOR.get(tx_target, "#0072B2"),
+        ax.axvline(tx_onset, color=CMS_COLOR.get(tx_color_key, "#0072B2"),
                    linestyle=":", linewidth=1.4)
         ax.set_xlabel("Meses desde la cirugía", fontsize=9)
         ax.set_ylabel("Riesgo (ordinal)", fontsize=9)
@@ -412,16 +501,22 @@ with tab_tx:
         st.markdown(readout("Riesgo final · sin tratamiento", f"{h_base[-1]:.2f}",
                              accent="#8A8F98"), unsafe_allow_html=True)
         st.markdown(readout("Riesgo final · con tratamiento", f"{h_tx[-1]:.2f}",
-                             accent=CMS_COLOR.get(tx_target, "#0072B2")), unsafe_allow_html=True)
+                             accent=CMS_COLOR.get(tx_color_key, "#0072B2")), unsafe_allow_html=True)
         st.markdown(readout("Diferencia", f"{delta:+.2f}",
                              accent="#1B7F5A" if delta > 0.01 else "#8A8F98"),
                     unsafe_allow_html=True)
 
         if abs(delta) < 0.01:
-            st.info(f"**{treatment}** no aplica a un paciente que se dirige a "
-                    f"**{CMS_SHORT.get(tx_target)}**. Es el comportamiento esperado: los "
-                    "criterios de eficacia reflejan qué pacientes se benefician según la "
-                    "evidencia clínica publicada.")
+            st.info(f"**{treatment}** no muestra efecto no trivial para esta trayectoria "
+                    f"{'de este paciente' if modo_tx == 'Paciente de mi cohorte' else f'hacia {CMS_SHORT.get(tx_color_key)}'}. "
+                    "Es el comportamiento esperado: los criterios de eficacia reflejan qué "
+                    "pacientes se benefician según la evidencia clínica publicada — un "
+                    "mecanismo que no aplica no debería mostrar beneficio simulado.")
+        elif modo_tx == "Paciente de mi cohorte":
+            direccion = "reduce" if delta > 0 else "no reduce"
+            st.success(f"Con este mecanismo, el modelo {direccion} el riesgo simulado para "
+                       f"este paciente (Δ={delta:+.2f}). Recordatorio: esto es dirección de "
+                       "efecto, no una recomendación clínica — ver el aviso de alcance abajo.")
         st.caption(describe_treatment(treatment))
 
     st.markdown(
