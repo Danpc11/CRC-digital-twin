@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from calibration import calibrate_patterns_from_data, zscore_genes
 from survival_validation import score_cohort
 from attractor_model import build_model_from_patterns
+from modern_hopfield import patterns_to_matrix
 from prognosis import hazard_from_trajectory, detect_recurrence_signal
 from prognosis_demo import EVIDENCE_STRENGTH, simulate_longitudinal_patient, classify_current_state
 from treatment_perturbation import TREATMENT_MECHANISMS, describe_treatment
@@ -122,9 +123,10 @@ def test_readout_includes_value_and_accent_color(app_functions):
 
 def test_cached_trajectory_produces_expected_shape(app_functions, real_calibration):
     patterns, gene_order, W = real_calibration
+    X, _ = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     driver = patterns["CMS4_mesenchymal"]
-    t, x = app_functions["cached_trajectory"](W, gene_order, driver, n_genes, 10, 15)
+    t, x = app_functions["cached_trajectory"](X, gene_order, driver, n_genes, 10, 15)
     assert len(t) == 10
     assert x.shape == (n_genes, 10)
 
@@ -156,10 +158,11 @@ def test_evaluate_all_treatments_immunotherapy_applies_near_cms1(app_functions, 
 
 def test_build_patient_pdf_produces_valid_pdf_bytes(app_functions, real_calibration):
     patterns, gene_order, W = real_calibration
+    X, _ = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     driver = patterns["CMS4_mesenchymal"]
 
-    t, x = app_functions["cached_trajectory"](W, gene_order, driver, n_genes, 10, 15)
+    t, x = app_functions["cached_trajectory"](X, gene_order, driver, n_genes, 10, 15)
     hazard = hazard_from_trajectory(x)
     alert, idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
     resultados = app_functions["evaluate_all_treatments"](W, n_genes, gene_order, driver, patterns)
@@ -177,10 +180,11 @@ def test_build_patient_pdf_does_not_crash_without_alert(app_functions, real_cali
     """Caso sin alerta detectada (idx=None) -- no debe reventar al
     intentar indexar t_checks[None]."""
     patterns, gene_order, W = real_calibration
+    X, _ = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     driver = patterns["CMS4_mesenchymal"]
 
-    t, x = app_functions["cached_trajectory"](W, gene_order, driver, n_genes, 5, 999)  # recaida nunca ocurre
+    t, x = app_functions["cached_trajectory"](X, gene_order, driver, n_genes, 5, 999)  # recaida nunca ocurre
     hazard = hazard_from_trajectory(x)
     alert, idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
     assert alert is False

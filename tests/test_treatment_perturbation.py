@@ -21,6 +21,7 @@ from treatment_perturbation import (
 )
 from treatment_simulation_demo import simulate_with_optional_treatment
 from attractor_model import build_model_from_patterns
+from modern_hopfield import patterns_to_matrix
 
 
 @pytest.fixture(scope="module")
@@ -108,16 +109,16 @@ def test_counterfactual_treated_trajectory_has_lower_final_hazard(real_calibrate
     from prognosis import hazard_from_trajectory
 
     patterns, gene_order = real_calibrated_patterns
-    W, labels, _ = build_model_from_patterns(patterns)
+    X, labels = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns["CMS1_MSI_immune"]
 
     _, x_baseline = simulate_with_optional_treatment(
-        W, n_genes, gene_order, recurrence_pattern, patterns,
+        X, n_genes, gene_order, recurrence_pattern, patterns,
         treatment=None, n_timepoints=8, recurrence_onset_month=15,
     )
     _, x_treated = simulate_with_optional_treatment(
-        W, n_genes, gene_order, recurrence_pattern, patterns,
+        X, n_genes, gene_order, recurrence_pattern, patterns,
         treatment="immunotherapy_antiPD1", treatment_onset_month=18,
         n_timepoints=8, recurrence_onset_month=15,
     )

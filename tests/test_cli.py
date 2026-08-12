@@ -129,6 +129,15 @@ def test_dynamics_diagnostics_subcommand_is_registered():
     assert "dynamics-diagnostics" in subcommands
 
 
+def test_modern_hopfield_is_default_for_clinical_simulations():
+    parser = cli.build_parser()
+    prognosis = parser.parse_args(["prognosis", "--patterns", "p.tsv"])
+    treatment = parser.parse_args([
+        "simulate-treatment", "--patterns", "p.tsv", "--treatment", "anti_egfr"])
+    assert prognosis.dynamics_model == "modern_hopfield"
+    assert treatment.dynamics_model == "modern_hopfield"
+
+
 @patch("cli.subprocess.run")
 def test_modern_hopfield_dispatches_stabilized_sweep(mock_run):
     mock_run.return_value = MagicMock(returncode=0)

@@ -21,6 +21,7 @@ from prognosis_demo import (
 )
 from calibration import calibrate_patterns_from_data
 from attractor_model import build_model_from_patterns
+from modern_hopfield import patterns_to_matrix
 from synthetic_data import generate_synthetic_cohort
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 
@@ -35,12 +36,12 @@ def real_calibrated_patterns():
 def test_baseline_period_stays_at_origin(real_calibrated_patterns):
     """Antes del inicio de recaida, sin forzamiento, el estado debe permanecer en cero."""
     patterns, gene_order = real_calibrated_patterns
-    W, labels, _ = build_model_from_patterns(patterns)
+    X, labels = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns["CMS4_mesenchymal"]
 
     t_checks, x_series = simulate_longitudinal_patient(
-        W, gene_order, recurrence_pattern, n_genes,
+        X, gene_order, recurrence_pattern, n_genes,
         n_timepoints=6, months_between_checks=3, recurrence_onset_month=100,  # nunca llega
     )
     assert np.allclose(x_series, 0.0, atol=1e-6)
@@ -49,12 +50,12 @@ def test_baseline_period_stays_at_origin(real_calibrated_patterns):
 def test_recurrence_signal_detected_after_onset(real_calibrated_patterns):
     """Tras el inicio de recaida, se debe detectar una alerta en algun punto posterior."""
     patterns, gene_order = real_calibrated_patterns
-    W, labels, _ = build_model_from_patterns(patterns)
+    X, labels = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns["CMS4_mesenchymal"]
 
     t_checks, x_series = simulate_longitudinal_patient(
-        W, gene_order, recurrence_pattern, n_genes,
+        X, gene_order, recurrence_pattern, n_genes,
         n_timepoints=8, months_between_checks=3, recurrence_onset_month=15,
     )
     hazard = hazard_from_trajectory(x_series)
@@ -67,12 +68,12 @@ def test_recurrence_signal_detected_after_onset(real_calibrated_patterns):
 def test_trajectory_converges_toward_recurrence_pattern_direction(real_calibrated_patterns):
     """El estado final debe correlacionar positivamente con el patron de recaida simulado."""
     patterns, gene_order = real_calibrated_patterns
-    W, labels, _ = build_model_from_patterns(patterns)
+    X, labels = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns["CMS4_mesenchymal"]
 
     t_checks, x_series = simulate_longitudinal_patient(
-        W, gene_order, recurrence_pattern, n_genes,
+        X, gene_order, recurrence_pattern, n_genes,
         n_timepoints=8, months_between_checks=3, recurrence_onset_month=15,
     )
     x_final = x_series[:, -1]
@@ -83,15 +84,15 @@ def test_trajectory_converges_toward_recurrence_pattern_direction(real_calibrate
 def test_different_recurrence_targets_produce_different_trajectories(real_calibrated_patterns):
     """Simular recaida hacia CMS1 vs CMS4 debe producir trayectorias claramente distintas."""
     patterns, gene_order = real_calibrated_patterns
-    W, labels, _ = build_model_from_patterns(patterns)
+    X, labels = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
 
     _, x_cms4 = simulate_longitudinal_patient(
-        W, gene_order, patterns["CMS4_mesenchymal"], n_genes,
+        X, gene_order, patterns["CMS4_mesenchymal"], n_genes,
         n_timepoints=8, months_between_checks=3, recurrence_onset_month=15,
     )
     _, x_cms1 = simulate_longitudinal_patient(
-        W, gene_order, patterns["CMS1_MSI_immune"], n_genes,
+        X, gene_order, patterns["CMS1_MSI_immune"], n_genes,
         n_timepoints=8, months_between_checks=3, recurrence_onset_month=15,
     )
     assert not np.allclose(x_cms4[:, -1], x_cms1[:, -1], atol=0.1)
@@ -100,6 +101,16 @@ def test_different_recurrence_targets_produce_different_trajectories(real_calibr
 def test_evidence_strength_covers_all_four_cms():
     expected = {"CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_mesenchymal"}
     assert set(EVIDENCE_STRENGTH.keys()) == expected
+
+
+def test_projection_legacy_remains_explicitly_available(real_calibrated_patterns):
+    patterns, gene_order = real_calibrated_patterns
+    W, _, _ = build_model_from_patterns(patterns)
+    t, x = simulate_longitudinal_patient(
+        W, gene_order, patterns["CMS4_mesenchymal"], len(gene_order),
+        n_timepoints=6, recurrence_onset_month=15,
+        dynamics_model="projection_legacy")
+    assert x.shape == (len(gene_order), len(t))
 
 
 def test_cms4_has_strong_evidence_others_do_not():
