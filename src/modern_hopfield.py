@@ -50,6 +50,43 @@ verificado contra diferencias finitas, decrecimiento de energia
 verificado numericamente, equilibrios/estabilidad/cuencas con la misma
 metodologia de dynamics_diagnostics.py) para permitir una comparacion
 justa antes de decidir si reemplaza al sistema actual.
+HALLAZGO CRITICO -- EL ORIGEN ES UNA SILLA INESTABLE, NO UN REPOSO
+--------------------------------------------------------------------
+Verificado con datos reales de GSE39582: el origen SI es un punto fijo
+exacto de esta dinamica (consecuencia matematica de que los patrones,
+calibrados via z-score contra la media global, suman cero -- ver
+hallazgo de "colapso de rango" en dynamics_diagnostics.py), pero es
+una SILLA con eigenvalores hasta +4.25 (7 negativos, 3 fuertemente
+positivos), NO un reposo estable como en attractor_model.py (donde el
+termino -x domina y el origen SI es localmente estable, representando
+"sin enfermedad residual").
+
+CONSECUENCIA PRACTICA GRAVE: en simulate_longitudinal_patient_hopfield
+(y su version con sesgo), la fase "sin recaida" (antes de
+recurrence_onset_month, sin forzamiento) NO mantiene al paciente en el
+origen -- el ruido numerico de la integracion se amplifica
+exponencialmente (tasa ~e^{4.25 t}) y el estado colapsa a la cuenca
+dominante (CMS1 en la calibracion real) ANTES de que cualquier
+forzamiento/sesgo hacia otro patron siquiera comience. Verificado:
+para mes 9 el estado sigue esencialmente en el origen (norma 0.02),
+para mes 12 ya esta en CMS1 (norma 1.7, corr=0.997), para mes 15
+(cuando "empieza" la recaida forzada) ya esta CMS1 exacto (corr=1.000).
+Ningun mecanismo de forzamiento posterior (aditivo o sesgo en softmax)
+puede revertir esto de forma confiable, porque no esta partiendo de
+un punto neutral -- ya esta profundamente en la cuenca mas fuerte
+(eigenvalor -1.0) antes de empezar.
+
+VEREDICTO HONESTO: este rediseno es una mejora demostrable para la
+pregunta de EQUILIBRIOS/ATRACTORES (flujo de gradiente probado,
+intervalo amplio de beta, cobertura completa de cuencas sin espurios)
+-- pero NO es un reemplazo directo para el modulo de PRONOSTICO/
+TRAYECTORIA CLINICA (prognosis_demo.py), que depende de que el origen
+sea un reposo estable durante la fase pre-recaida. Usar esta dinamica
+para verificar clasificacion/atractores es solido; usarla para
+simular trayectorias clinicas requeriria rediseno arquitectonico
+adicional (ej. un termino estabilizador especifico para la fase
+pre-recaida, o redefinir que punto representa "sin enfermedad" bajo
+esta energia), no solo ajustar la magnitud del forzamiento.
 """
 
 import sys
@@ -384,6 +421,112 @@ def find_minimum_forcing_strength(
     }
 
 
+def modern_hopfield_field_biased(x: np.ndarray, X: np.ndarray, beta: float, bias: np.ndarray) -> np.ndarray:
+    """
+    Mecanismo ALTERNATIVO al forzamiento aditivo (I_driver sumado
+    directamente al campo) -- en vez de pelear contra el paisaje de
+    energia con una fuerza externa, sesga las similitudes ANTES del
+    softmax (mas "nativo" a esta construccion: cambia CUAL combinacion
+    de patrones se favorece, en vez de imponer una fuerza que compite
+    con el propio flujo de gradiente).
+
+    NO VERIFICADO como solucion real todavia -- un intento de
+    reproducir el problema (CMS1 dominante casi opuesto a CMS2, r~-0.8
+    en los datos reales) con un caso sintetico dio el resultado
+    CONTRARIO (aditivo funciono, sesgo fallo) -- evidencia de que la
+    reproduccion sintetica no capturo la estructura real del problema
+    (probablemente depende de como se relacionan los 4 patrones entre
+    si, no solo el par dominante-objetivo). Hay que probar esto
+    directamente contra los datos reales antes de confiar en el.
+
+    bias: vector de longitud M (numero de patrones), sumado a las
+    similitudes X^T x antes del softmax -- un valor grande en el
+    indice del patron objetivo aumenta su peso en la combinacion.
+    """
+    z = X.T @ x + bias
+    weights = _softmax(beta * z)
+    return -x + X @ weights
+
+
+def simulate_longitudinal_patient_hopfield_biased(
+    X: np.ndarray, target_idx: int, n_genes: int,
+    n_timepoints: int = 8, months_between_checks: int = 3,
+    recurrence_onset_month: int = 15, beta: float = 2.0,
+    max_bias_strength: float = 5.0,
+) -> tuple:
+    """Version de simulate_longitudinal_patient_hopfield() usando el
+    mecanismo de sesgo en softmax en vez de forzamiento aditivo."""
+    n_patterns = X.shape[1]
+    t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
+    x_series = np.zeros((n_genes, n_timepoints))
+    x_current = np.zeros(n_genes)
+
+    for i, t in enumerate(t_checks):
+        bias = np.zeros(n_patterns)
+        if t >= recurrence_onset_month:
+            months_since_onset = t - recurrence_onset_month
+            strength = min(0.15 * months_since_onset, max_bias_strength)
+            bias[target_idx] = strength
+
+        sol = solve_ivp(
+            lambda tt, xx: modern_hopfield_field_biased(xx, X, beta, bias),
+            (0, months_between_checks), x_current, method="RK45", rtol=1e-8, atol=1e-10)
+        x_current = sol.y[:, -1]
+        x_series[:, i] = x_current
+
+    return t_checks, x_series
+
+
+def find_minimum_bias_strength(
+    patterns: dict, target_label: str, beta: float = 3.0,
+    strength_candidates=None, corr_threshold: float = 0.9,
+    recurrence_onset_month: int = 15, n_timepoints: int = 10,
+) -> dict:
+    """Version de find_minimum_forcing_strength() para el mecanismo de
+    sesgo en vez de forzamiento aditivo -- misma logica de busqueda y
+    diagnostico, mecanismo distinto."""
+    if strength_candidates is None:
+        strength_candidates = [1.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0]
+
+    X, labels = patterns_to_matrix(patterns)
+    n_genes = X.shape[0]
+    idx_target = labels.index(target_label)
+    p_target = X[:, idx_target]
+
+    resultados = []
+    umbral_minimo_encontrado = None
+    for fuerza in strength_candidates:
+        t, x = simulate_longitudinal_patient_hopfield_biased(
+            X, idx_target, n_genes, beta=beta, max_bias_strength=fuerza,
+            n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        x_final = x[:, -1]
+
+        if np.std(x_final) < 1e-12:
+            resultados.append({"fuerza": fuerza, "corr_con_objetivo": float("nan"),
+                                "corr_con_mas_parecido": float("nan"), "mas_parecido_a": "origen"})
+            continue
+
+        corr_target = float(np.corrcoef(x_final, p_target)[0, 1])
+        mejor_label, mejor_corr = None, -2.0
+        for i, label in enumerate(labels):
+            c = float(np.corrcoef(x_final, X[:, i])[0, 1])
+            if c > mejor_corr:
+                mejor_corr, mejor_label = c, label
+
+        resultados.append({
+            "fuerza": fuerza, "corr_con_objetivo": corr_target,
+            "corr_con_mas_parecido": mejor_corr, "mas_parecido_a": mejor_label,
+        })
+        if corr_target >= corr_threshold and umbral_minimo_encontrado is None:
+            umbral_minimo_encontrado = fuerza
+
+    return {
+        "patron_objetivo": target_label,
+        "umbral_minimo_encontrado": umbral_minimo_encontrado,
+        "detalle": resultados,
+    }
+
+
 def compare_forced_trajectories_old_vs_new(
     patterns: dict, W_old: np.ndarray, gene_order: list,
     beta_old: float = 2.0, beta_new: float = 3.0, max_forcing_strength_new: float = 1.5,
@@ -456,6 +599,11 @@ def main():
                          help="Buscar la fuerza minima necesaria para converger correctamente hacia "
                               "el patron dado (nombre exacto, ej. CMS2_canonical_WNT) -- no asumir "
                               "que un valor fijo funciona para todos los patrones/calibraciones.")
+    parser.add_argument("--find-bias-threshold",
+                         help="Igual que --find-forcing-threshold pero con el mecanismo ALTERNATIVO "
+                              "(sesgo en softmax en vez de fuerza aditiva) -- NO VERIFICADO como "
+                              "solucion, un intento de reproduccion sintetica del problema real dio "
+                              "resultados inconsistentes. Probar directamente, sin asumir que funciona.")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -510,6 +658,20 @@ def main():
             print("\nAVISO: ningun candidato probado (hasta 20.0) logro correlacion >= 0.9 con "
                   "el objetivo -- ampliar strength_candidates o revisar si este patron tiene un "
                   "problema mas de fondo (ej. muy cerca de otro patron dominante).")
+
+    if args.find_bias_threshold:
+        print("\n" + "=" * 78)
+        print(f"BUSQUEDA DE SESGO MINIMO (mecanismo alternativo) -- objetivo: {args.find_bias_threshold}")
+        print("=" * 78)
+        resultado_bias = find_minimum_bias_strength(patterns, args.find_bias_threshold, beta=args.beta)
+        for r in resultado_bias["detalle"]:
+            print(f"  fuerza={r['fuerza']:6.1f}  corr_objetivo={r['corr_con_objetivo']:+.3f}  "
+                  f"mas_parecido_a={r['mas_parecido_a']} (corr={r['corr_con_mas_parecido']:.3f})")
+        if resultado_bias["umbral_minimo_encontrado"] is not None:
+            print(f"\nUmbral minimo encontrado (sesgo): {resultado_bias['umbral_minimo_encontrado']}")
+        else:
+            print("\nAVISO: el mecanismo de sesgo TAMPOCO logro correlacion >= 0.9 con "
+                  "los candidatos probados.")
 
     comparacion_forzada = None
     if args.compare_forced:
