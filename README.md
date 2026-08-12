@@ -4,13 +4,18 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-102%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-135%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
 datos reales, con validación contra desenlaces de supervivencia y un módulo de pronóstico
 longitudinal para seguimiento post-quirúrgico — diseñado para operar sobre paneles medibles
 únicamente mediante **qPCR/RT-qPCR** (reacción en cadena de la polimerasa cuantitativa o con transcripción inversa), sin PCR digital por gotículas (ddPCR), secuenciación de nueva generación (NGS) ni secuenciación de exosomas.
+
+El clasificador clínico principal sigue siendo la correlación con centroides CMS congelados.
+El repositorio incluye además una recuperación dinámica **Modern Hopfield experimental** con
+energía explícita, criterios de convergencia/estabilidad y comparación longitudinal V1/V2;
+se reporta por separado y no sustituye silenciosamente la clasificación validada.
 
 Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md`.
 Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
@@ -19,7 +24,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (102 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (135 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -85,7 +90,8 @@ python3 cli.py test                  # suite de regresión
 ```
 
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
-`cox-diagnostics`, `dynamics-diagnostics`, `prognosis`, `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
+`cox-diagnostics`, `dynamics-diagnostics`, `modern-hopfield`, `prognosis`,
+`simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
 
 Para ejecutar el diagnóstico dinámico completo y guardar todas las tablas reproducibles:
@@ -102,12 +108,29 @@ estables por distancia, mide cuencas locales con criterios de correlación, dist
 residuo, ejecuta sensibilidad a ruido/umbral y compara las trayectorias forzadas para
 β=2 y β=10. Es diagnóstico de investigación, no selección clínica de β.
 
+Para comparar en los cuatro CMS exactamente las mismas fuerzas sin estabilizador (V1) y con
+corrección basal/estabilizador (V2):
+
+```bash
+python3 cli.py modern-hopfield \
+  --patterns results_gse39582_final/calibrated_patterns.tsv \
+  --beta 3.0 --compare-stabilized-sweep \
+  --forcing-candidates 0.7 1.5 3 5 8 12 20 \
+  --output results_modern_hopfield/
+```
+
+La salida incluye el residuo del campo en el origen, dirección del desplazamiento basal,
+detalle V1/V2 por CMS y los primeros candidatos que alcanzan el criterio de recuperación.
+
 ### Interfaz web
 
-`python3 cli.py app` inicia una aplicación con cuatro pestañas: clasificación de muestras contra
+`python3 cli.py app` inicia una aplicación con cinco pestañas: clasificación de muestras contra
 patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuerza de evidencia
 del atractor y tratamientos aplicables), simulación contrafactual de tratamiento y una
 pestaña de método con el panel, la evidencia acumulada y las limitaciones.
+En **Muestras** puede activarse la recuperación Modern Hopfield experimental. Una etiqueta
+dinámica solo se acepta si converge, el equilibrio es estable, el residuo es pequeño y la
+correlación supera el umbral; las discordancias se muestran sin reemplazar el CMS principal.
 
 ### Ejecutable de un solo archivo (sin instalar Python)
 
@@ -154,6 +177,7 @@ src/
   pooled_cox_validation.py           Cox estratificado combinando múltiples cohortes externas
   cox_diagnostics.py                 diagnósticos formales del Cox (Schoenfeld, influyentes, heterogeneidad)
   dynamics_diagnostics.py            equilibrios/estabilidad reales de la dinámica no lineal
+  modern_hopfield.py                  energía moderna, clasificación dinámica y barrido V1/V2
   concordance_analysis.py            matriz de concordancia modelo vs. etiqueta oficial
   feature_selection.py               selección data-driven de genes (AUC/ANOVA/Random Forest)
   synthetic_data.py                  generador de datos de prueba
