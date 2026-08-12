@@ -47,7 +47,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from attractor_model import build_model_from_patterns
 from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
 from clinical_selection import assess_molecular_eligibility, hybrid_mechanism_hypotheses
-from modern_hopfield import score_cohort_modern_hopfield
+from modern_hopfield import patterns_to_matrix, score_cohort_modern_hopfield
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from prognosis_demo import (
     EVIDENCE_STRENGTH,
@@ -164,25 +164,30 @@ def readout(eyebrow: str, value: str, unit: str = "", accent: str = "#4A5058") -
 # cuando el vector del paciente o los patrones cambian, no solo
 # cuando cambian los parametros "cosmeticos" (onset, n_checks).
 @st.cache_data(show_spinner=False)
-def cached_trajectory(W, gene_order, driver_vector, n_genes, n_timepoints, recurrence_onset_month):
+def cached_trajectory(model_matrix, gene_order, driver_vector, n_genes, n_timepoints,
+                      recurrence_onset_month, dynamics_model="modern_hopfield",
+                      dynamics_beta=3.0):
     return simulate_longitudinal_patient(
-        W, gene_order, driver_vector, n_genes,
-        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        model_matrix, gene_order, driver_vector, n_genes,
+        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
+        dynamics_model=dynamics_model, beta=dynamics_beta)
 
 
 @st.cache_data(show_spinner=False)
-def cached_treatment_sim(W, n_genes, gene_order, driver_vector, patterns, treatment,
+def cached_treatment_sim(model_matrix, n_genes, gene_order, driver_vector, patterns, treatment,
                           treatment_onset_month, ras_braf_wildtype, n_timepoints,
-                          recurrence_onset_month):
+                          recurrence_onset_month, dynamics_model, dynamics_beta):
     return simulate_with_optional_treatment(
-        W, n_genes, gene_order, driver_vector, patterns, treatment=treatment,
+        model_matrix, n_genes, gene_order, driver_vector, patterns, treatment=treatment,
         treatment_onset_month=treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
-        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
+        dynamics_model=dynamics_model, beta=dynamics_beta)
 
 
-def evaluate_all_treatments(W, n_genes, gene_order, driver_vector, patterns,
+def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, patterns,
                              recurrence_onset_month=15, treatment_onset_month=18,
-                             ras_braf_wildtype=None):
+                             ras_braf_wildtype=None, dynamics_model="modern_hopfield",
+                             dynamics_beta=3.0):
     """
     Corre los mecanismos de tratamiento disponibles contra el vector de
     UN paciente, devuelve un resumen ordenado de mayor a menor
@@ -193,15 +198,17 @@ def evaluate_all_treatments(W, n_genes, gene_order, driver_vector, patterns,
     uno por uno en la pestana Intervencion.
     """
     _, x_base = cached_treatment_sim(
-        W, n_genes, gene_order, driver_vector, patterns, None,
-        treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month)
+        model_matrix, n_genes, gene_order, driver_vector, patterns, None,
+        treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
+        dynamics_model, dynamics_beta)
     h_base = hazard_from_trajectory(x_base)[-1]
 
     results = []
     for name in TREATMENT_MECHANISMS:
         _, x_tx = cached_treatment_sim(
-            W, n_genes, gene_order, driver_vector, patterns, name,
-            treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month)
+            model_matrix, n_genes, gene_order, driver_vector, patterns, name,
+            treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
+            dynamics_model, dynamics_beta)
         h_tx = hazard_from_trajectory(x_tx)[-1]
         results.append({
             "treatment": name, "h_base": h_base, "h_tx": h_tx,
@@ -346,6 +353,25 @@ with st.sidebar:
                       "Recalibra con `run_pipeline.py` actualizado para habilitarlo.")
         st.session_state["gene_stats"] = gene_stats
 
+        st.divider()
+        st.markdown('<div class="eyebrow">Motor dinámico</div>', unsafe_allow_html=True)
+        dynamics_model = st.selectbox(
+            "Modelo para trayectoria e intervención",
+            ["modern_hopfield", "projection_legacy"],
+            index=0,
+            format_func=lambda value: (
+                "Modern Hopfield V2 (predeterminado)"
+                if value == "modern_hopfield" else "Proyección continua (legacy)"),
+        )
+        if dynamics_model == "modern_hopfield":
+            dynamics_beta = st.number_input(
+                "β dinámico", 0.1, 20.0, 3.0, 0.1, key="modern_hopfield_beta")
+            st.caption("Reposo estabilizado, transición suave y driver normalizado.")
+        else:
+            dynamics_beta = st.number_input(
+                "β dinámico", 0.1, 20.0, 2.0, 0.1, key="projection_legacy_beta")
+            st.warning("Modelo histórico disponible para comparación; no es el recomendado.")
+
     st.divider()
     st.markdown(
         '<div class="scope" style="border:0;margin:0;padding:0">'
@@ -389,7 +415,16 @@ if not patterns:
     )
     st.stop()
 
-W, _labels, _ = build_model_from_patterns(patterns)
+st.caption(
+    "Motor dinámico activo: "
+    + ("Modern Hopfield V2" if dynamics_model == "modern_hopfield"
+       else "proyección continua (legacy)")
+    + f" · β={dynamics_beta:.2f}")
+
+if dynamics_model == "modern_hopfield":
+    dynamics_matrix, _labels = patterns_to_matrix(patterns)
+else:
+    dynamics_matrix, _labels, _ = build_model_from_patterns(patterns)
 n_genes = len(gene_order)
 
 tab_muestras, tab_paciente, tab_traj, tab_tx, tab_metodo = st.tabs(
@@ -570,7 +605,9 @@ with tab_paciente:
         conf_p = float(fila["classification_confidence"])
 
         with st.spinner("Simulando trayectoria..."):
-            t_p, x_p = cached_trajectory(W, cohort_genes_p, driver_p, n_genes, 10, 15)
+            t_p, x_p = cached_trajectory(
+                dynamics_matrix, cohort_genes_p, driver_p, n_genes, 10, 15,
+                dynamics_model, dynamics_beta)
             hazard_p = hazard_from_trajectory(x_p)
             alert_p, idx_p = detect_recurrence_signal(hazard_p, baseline_window=2, threshold_sigma=3.0)
 
@@ -698,7 +735,9 @@ with tab_paciente:
             "el aviso completo más abajo."
         )
         with st.spinner("Evaluando mecanismos de tratamiento..."):
-            resultados_tx = evaluate_all_treatments(W, n_genes, cohort_genes_p, driver_p, patterns)
+            resultados_tx = evaluate_all_treatments(
+                dynamics_matrix, n_genes, cohort_genes_p, driver_p, patterns,
+                dynamics_model=dynamics_model, dynamics_beta=dynamics_beta)
 
         aplican = [r for r in resultados_tx if r["aplica"]]
         if aplican:
@@ -798,8 +837,9 @@ with tab_traj:
         n_checks = c3.slider("Chequeos de seguimiento", 4, 16, 10)
 
     t_checks, x_series = simulate_longitudinal_patient(
-        W, gene_order, driver_vector, n_genes,
-        n_timepoints=n_checks, recurrence_onset_month=onset)
+        dynamics_matrix, gene_order, driver_vector, n_genes,
+        n_timepoints=n_checks, recurrence_onset_month=onset,
+        dynamics_model=dynamics_model, beta=dynamics_beta)
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
 
@@ -919,12 +959,14 @@ with tab_tx:
 
     ras_map = {"wild-type": True, "mutante": False, "desconocido": None}
     _, x_base = simulate_with_optional_treatment(
-        W, n_genes, gene_order, tx_driver_vector, patterns,
-        treatment=None, n_timepoints=10, recurrence_onset_month=15)
+        dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns,
+        treatment=None, n_timepoints=10, recurrence_onset_month=15,
+        dynamics_model=dynamics_model, beta=dynamics_beta)
     t_checks, x_tx = simulate_with_optional_treatment(
-        W, n_genes, gene_order, tx_driver_vector, patterns, treatment=treatment,
+        dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns, treatment=treatment,
         treatment_onset_month=tx_onset, ras_braf_wildtype=ras_map[ras],
-        n_timepoints=10, recurrence_onset_month=15)
+        n_timepoints=10, recurrence_onset_month=15,
+        dynamics_model=dynamics_model, beta=dynamics_beta)
     h_base, h_tx = hazard_from_trajectory(x_base), hazard_from_trajectory(x_tx)
     delta = h_base[-1] - h_tx[-1]
 
