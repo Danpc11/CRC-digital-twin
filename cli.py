@@ -118,6 +118,8 @@ def cmd_cox_diagnostics(args):
 
 def cmd_dynamics_diagnostics(args):
     argv = ["--patterns", args.patterns, "--beta", str(args.beta), "--n-samples", str(args.n_samples)]
+    if args.find_interval:
+        argv.append("--find-interval")
     if args.output:
         argv += ["--output", args.output]
     _run_module("dynamics_diagnostics.py", argv)
@@ -211,6 +213,8 @@ def build_parser():
     s.add_argument("--patterns", required=True)
     s.add_argument("--beta", type=float, default=2.0)
     s.add_argument("--n-samples", type=int, default=300)
+    s.add_argument("--find-interval", action="store_true",
+                    help="Buscar automaticamente un intervalo de beta con 4 atractores CMS genuinos")
     s.add_argument("--output")
     s.set_defaults(func=cmd_dynamics_diagnostics)
 
