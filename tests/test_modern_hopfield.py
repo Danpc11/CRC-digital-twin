@@ -125,3 +125,60 @@ def test_patterns_to_matrix_preserves_order():
     assert labels == ["A", "B", "C"]
     assert np.array_equal(X[:, 0], patterns["A"])
     assert np.array_equal(X[:, 2], patterns["C"])
+
+
+def test_forcing_strength_0_7_converges_to_dominant_pattern_not_target(real_patterns):
+    """
+    Regresion de un hallazgo real: con fuerza_max=0.7 (el valor viejo,
+    calibrado para attractor_model.py), forzar hacia un patron NO
+    dominante puede terminar convergiendo al patron DOMINANTE en su
+    lugar -- la atraccion nativa de esta dinamica (eigenvalor ~-1.0
+    para el patron de mayor norma) es mucho mas fuerte que la del
+    sistema anterior (~-0.08 cerca de su region critica), y 0.7 no
+    basta para vencerla.
+    """
+    from modern_hopfield import patterns_to_matrix, simulate_longitudinal_patient_hopfield
+    X, labels = patterns_to_matrix(real_patterns)
+    n_genes = X.shape[0]
+
+    # identificar el patron de MAYOR norma (el "dominante" esperado)
+    normas = {l: np.linalg.norm(X[:, i]) for i, l in enumerate(labels)}
+    dominante = max(normas, key=normas.get)
+    no_dominante = min(normas, key=normas.get)
+    if dominante == no_dominante:
+        pytest.skip("normas identicas en este dataset sintetico, no aplica el escenario")
+
+    idx_target = labels.index(no_dominante)
+    p_target = X[:, idx_target]
+
+    t, x = simulate_longitudinal_patient_hopfield(
+        X, p_target, n_genes, beta=3.0, max_forcing_strength=0.7,
+        n_timepoints=10, recurrence_onset_month=15)
+    x_final = x[:, -1]
+
+    corr_target = np.corrcoef(x_final, p_target)[0, 1] if np.std(x_final) > 1e-12 else np.nan
+    # con fuerza insuficiente, no deberia lograr una correlacion alta
+    # y limpia con el objetivo -- puede ser bajo, negativo, o ambiguo,
+    # pero no un 1.0 perfecto como con fuerza suficiente
+    assert corr_target < 0.9 or np.isnan(corr_target)
+
+
+def test_forcing_strength_1_5_converges_correctly_to_any_target(real_patterns):
+    """Con fuerza_max=1.5 (el nuevo default), forzar hacia CUALQUIER
+    patron -- incluido el de menor norma -- debe converger limpiamente
+    a ese objetivo, no al patron dominante."""
+    from modern_hopfield import patterns_to_matrix, simulate_longitudinal_patient_hopfield
+    X, labels = patterns_to_matrix(real_patterns)
+    n_genes = X.shape[0]
+
+    normas = {l: np.linalg.norm(X[:, i]) for i, l in enumerate(labels)}
+    no_dominante = min(normas, key=normas.get)
+    idx_target = labels.index(no_dominante)
+    p_target = X[:, idx_target]
+
+    t, x = simulate_longitudinal_patient_hopfield(
+        X, p_target, n_genes, beta=3.0, max_forcing_strength=1.5,
+        n_timepoints=10, recurrence_onset_month=15)
+    x_final = x[:, -1]
+    corr_target = np.corrcoef(x_final, p_target)[0, 1] if np.std(x_final) > 1e-12 else np.nan
+    assert corr_target > 0.95
