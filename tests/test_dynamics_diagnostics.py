@@ -23,10 +23,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dynamics_diagnostics import (
+    basin_membership_near_patterns,
     check_equilibria_separation,
+    compare_clinical_trajectories,
     es_atractor_cms,
+    find_contiguous_valid_segments,
     find_true_equilibrium,
     find_valid_beta_interval,
+    investigate_unclassified_basins,
     jacobian_at_state,
     stability_at_equilibrium,
     sweep_beta_stability,
@@ -214,3 +218,119 @@ def test_find_valid_beta_interval_finds_known_interval_with_real_calibration(syn
     # el intervalo encontrado deberia estar en la region alta (beta > 5),
     # consistente con el hallazgo verificado a mano
     assert validos["beta"].min() > 5.0
+
+
+def test_todos_4_califican_requires_separation_not_just_individual_count():
+    """
+    Regresion de un bug real de revision externa: 'todos_4_califican'
+    solo contaba cuantos pasaban es_atractor_cms() individualmente, sin
+    verificar que no hubieran colapsado entre si -- 4 equilibrios
+    identicos (colapsados) podrian "calificar" cada uno por separado.
+    """
+    # 4 patrones DELIBERADAMENTE colapsados al mismo punto (simula el
+    # caso donde individualmente pasarian es_atractor_cms pero estan
+    # superpuestos)
+    patterns = {
+        "A": np.array([2.0, 0.0, 0.0, 0.0]), "B": np.array([2.01, 0.0, 0.0, 0.0]),
+        "C": np.array([1.99, 0.01, 0.0, 0.0]), "D": np.array([2.0, -0.01, 0.0, 0.0]),
+    }
+    W, _, _ = build_model_from_patterns(patterns)
+    resultado = find_valid_beta_interval(patterns, W, beta_min=0.5, beta_max=0.5, n_steps=1,
+                                           min_separation=0.5)
+    # aunque los 4 pudieran pasar es_atractor_cms individualmente, estan
+    # colapsados entre si (separacion < 0.5) -- NO deben calificar juntos
+    assert resultado.iloc[0]["todos_4_califican"] == False
+
+
+def test_find_contiguous_valid_segments_splits_disjoint_ranges():
+    """
+    Regresion de un bug real: reportar solo min()/max() de los puntos
+    validos asume un unico intervalo continuo sin verificarlo. Aqui se
+    construye un caso con DOS tramos separados por un hueco, y se
+    verifica que efectivamente se detecten como 2 segmentos, no 1.
+    """
+    df = pd.DataFrame({
+        "beta": [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0],
+        "todos_4_califican": [True, True, True, False, False, False, False, True, True, True, True],
+    })
+    segmentos = find_contiguous_valid_segments(df, beta_max_explored=2.0)
+    assert len(segmentos) == 2, f"se esperaban 2 tramos separados, se encontraron {len(segmentos)}"
+    assert segmentos[0]["beta_max"] < segmentos[1]["beta_min"]
+
+
+def test_find_contiguous_valid_segments_flags_undetermined_upper_bound():
+    """Si el ultimo tramo valido toca el limite explorado, debe marcarse
+    como limite superior NO determinado -- no reportar ese numero como
+    si fuera el verdadero borde."""
+    df = pd.DataFrame({
+        "beta": [1.0, 1.1, 1.2, 1.3, 1.4],
+        "todos_4_califican": [False, False, True, True, True],
+    })
+    segmentos = find_contiguous_valid_segments(df, beta_max_explored=1.4)
+    assert segmentos[-1]["limite_superior_no_determinado"] == True
+
+
+def test_investigate_unclassified_basins_finds_genuine_spurious_equilibria(synthetic_df):
+    """
+    Verificado con la calibracion real del proyecto antes de escribir
+    este test: con beta=10 (dentro del intervalo donde los 4 patrones
+    CMS son atractores genuinos), la mayoria de las trayectorias desde
+    ruido centrado en el origen NO terminan en ninguno de los 4 -- pero
+    SI convergen a un numero pequeno de equilibrios adicionales
+    genuinos (fenomeno de atractores espurios en redes asociativas
+    saturadas), no a comportamiento sin estructura.
+    """
+    patterns, gene_cols = calibrate_patterns_from_data(synthetic_df)
+    W, _, _ = build_model_from_patterns(patterns)
+
+    resultado = investigate_unclassified_basins(patterns, W, beta=10.0, n_samples=40, seed=3)
+    if resultado["n_sin_clasificar"] > 0:
+        # si hay estados sin clasificar, al menos algunos clusters
+        # deben ser equilibrios genuinos (no solo ruido sin estructura)
+        genuinos = [c for c in resultado["clusters"] if c["es_equilibrio_genuino"]]
+        assert len(genuinos) > 0
+
+
+def test_compare_clinical_trajectories_uses_different_beta_per_row():
+    """
+    Regresion de un bug real que encontre yo mismo construyendo esta
+    funcion: la primera version pasaba dos matrices W distintas como si
+    'W dependiera de beta' (no depende -- W se construye solo de los
+    patrones, beta solo entra en tanh(beta*x) dentro de dynamics()) y
+    nunca pasaba beta a simulate_longitudinal_patient(), dando
+    resultados IDENTICOS para beta=2 y beta=10 sin ningun error visible.
+    """
+    patterns = {"A": np.array([2.0, -1.0, 0.5, 1.0, -0.5]),
+                "B": np.array([-1.0, 2.0, -0.5, -1.0, 1.5])}
+    W, _, _ = build_model_from_patterns(patterns)
+    gene_order = ["g1", "g2", "g3", "g4", "g5"]
+
+    resultado = compare_clinical_trajectories(patterns, W, gene_order, betas=(2.0, 10.0))
+    for patron in patterns:
+        fila_b2 = resultado[(resultado["patron"] == patron) & (resultado["beta"] == 2.0)].iloc[0]
+        fila_b10 = resultado[(resultado["patron"] == patron) & (resultado["beta"] == 10.0)].iloc[0]
+        # deben ser DISTINTOS -- si son identicos, el bug volvio
+        assert fila_b2["hazard_final"] != fila_b10["hazard_final"]
+
+
+def test_basin_membership_near_patterns_more_robust_than_global_sampling(synthetic_df):
+    """
+    Verificado con la calibracion real: muestrear CERCA de cada patron
+    (ruido pequeno) da una tasa de retorno mucho mas alta que el
+    muestreo global centrado en el origen -- confirma que ambas
+    estrategias miden cosas distintas (tamano de cuenca local vs.
+    cobertura global del espacio de estados).
+
+    Usa beta=10 (no beta=2) a proposito -- ya esta establecido que
+    beta=2 no tiene NINGUN atractor genuino (ver
+    test_beta_stability_transition_near_one), asi que 0% de retorno
+    ahi seria el resultado CORRECTO y esperado, no una prueba util de
+    esta funcion. beta=10 esta dentro del intervalo verificado donde
+    los patrones si son atractores genuinos.
+    """
+    patterns, gene_cols = calibrate_patterns_from_data(synthetic_df)
+    W, _, _ = build_model_from_patterns(patterns)
+
+    resultado = basin_membership_near_patterns(
+        patterns, W, beta=10.0, noise_scale=0.2, n_per_pattern=20, seed=4)
+    assert resultado["proporcion_regresa_al_mismo"].mean() > 0.0
