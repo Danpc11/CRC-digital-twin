@@ -273,3 +273,95 @@ def test_quiescent_phase_drifts_away_from_origin_before_forcing_begins(real_patt
         "durante la fase 'sin recaida' -- si esto falla, la inestabilidad "
         "de silla pudo haberse corregido en una version posterior"
     )
+
+
+def test_compute_stabilizing_k_makes_origin_genuinely_stable(real_patterns):
+    """
+    Regresion del hallazgo critico: con k=0 (sin estabilizador), el
+    origen es una silla inestable (eigenvalores positivos). Con
+    k=compute_stabilizing_k(), debe pasar a ser un minimo local
+    genuino (TODOS los eigenvalores negativos).
+    """
+    from modern_hopfield import (patterns_to_matrix, compute_stabilizing_k,
+                                   modern_hopfield_jacobian_stabilized)
+    X, labels = patterns_to_matrix(real_patterns)
+    beta = 3.0
+    origen = np.zeros(X.shape[0])
+
+    k = compute_stabilizing_k(X, beta)
+    assert k > 0, "deberia ser positivo si el origen sin estabilizar es inestable"
+
+    J_estabilizado = modern_hopfield_jacobian_stabilized(origen, X, beta, k)
+    eigvals = np.linalg.eigvalsh(J_estabilizado)
+    assert np.all(eigvals < 0), "el origen debe ser estable CON el estabilizador aplicado"
+
+
+def test_stabilized_jacobian_matches_finite_differences():
+    rng = np.random.default_rng(0)
+    X = rng.normal(0, 1.5, size=(10, 4))
+    x = rng.normal(0, 1, size=10)
+    beta, k = 2.0, 3.0
+
+    from modern_hopfield import modern_hopfield_field_stabilized, modern_hopfield_jacobian_stabilized
+    J_analitico = modern_hopfield_jacobian_stabilized(x, X, beta, k)
+    eps = 1e-6
+    J_numerico = np.zeros((10, 10))
+    for i in range(10):
+        xp, xm = x.copy(), x.copy()
+        xp[i] += eps
+        xm[i] -= eps
+        J_numerico[:, i] = (modern_hopfield_field_stabilized(xp, X, beta, k) -
+                              modern_hopfield_field_stabilized(xm, X, beta, k)) / (2 * eps)
+    assert np.max(np.abs(J_analitico - J_numerico)) < 1e-6
+
+
+def test_quiescent_phase_stays_at_origin_with_stabilizer(real_patterns):
+    """
+    Regresion directa del hallazgo critico: CON el estabilizador
+    activo, la fase 'sin recaida' debe mantener el estado en el
+    origen (a diferencia de sin estabilizador, donde colapsaba a la
+    cuenca dominante por inestabilidad numerica).
+    """
+    from modern_hopfield import (patterns_to_matrix, compute_stabilizing_k,
+                                   modern_hopfield_field_stabilized)
+    from scipy.integrate import solve_ivp
+
+    X, labels = patterns_to_matrix(real_patterns)
+    beta = 3.0
+    k = compute_stabilizing_k(X, beta)
+    x_current = np.zeros(X.shape[0])
+
+    for t in np.arange(0, 15, 3):
+        sol = solve_ivp(lambda tt, xx: modern_hopfield_field_stabilized(xx, X, beta, k),
+                         (0, 3), x_current, method="RK45", rtol=1e-8, atol=1e-10)
+        x_current = sol.y[:, -1]
+
+    assert np.linalg.norm(x_current) < 1e-3, (
+        "con el estabilizador activo, el estado deberia quedarse en el origen "
+        "durante toda la fase pre-recaida"
+    )
+
+
+def test_v2_simulation_reaches_all_targets_with_synthetic_data(real_patterns):
+    """
+    Con datos sinteticos, la version v2 (estabilizador en fase
+    pre-recaida + forzamiento normal en fase de recaida) debe converger
+    correctamente a CUALQUIER patron objetivo -- CUIDADO: esto NO
+    garantiza que resuelva el caso real de GSE39582 (CMS1-CMS2 con
+    r=-0.825), donde las reproducciones sinteticas han dado resultados
+    distintos al comportamiento real varias veces en esta investigacion.
+    Verificar con datos reales antes de confiar en esto como solucion
+    definitiva.
+    """
+    from modern_hopfield import patterns_to_matrix, simulate_longitudinal_patient_hopfield_v2
+    X, labels = patterns_to_matrix(real_patterns)
+    n_genes = X.shape[0]
+
+    for i, label in enumerate(labels):
+        p = X[:, i]
+        t, x = simulate_longitudinal_patient_hopfield_v2(
+            X, p, n_genes, beta=3.0, max_forcing_strength=1.5,
+            n_timepoints=10, recurrence_onset_month=15)
+        x_final = x[:, -1]
+        corr = np.corrcoef(x_final, p)[0, 1] if np.std(x_final) > 1e-12 else np.nan
+        assert corr > 0.9, f"{label} no convergio correctamente (corr={corr:.3f})"
