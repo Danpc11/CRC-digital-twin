@@ -104,6 +104,7 @@ def test_external_validation_parses_modern_hopfield_options():
     assert args.classifier == "both"
     assert args.beta == 3.5
     assert args.modern_corr_threshold == 0.85
+    assert args.modern_input_margin_threshold == 0.15
     assert args.require_valid_beta is True
 
 
@@ -119,6 +120,7 @@ def test_pooled_cox_forwards_incremental_model_options(mock_run):
     assert "--adjust-stage" in called_cmd
     assert "CMS2_canonical_WNT" in called_cmd
     assert called_cmd[called_cmd.index("--bootstrap-iterations") + 1] == "25"
+    assert "--calibration-horizons" in called_cmd
 
 
 def test_app_subcommand_default_port_and_address():

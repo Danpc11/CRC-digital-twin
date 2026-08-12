@@ -42,8 +42,9 @@ def test_load_can_analyze_modern_hopfield_and_excludes_abstentions(tmp_path):
         "classification_confidence": [0.7, 0.8],
         "modern_hopfield_cms": ["CMS1_MSI_immune", "indeterminado"],
         "modern_hopfield_correlation": [0.95, 0.4],
+        "modern_hopfield_input_margin": [0.25, 0.05],
     }).to_csv(path, sep="\t", index=False)
     result = load(str(path), prediction_col="modern_hopfield_cms")
     assert len(result) == 1
     assert result.iloc[0]["predicted_cms"] == "CMS1_MSI_immune"
-    assert result.iloc[0]["classification_confidence"] == 0.95
+    assert result.iloc[0]["classification_confidence"] == 0.25

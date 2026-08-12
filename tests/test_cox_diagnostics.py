@@ -19,6 +19,8 @@ from cox_diagnostics import (
     check_influential_observations,
     check_proportional_hazards,
     fit_piecewise_cms4_effect,
+    fit_piecewise_cms_effects,
+    global_proportional_hazards_test,
 )
 from lifelines import CoxPHFitter
 
@@ -156,4 +158,35 @@ def test_piecewise_cms4_model_returns_early_and_late_effects():
     assert result["hr_early"] > 0
     assert result["hr_late"] > 0
     assert 0 <= result["p_early_vs_late"] <= 1
-    assert {"cms4_early", "cms4_late"}.issubset(result["summary"].index)
+    assert {
+        "cms_CMS4_mesenchymal__early", "cms_CMS4_mesenchymal__late",
+    }.issubset(result["summary"].index)
+
+
+def test_global_ph_test_returns_omnibus_result():
+    ph = pd.DataFrame({"p": [0.01, 0.20, 0.70]})
+    result = global_proportional_hazards_test(ph)
+    assert result["df"] == 6
+    assert 0 <= result["p_global"] <= 1
+
+
+def test_piecewise_joint_model_replaces_all_cms_coefficients():
+    rng = np.random.default_rng(45)
+    rows = []
+    for cohort in ["A", "B"]:
+        for _ in range(220):
+            group = int(rng.integers(0, 3))
+            rows.append({
+                "cohort": cohort,
+                "relapse_free_months": rng.exponential(25) + 0.1,
+                "relapse_event": int(rng.random() < 0.65),
+                "cms_CMS1_MSI_immune": int(group == 1),
+                "cms_CMS4_mesenchymal": int(group == 2),
+                "stage_harmonized": int(rng.integers(1, 4)),
+            })
+    result = fit_piecewise_cms_effects(
+        pd.DataFrame(rows), "relapse_free_months", "relapse_event",
+        ["cms_CMS1_MSI_immune", "cms_CMS4_mesenchymal", "stage_harmonized"],
+        cutoff=18.0)
+    assert set(result["contrasts"].index) == {
+        "cms_CMS1_MSI_immune", "cms_CMS4_mesenchymal"}

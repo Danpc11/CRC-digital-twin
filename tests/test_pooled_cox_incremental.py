@@ -10,8 +10,10 @@ from lifelines import CoxPHFitter
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pooled_cox_validation import (
+    apparent_calibration_at_horizons,
     bootstrap_cindex_increment,
     build_cox_frame,
+    leave_one_cohort_out_validation,
     nested_model_increment,
 )
 
@@ -62,3 +64,23 @@ def test_bootstrap_cindex_increment_returns_requested_rows():
         iterations=3, seed=4)
     assert len(result) == 3
     assert {"iteration", "delta_c_index"}.issubset(result.columns)
+
+
+def test_leave_one_cohort_out_evaluates_each_held_out_cohort():
+    data = _survival_data(seed=15)
+    result = leave_one_cohort_out_validation(
+        data, "relapse_free_months", "relapse_event", "CMS2_canonical_WNT")
+    assert set(result["cohort_omitted"]) == {"A", "B"}
+    assert result["delta_c_index_test"].notna().all()
+
+
+def test_apparent_calibration_returns_each_cohort_and_horizon():
+    data = _survival_data(seed=16)
+    frame = build_cox_frame(
+        data, "relapse_free_months", "relapse_event", "CMS2_canonical_WNT",
+        ["stage_harmonized"], include_cms=True)
+    model = CoxPHFitter().fit(frame, "duration", "event", strata=["cohort"])
+    result = apparent_calibration_at_horizons(model, frame, horizons=[12, 36])
+    assert len(result) == 4
+    assert set(result["horizon_months"]) == {12.0, 36.0}
+    assert result["predicted_risk_mean"].between(0, 1).all()

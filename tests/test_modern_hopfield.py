@@ -433,8 +433,19 @@ def test_modern_cohort_scoring_exports_audit_columns(real_patterns):
         "modern_hopfield_margin", "modern_hopfield_residual",
         "modern_hopfield_converged", "modern_hopfield_stable",
         "modern_hopfield_displacement", "modern_hopfield_energy_drop",
+        "modern_hopfield_input_label", "modern_hopfield_input_correlation",
+        "modern_hopfield_input_margin", "modern_hopfield_abstention_reason",
     }
     assert expected.issubset(scored.columns)
+
+
+def test_modern_classifier_abstains_when_input_margin_is_ambiguous(real_patterns):
+    expression = real_patterns["CMS1_MSI_immune"]
+    result = classify_expression_modern_hopfield(
+        expression, real_patterns, beta=3.0, input_margin_threshold=10.0)
+    assert result["label"] == "indeterminado"
+    assert result["abstention_reason"] == "entrada_hibrida_o_ambigua"
+    assert np.isfinite(result["input_margin"])
 
 
 def test_beta_sweep_rejects_duplicate_equilibria_even_if_each_matches():
