@@ -474,3 +474,81 @@ def test_withdrawal_success_is_based_on_free_final_state(real_patterns):
     assert {"v1_cms_activo", "v1_cms_final", "v2_cms_activo", "v2_cms_final"}.issubset(sweep.columns)
     assert (sweep["v1_residuo_post_retirada"] < 1e-6).all()
     assert (sweep["v2_residuo_post_retirada"] < 1e-6).all()
+
+
+def test_modern_hopfield_baseline_makes_origin_an_exact_fixed_point(real_patterns):
+    """
+    La correccion basal (X @ 1/M) debe hacer que el campo en el origen
+    sea CERO exacto, incluso con clases desbalanceadas donde la suma
+    de patrones NO es exactamente cero (a diferencia de la propiedad
+    aproximada que dependia de z-score contra media global) --
+    verificado con datos reales de GSE39582 donde, SIN esta correccion,
+    el residuo en el origen no era cero exacto (por eso la fase
+    pre-recaida dejaba un remanente de norma ~0.29 en vez de 0).
+    """
+    from modern_hopfield import (patterns_to_matrix, modern_hopfield_baseline,
+                                   modern_hopfield_field, modern_hopfield_field_stabilized)
+    X, labels = patterns_to_matrix(real_patterns)
+    beta = 3.0
+    origen = np.zeros(X.shape[0])
+
+    baseline = modern_hopfield_baseline(X)
+    # el campo SIN corregir puede no ser exactamente cero en el origen
+    campo_sin_correccion = modern_hopfield_field(origen, X, beta)
+    # pero RESTANDO baseline, el campo estabilizado en el origen (con
+    # k=0, solo la correccion basal) debe ser exactamente cero
+    campo_con_correccion = modern_hopfield_field_stabilized(origen, X, beta, k=0.0,
+                                                                baseline_correction=baseline)
+    assert np.linalg.norm(campo_con_correccion) < 1e-10, (
+        "con la correccion basal, el origen debe ser un punto fijo EXACTO, "
+        "no solo aproximado"
+    )
+
+
+def test_relax_after_forcing_withdrawal_returns_to_genuine_nearby_attractor():
+    """
+    Al retirar el forzamiento desde un estado cercano a un patron,
+    relax_after_forcing_withdrawal debe converger de vuelta a ESE mismo
+    patron (confirmando que es un atractor genuino, autosostenido, no
+    solo un artefacto de la fuerza externa activa)."""
+    from modern_hopfield import patterns_to_matrix, relax_after_forcing_withdrawal
+    import numpy as _np
+    rng = _np.random.default_rng(1)
+    patterns = {
+        "A": rng.normal(2, 0.2, 8), "B": rng.normal(-2, 0.2, 8),
+        "C": _np.concatenate([rng.normal(2, 0.2, 4), rng.normal(-2, 0.2, 4)]),
+        "D": _np.concatenate([rng.normal(-2, 0.2, 4), rng.normal(2, 0.2, 4)]),
+    }
+    X, labels = patterns_to_matrix(patterns)
+    beta = 3.0
+
+    # empezar MUY cerca del patron B, sin ningun forzamiento activo
+    estado_cercano_a_B = patterns["B"] * 0.95
+    resultado = relax_after_forcing_withdrawal(estado_cercano_a_B, X, labels, beta=beta)
+
+    assert resultado["converged"] is True
+    assert resultado["label"] == "B"
+    assert resultado["correlation"] > 0.95
+
+
+def test_summarize_forcing_thresholds_picks_lowest_successful_strength():
+    """Debe elegir la fuerza MAS CHICA que tuvo exito para cada patron,
+    no cualquier fuerza exitosa ni la mas grande."""
+    from modern_hopfield import summarize_forcing_thresholds
+    import pandas as pd
+
+    sweep_falso = pd.DataFrame([
+        {"patron_objetivo": "A", "fuerza_maxima": 1.0, "v1_exito": False, "v2_exito": True},
+        {"patron_objetivo": "A", "fuerza_maxima": 2.0, "v1_exito": True, "v2_exito": True},
+        {"patron_objetivo": "A", "fuerza_maxima": 3.0, "v1_exito": True, "v2_exito": True},
+        {"patron_objetivo": "B", "fuerza_maxima": 1.0, "v1_exito": False, "v2_exito": False},
+        {"patron_objetivo": "B", "fuerza_maxima": 2.0, "v1_exito": False, "v2_exito": False},
+    ])
+    resumen = summarize_forcing_thresholds(sweep_falso)
+    fila_a = resumen[resumen["patron_objetivo"] == "A"].iloc[0]
+    assert fila_a["umbral_v1"] == 2.0  # la mas chica que tuvo exito, no 3.0
+    assert fila_a["umbral_v2"] == 1.0  # v2 tuvo exito desde 1.0
+
+    fila_b = resumen[resumen["patron_objetivo"] == "B"].iloc[0]
+    assert np.isnan(fila_b["umbral_v1"])  # ninguna fuerza probada tuvo exito
+    assert np.isnan(fila_b["umbral_v2"])
