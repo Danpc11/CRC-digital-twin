@@ -181,6 +181,93 @@ def stability_at_equilibrium_hopfield(x_eq: np.ndarray, X: np.ndarray, beta: flo
     return eigvals, stable, max_eigval
 
 
+def _correlation_profile(x: np.ndarray, X: np.ndarray, labels: list) -> dict:
+    """Correlaciones seguras y etiqueta mas cercana para un estado."""
+    correlations = {}
+    for i, label in enumerate(labels):
+        p = X[:, i]
+        if np.std(x) < 1e-12 or np.std(p) < 1e-12:
+            correlations[label] = float("nan")
+        else:
+            correlations[label] = float(np.corrcoef(x, p)[0, 1])
+    finite = {k: v for k, v in correlations.items() if np.isfinite(v)}
+    if not finite:
+        return {"correlations": correlations, "best_label": "indeterminado",
+                "best_correlation": float("nan"), "margin": float("nan")}
+    ordered = sorted(finite.items(), key=lambda item: item[1], reverse=True)
+    margin = ordered[0][1] - ordered[1][1] if len(ordered) > 1 else float("nan")
+    return {"correlations": correlations, "best_label": ordered[0][0],
+            "best_correlation": ordered[0][1], "margin": float(margin)}
+
+
+def classify_expression_modern_hopfield(
+    expression: np.ndarray, patterns: dict, beta: float = 3.0,
+    integration_time: float = 30.0, corr_threshold: float = 0.8,
+    residual_threshold: float = 1e-6,
+) -> dict:
+    """Recuperacion dinamica experimental de una muestra ya normalizada.
+
+    La etiqueta solo se acepta si la integracion y el refinamiento convergen,
+    el equilibrio es estable, el residuo es pequeno y la correlacion supera
+    el umbral. No reemplaza al clasificador CMS por correlacion validado.
+    """
+    if beta <= 0:
+        raise ValueError("beta debe ser > 0")
+    x0 = np.asarray(expression, dtype=float)
+    X, labels = patterns_to_matrix(patterns)
+    if x0.shape != (X.shape[0],):
+        raise ValueError(f"expression debe tener forma ({X.shape[0]},)")
+    if not np.all(np.isfinite(x0)):
+        raise ValueError("expression contiene valores no finitos")
+    if np.linalg.norm(x0) < 1e-8 or np.std(x0) < 1e-12:
+        return {
+            "label": "indeterminado", "correlation": float("nan"),
+            "margin": float("nan"), "converged": False, "stable": False,
+            "residual": float("nan"), "displacement": 0.0,
+            "energy_drop": 0.0, "correlations": {label: float("nan") for label in labels},
+        }
+
+    sol = solve_ivp(
+        lambda t, x: modern_hopfield_field(x, X, beta), (0, integration_time), x0,
+        method="RK45", rtol=1e-8, atol=1e-10)
+    x_terminal = sol.y[:, -1]
+    x_eq, refined, _ = find_true_equilibrium_hopfield(x_terminal, X, beta)
+    residual = float(np.linalg.norm(modern_hopfield_field(x_eq, X, beta)))
+    _, stable, max_eig = stability_at_equilibrium_hopfield(x_eq, X, beta)
+    profile = _correlation_profile(x_eq, X, labels)
+    converged = bool(sol.success and refined and residual <= residual_threshold)
+    accepted = bool(converged and stable and
+                    profile["best_correlation"] >= corr_threshold)
+    return {
+        "label": profile["best_label"] if accepted else "indeterminado",
+        "correlation": profile["best_correlation"], "margin": profile["margin"],
+        "converged": converged, "stable": stable, "max_eigenvalue": max_eig,
+        "residual": residual, "displacement": float(np.linalg.norm(x_eq - x0)),
+        "energy_drop": float(hopfield_energy(x0, X, beta) - hopfield_energy(x_eq, X, beta)),
+        "correlations": profile["correlations"], "equilibrium": x_eq,
+    }
+
+
+def score_cohort_modern_hopfield(
+    df, gene_cols: list[str], patterns: dict, beta: float = 3.0,
+    corr_threshold: float = 0.8,
+):
+    """Agrega columnas de recuperacion Modern Hopfield a una cohorte."""
+    out = df.copy()
+    results = [classify_expression_modern_hopfield(
+        row.to_numpy(dtype=float), patterns, beta=beta,
+        corr_threshold=corr_threshold) for _, row in df[gene_cols].iterrows()]
+    out["modern_hopfield_cms"] = [r["label"] for r in results]
+    out["modern_hopfield_correlation"] = [r["correlation"] for r in results]
+    out["modern_hopfield_margin"] = [r["margin"] for r in results]
+    out["modern_hopfield_residual"] = [r["residual"] for r in results]
+    out["modern_hopfield_stable"] = [r["stable"] for r in results]
+    if "predicted_cms" in out.columns:
+        out["modern_hopfield_concordant"] = (
+            out["modern_hopfield_cms"] == out["predicted_cms"])
+    return out
+
+
 def verify_energy_decreases(
     X: np.ndarray, beta: float, n_trajectories: int = 20,
     integration_time: float = 30.0, seed: int = 0,
@@ -239,6 +326,7 @@ def verify_all_patterns_hopfield(patterns: dict, beta: float = 2.0) -> "pd.DataF
 def empirical_basin_membership_hopfield(
     patterns: dict, beta: float = 2.0, n_samples: int = 300,
     integration_time: float = 30.0, corr_threshold: float = 0.8, seed: int = 0,
+    residual_threshold: float = 1e-6,
 ) -> "pd.DataFrame":
     """Version de empirical_basin_membership() (dynamics_diagnostics.py)
     para esta dinamica -- misma metodologia exacta, para comparacion
@@ -255,7 +343,14 @@ def empirical_basin_membership_hopfield(
         sol = solve_ivp(
             lambda t, x: modern_hopfield_field(x, X, beta), (0, integration_time), x0,
             method="RK45", rtol=1e-8, atol=1e-10)
-        x_final = sol.y[:, -1]
+        x_terminal = sol.y[:, -1]
+        x_final, refined, _ = find_true_equilibrium_hopfield(x_terminal, X, beta)
+        residual = float(np.linalg.norm(modern_hopfield_field(x_final, X, beta)))
+        _, stable, _ = stability_at_equilibrium_hopfield(x_final, X, beta)
+        if not (sol.success and refined and stable and residual <= residual_threshold):
+            resultados.append({"convergio_a": "no_convergente", "correlacion": np.nan,
+                                "norma_final": float(np.linalg.norm(x_final))})
+            continue
         norm_final = float(np.linalg.norm(x_final))
         if norm_final < 1e-6:
             resultados.append({"convergio_a": "origen", "correlacion": np.nan, "norma_final": norm_final})
@@ -277,7 +372,9 @@ def empirical_basin_membership_hopfield(
     return resumen
 
 
-def sweep_beta_hopfield(patterns: dict, beta_values=None) -> "pd.DataFrame":
+def sweep_beta_hopfield(
+    patterns: dict, beta_values=None, min_separation: float = 0.5,
+) -> "pd.DataFrame":
     """Barrido de beta para esta dinamica -- reporta si los 4 patrones
     son simultaneamente equilibrios exactos (o casi), estables, y
     separados entre si, para cada beta."""
@@ -299,9 +396,11 @@ def sweep_beta_hopfield(patterns: dict, beta_values=None) -> "pd.DataFrame":
                 n_ok += 1
         distancias = [np.linalg.norm(equilibria[labels[i]] - equilibria[labels[j]])
                       for i in range(len(labels)) for j in range(i + 1, len(labels))]
+        min_sep = float(min(distancias)) if distancias else float("nan")
         rows.append({
-            "beta": beta, "n_patrones_ok": n_ok, "todos_4_ok": n_ok == len(labels),
-            "min_separacion": float(min(distancias)) if distancias else float("nan"),
+            "beta": beta, "n_patrones_ok": n_ok,
+            "todos_4_ok": n_ok == len(labels) and min_sep >= min_separation,
+            "min_separacion": min_sep,
         })
     return pd.DataFrame(rows)
 
@@ -441,19 +540,32 @@ def compute_stabilizing_k(X: np.ndarray, beta: float, safety_margin: float = 1.0
     return max(0.0, max_eig) + safety_margin
 
 
-def modern_hopfield_field_stabilized(x: np.ndarray, X: np.ndarray, beta: float, k: float = 0.0) -> np.ndarray:
+def modern_hopfield_baseline(X: np.ndarray) -> np.ndarray:
+    """Deriva el termino constante que hace al origen un punto fijo.
+
+    En x=0 el softmax es uniforme, por lo que el campo sin corregir es
+    X @ (1/M). Restarlo es equivalente a agregar un termino lineal a la
+    energia y no cambia el Jacobiano.
+    """
+    return X @ np.full(X.shape[1], 1.0 / X.shape[1])
+
+
+def modern_hopfield_field_stabilized(
+    x: np.ndarray, X: np.ndarray, beta: float, k: float = 0.0,
+    baseline_correction: np.ndarray | None = None,
+) -> np.ndarray:
     """
     Campo con termino estabilizador extra -k*x, para usar SOLO durante
     la fase pre-recaida (k=0 durante la fase de forzamiento/sesgo --
     ahi se quiere la dinamica genuina, sin distorsionar el paisaje de
     energia que ya se verifico que tiene los 4 atractores correctos).
 
-    Sigue siendo un flujo de gradiente (el termino extra -k*x es
-    tambien un gradiente, de (k/2)||x||^2 -- sumar dos gradientes sigue
-    siendo un gradiente), asi que las garantias de decrecimiento de
-    energia se preservan mientras k este activo.
+    La correccion constante b=X@(1/M) garantiza F(0)=0 incluso con
+    centroides de clases desbalanceadas. El campo es descenso de la
+    energia modificada E_k(x)=E(x)+b^T x+(k/2)||x||^2.
     """
-    return modern_hopfield_field(x, X, beta) - k * x
+    b = modern_hopfield_baseline(X) if baseline_correction is None else baseline_correction
+    return modern_hopfield_field(x, X, beta) - b - k * x
 
 
 def modern_hopfield_jacobian_stabilized(x: np.ndarray, X: np.ndarray, beta: float, k: float = 0.0) -> np.ndarray:
@@ -467,7 +579,7 @@ def simulate_longitudinal_patient_hopfield_v2(
     n_timepoints: int = 8, months_between_checks: int = 3,
     recurrence_onset_month: int = 15, beta: float = 2.0,
     max_forcing_strength: float = 1.5, stabilizing_k: float | None = None,
-    mechanism: str = "additive",
+    mechanism: str = "additive", smooth_transition: bool = True,
 ) -> tuple:
     """
     Version CORREGIDA de simulate_longitudinal_patient_hopfield -- usa
@@ -482,8 +594,11 @@ def simulate_longitudinal_patient_hopfield_v2(
     mechanism: "additive" (fuerza sumada al campo) o "bias" (sesgo en
     softmax, ver modern_hopfield_field_biased) para la fase de recaida.
     """
+    if mechanism not in {"additive", "bias"}:
+        raise ValueError("mechanism debe ser 'additive' o 'bias'")
     if stabilizing_k is None:
         stabilizing_k = compute_stabilizing_k(X, beta)
+    baseline = modern_hopfield_baseline(X)
 
     n_patterns = X.shape[1]
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
@@ -499,15 +614,31 @@ def simulate_longitudinal_patient_hopfield_v2(
         if t >= recurrence_onset_month:
             months_since_onset = t - recurrence_onset_month
             strength = min(0.15 * months_since_onset, max_forcing_strength)
+            # Evita retirar el reposo en el mismo instante en que la fuerza
+            # todavia vale cero. Al crecer la senal, se apagan suavemente
+            # tanto k como la correccion basal.
+            if smooth_transition and max_forcing_strength > 0:
+                quiescent_weight = max(0.0, 1.0 - strength / max_forcing_strength)
+            elif smooth_transition:
+                quiescent_weight = 1.0
+            else:
+                quiescent_weight = 0.0
             if mechanism == "bias" and target_idx is not None:
                 bias = np.zeros(n_patterns)
                 bias[target_idx] = strength
-                field = lambda tt, xx: modern_hopfield_field_biased(xx, X, beta, bias)
+                field = lambda tt, xx: (
+                    modern_hopfield_field_biased(xx, X, beta, bias)
+                    - quiescent_weight * baseline
+                    - quiescent_weight * stabilizing_k * xx)
             else:
                 I_driver = strength * recurrence_pattern
-                field = lambda tt, xx: modern_hopfield_field(xx, X, beta) + I_driver
+                field = lambda tt, xx: (
+                    modern_hopfield_field(xx, X, beta) + I_driver
+                    - quiescent_weight * baseline
+                    - quiescent_weight * stabilizing_k * xx)
         else:
-            field = lambda tt, xx: modern_hopfield_field_stabilized(xx, X, beta, stabilizing_k)
+            field = lambda tt, xx: modern_hopfield_field_stabilized(
+                xx, X, beta, stabilizing_k, baseline)
 
         sol = solve_ivp(field, (0, months_between_checks), x_current,
                          method="RK45", rtol=1e-8, atol=1e-10)
@@ -515,6 +646,112 @@ def simulate_longitudinal_patient_hopfield_v2(
         x_series[:, i] = x_current
 
     return t_checks, x_series
+
+
+def diagnose_pre_recurrence_residual(
+    patterns: dict, beta: float = 3.0, duration_months: int = 15,
+    months_between_checks: int = 3, stabilizing_k: float | None = None,
+) -> dict:
+    """Cuantifica y orienta cualquier desplazamiento durante el reposo."""
+    X, labels = patterns_to_matrix(patterns)
+    k = compute_stabilizing_k(X, beta) if stabilizing_k is None else stabilizing_k
+    origin = np.zeros(X.shape[0])
+    baseline = modern_hopfield_baseline(X)
+    initial_residual = float(np.linalg.norm(
+        modern_hopfield_field_stabilized(origin, X, beta, k, baseline)))
+    x = origin.copy()
+    n_steps = int(np.ceil(duration_months / months_between_checks))
+    for _ in range(n_steps):
+        sol = solve_ivp(
+            lambda t, xx: modern_hopfield_field_stabilized(xx, X, beta, k, baseline),
+            (0, months_between_checks), x, method="RK45", rtol=1e-8, atol=1e-10)
+        x = sol.y[:, -1]
+    profile = _correlation_profile(x, X, labels)
+    return {
+        "k": float(k), "baseline_correction_norm": float(np.linalg.norm(baseline)),
+        "origin_field_residual": initial_residual, "final_norm": float(np.linalg.norm(x)),
+        "final_field_residual": float(np.linalg.norm(
+            modern_hopfield_field_stabilized(x, X, beta, k, baseline))),
+        "closest_cms": profile["best_label"],
+        "closest_correlation": profile["best_correlation"],
+        "correlations": profile["correlations"], "final_state": x,
+        "origin_is_fixed": initial_residual <= 1e-8,
+    }
+
+
+def compare_forcing_sweep_v1_v2(
+    patterns: dict, beta: float = 3.0, strength_candidates=None,
+    corr_threshold: float = 0.9, recurrence_onset_month: int = 15,
+    n_timepoints: int = 10, months_between_checks: int = 3,
+    smooth_transition: bool = True,
+) -> "pd.DataFrame":
+    """Barrido apples-to-apples de fuerza sin y con estabilizacion.
+
+    V1 es la dinamica Modern Hopfield sin reposo estabilizado. V2 usa
+    correccion basal, k calibrado y transicion opcionalmente suave.
+    Ambas corridas comparten beta, tiempos, objetivo y fuerza maxima.
+    """
+    import pandas as pd
+    if strength_candidates is None:
+        strength_candidates = [0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0]
+    strengths = sorted({float(v) for v in strength_candidates})
+    if not strengths or strengths[0] < 0:
+        raise ValueError("strength_candidates debe contener valores >= 0")
+
+    X, labels = patterns_to_matrix(patterns)
+    k = compute_stabilizing_k(X, beta)
+    baseline_diag = diagnose_pre_recurrence_residual(
+        patterns, beta=beta, duration_months=recurrence_onset_month,
+        months_between_checks=months_between_checks, stabilizing_k=k)
+    rows = []
+    for i, target in enumerate(labels):
+        p = X[:, i]
+        for strength in strengths:
+            _, x_v1 = simulate_longitudinal_patient_hopfield(
+                X, p, X.shape[0], n_timepoints=n_timepoints,
+                months_between_checks=months_between_checks,
+                recurrence_onset_month=recurrence_onset_month, beta=beta,
+                max_forcing_strength=strength)
+            _, x_v2 = simulate_longitudinal_patient_hopfield_v2(
+                X, p, X.shape[0], n_timepoints=n_timepoints,
+                months_between_checks=months_between_checks,
+                recurrence_onset_month=recurrence_onset_month, beta=beta,
+                max_forcing_strength=strength, stabilizing_k=k,
+                smooth_transition=smooth_transition)
+            profile_v1 = _correlation_profile(x_v1[:, -1], X, labels)
+            profile_v2 = _correlation_profile(x_v2[:, -1], X, labels)
+            corr_v1 = profile_v1["correlations"][target]
+            corr_v2 = profile_v2["correlations"][target]
+            rows.append({
+                "patron_objetivo": target, "fuerza_maxima": strength, "beta": beta,
+                "v1_corr_objetivo": corr_v1, "v1_cms_final": profile_v1["best_label"],
+                "v1_corr_maxima": profile_v1["best_correlation"],
+                "v1_exito": bool(np.isfinite(corr_v1) and corr_v1 >= corr_threshold and
+                                  profile_v1["best_label"] == target),
+                "v2_corr_objetivo": corr_v2, "v2_cms_final": profile_v2["best_label"],
+                "v2_corr_maxima": profile_v2["best_correlation"],
+                "v2_exito": bool(np.isfinite(corr_v2) and corr_v2 >= corr_threshold and
+                                  profile_v2["best_label"] == target),
+                "v2_norma_final": float(np.linalg.norm(x_v2[:, -1])),
+                "v2_norma_basal": baseline_diag["final_norm"],
+                "v2_residuo_campo_en_origen": baseline_diag["origin_field_residual"],
+                "stabilizing_k": k, "transicion_suave": smooth_transition,
+            })
+    return pd.DataFrame(rows)
+
+
+def summarize_forcing_thresholds(sweep) -> "pd.DataFrame":
+    """Extrae el primer candidato exitoso por CMS para V1 y V2."""
+    import pandas as pd
+    rows = []
+    for target, group in sweep.groupby("patron_objetivo", sort=False):
+        row = {"patron_objetivo": target}
+        for version in ("v1", "v2"):
+            passing = group[group[f"{version}_exito"]].sort_values("fuerza_maxima")
+            row[f"umbral_{version}"] = (
+                float(passing.iloc[0]["fuerza_maxima"]) if len(passing) else float("nan"))
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 
@@ -706,6 +943,12 @@ def main():
                               "automaticamente, confirma que el origen pasa a ser estable, y prueba "
                               "la simulacion v2 completa (estabilizador + forzamiento) contra los 4 "
                               "patrones -- la verificacion definitiva pendiente en datos reales.")
+    parser.add_argument("--compare-stabilized-sweep", action="store_true",
+                         help="Barre la misma lista de fuerzas en V1 y V2 para los cuatro CMS, "
+                              "incluyendo diagnostico del residuo pre-recaida")
+    parser.add_argument("--forcing-candidates", nargs="+", type=float,
+                         default=[0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0],
+                         help="Fuerzas maximas para --compare-stabilized-sweep")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -785,8 +1028,12 @@ def main():
         origen = np.zeros(X.shape[0])
         J0 = modern_hopfield_jacobian_stabilized(origen, X, args.beta, k)
         eigvals0 = np.linalg.eigvalsh(J0)
+        residuo_origen = float(np.linalg.norm(
+            modern_hopfield_field_stabilized(origen, X, args.beta, k)))
         print(f"Eigenvalores en el origen CON estabilizador: {np.round(eigvals0, 3)}")
-        print(f"Origen genuinamente estable ahora: {bool(np.all(eigvals0 < 0))}")
+        print(f"Residuo del campo en el origen: {residuo_origen:.3e}")
+        print(f"Origen genuinamente estable ahora: "
+              f"{bool(residuo_origen <= 1e-8 and np.all(eigvals0 < 0))}")
 
         x_current = np.zeros(X.shape[0])
         for t in np.arange(0, 15, 3):
@@ -805,6 +1052,25 @@ def main():
             x_final = x_sim[:, -1]
             corr = float(np.corrcoef(x_final, p)[0, 1]) if np.std(x_final) > 1e-12 else float("nan")
             print(f"  {label:20s} corr_con_objetivo={corr:+.3f}")
+
+    barrido_estabilizado = None
+    resumen_estabilizado = None
+    if args.compare_stabilized_sweep:
+        print("\n" + "=" * 78)
+        print("BARRIDO DE FUERZA V1 vs V2 ESTABILIZADA")
+        print("=" * 78)
+        diagnostico_basal = diagnose_pre_recurrence_residual(patterns, beta=args.beta)
+        print(f"Residuo del campo en origen: {diagnostico_basal['origin_field_residual']:.3e}")
+        print(f"Norma al final de fase pre-recaida: {diagnostico_basal['final_norm']:.6f}")
+        print(f"Direccion residual: {diagnostico_basal['closest_cms']} "
+              f"(corr={diagnostico_basal['closest_correlation']:+.3f})")
+        barrido_estabilizado = compare_forcing_sweep_v1_v2(
+            patterns, beta=args.beta, strength_candidates=args.forcing_candidates)
+        resumen_estabilizado = summarize_forcing_thresholds(barrido_estabilizado)
+        print("\nDetalle:")
+        print(barrido_estabilizado.to_string(index=False))
+        print("\nPrimer candidato exitoso por CMS:")
+        print(resumen_estabilizado.to_string(index=False))
 
     comparacion_forzada = None
     if args.compare_forced:
@@ -827,6 +1093,11 @@ def main():
             barrido.to_csv(out / "modern_hopfield_beta_sweep.tsv", sep="\t", index=False)
         if comparacion_forzada is not None:
             comparacion_forzada.to_csv(out / "modern_hopfield_forced_comparison.tsv", sep="\t", index=False)
+        if barrido_estabilizado is not None:
+            barrido_estabilizado.to_csv(
+                out / "modern_hopfield_stabilized_forcing_sweep.tsv", sep="\t", index=False)
+            resumen_estabilizado.to_csv(
+                out / "modern_hopfield_stabilized_thresholds.tsv", sep="\t", index=False)
         print(f"\nTablas guardadas en: {out}")
 
 
