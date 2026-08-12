@@ -148,6 +148,9 @@ def cmd_modern_hopfield(args):
     if args.compare_stabilized_sweep:
         argv.append("--compare-stabilized-sweep")
         argv += ["--forcing-candidates"] + [str(v) for v in args.forcing_candidates]
+        argv += ["--withdrawal-time", str(args.withdrawal_time)]
+        if args.unnormalized_driver:
+            argv.append("--unnormalized-driver")
     if args.output:
         argv += ["--output", args.output]
     _run_module("modern_hopfield.py", argv)
@@ -285,6 +288,9 @@ def build_parser():
                     help="Comparar V1 y V2 con las mismas fuerzas para los cuatro CMS")
     s.add_argument("--forcing-candidates", nargs="+", type=float,
                     default=[0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0])
+    s.add_argument("--withdrawal-time", type=float, default=30.0)
+    s.add_argument("--unnormalized-driver", action="store_true",
+                    help="Solo comparacion legado: no normalizar el vector del driver")
     s.add_argument("--output")
     s.set_defaults(func=cmd_modern_hopfield)
 
