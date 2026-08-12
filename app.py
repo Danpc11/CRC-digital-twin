@@ -542,18 +542,23 @@ with tab_muestras:
                 run_modern = st.checkbox(
                     "Calcular recuperación dinámica para esta cohorte",
                     key="run_modern_hopfield")
-                mh_c1, mh_c2 = st.columns(2)
+                mh_c1, mh_c2, mh_c3 = st.columns(3)
                 mh_beta = mh_c1.number_input(
                     "β Modern Hopfield", min_value=0.1, max_value=20.0,
                     value=3.0, step=0.1, key="modern_beta")
                 mh_corr = mh_c2.number_input(
                     "Correlación mínima", min_value=0.0, max_value=1.0,
                     value=0.8, step=0.05, key="modern_corr")
+                mh_input_margin = mh_c3.number_input(
+                    "Margen mínimo pre-relajación", min_value=0.0, max_value=1.0,
+                    value=0.15, step=0.05, key="modern_input_margin",
+                    help="Por debajo de este margen el estado se reporta híbrido/ambiguo y el modelo se abstiene.")
             if run_modern:
                 with st.spinner("Recuperando equilibrios Modern Hopfield..."):
                     scored = score_cohort_modern_hopfield(
                         scored, gene_order, patterns, beta=float(mh_beta),
-                        corr_threshold=float(mh_corr))
+                        corr_threshold=float(mh_corr),
+                        input_margin_threshold=float(mh_input_margin))
 
             # sample_id ya viene incluida en 'scored' si el archivo la
             # traia (zscore_genes/score_cohort hacen df.copy(), preservan
@@ -604,6 +609,7 @@ with tab_muestras:
             display_cols = ["sample_id", "predicted_cms", "classification_confidence"]
             display_cols += [c for c in (
                 "modern_hopfield_cms", "modern_hopfield_correlation",
+                "modern_hopfield_input_margin", "modern_hopfield_abstention_reason",
                 "modern_hopfield_margin", "modern_hopfield_residual",
                 "modern_hopfield_stable", "modern_hopfield_concordant") if c in scored.columns]
             st.dataframe(
@@ -652,17 +658,24 @@ with tab_paciente:
         if "modern_hopfield_cms" in fila.index:
             mh_label = fila["modern_hopfield_cms"]
             mh_corr_value = float(fila["modern_hopfield_correlation"])
+            mh_input_margin_value = float(fila.get("modern_hopfield_input_margin", float("nan")))
             concordant = bool(fila.get("modern_hopfield_concordant", False))
             if mh_label == "indeterminado":
-                st.warning("Modern Hopfield experimental: recuperación indeterminada; "
-                           "se conserva la clasificación principal por correlación.")
+                reason = fila.get("modern_hopfield_abstention_reason", "incertidumbre_no_especificada")
+                st.warning("Modern Hopfield experimental se abstiene: "
+                           f"{reason} (margen pre-relajación={mh_input_margin_value:.3f}). "
+                           "Se conserva el perfil continuo y la clasificación principal por correlación.")
             elif concordant:
                 st.success(f"Modern Hopfield experimental concuerda: "
                            f"{CMS_SHORT.get(mh_label, mh_label)} (r={mh_corr_value:.3f}).")
+                st.caption(f"Margen pre-relajación: {mh_input_margin_value:.3f}; "
+                           "la correlación final solo audita convergencia.")
             else:
                 st.warning(f"Discordancia experimental: correlación={CMS_SHORT.get(pred_p, pred_p)}, "
                            f"Modern Hopfield={CMS_SHORT.get(mh_label, mh_label)} "
                            f"(r={mh_corr_value:.3f}). Requiere revisión; no se fuerza una decisión.")
+                st.caption(f"Margen pre-relajación: {mh_input_margin_value:.3f}; "
+                           "la correlación final no representa confianza clínica.")
 
         ev_p = EVIDENCE_STRENGTH.get(pred_p, {})
         st.markdown(evidence_meter(ev_p.get("level", "sin evidencia")), unsafe_allow_html=True)

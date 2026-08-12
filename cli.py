@@ -92,6 +92,7 @@ def cmd_validate_external(args):
         argv += ["--event-col", args.event_col]
     argv += ["--classifier", args.classifier, "--beta", str(args.beta)]
     argv += ["--modern-corr-threshold", str(args.modern_corr_threshold)]
+    argv += ["--modern-input-margin-threshold", str(args.modern_input_margin_threshold)]
     argv += ["--modern-integration-time", str(args.modern_integration_time)]
     if args.require_valid_beta:
         argv.append("--require-valid-beta")
@@ -112,6 +113,9 @@ def cmd_pooled_cox(args):
         argv.append("--keep-stage-iv")
     argv += ["--bootstrap-iterations", str(args.bootstrap_iterations)]
     argv += ["--bootstrap-seed", str(args.bootstrap_seed)]
+    argv += ["--calibration-horizons"] + [str(v) for v in args.calibration_horizons]
+    if args.no_loco:
+        argv.append("--no-loco")
     _run_module("pooled_cox_validation.py", argv)
 
 
@@ -127,8 +131,8 @@ def cmd_cox_diagnostics(args):
     if args.no_stratify:
         argv.append("--no-stratify")
     argv += ["--time-cutoff", str(args.time_cutoff)]
-    if args.no_time_varying_cms4:
-        argv.append("--no-time-varying-cms4")
+    if args.no_time_varying_cms:
+        argv.append("--no-time-varying-cms")
     if args.output:
         argv += ["--output", args.output]
     _run_module("cox_diagnostics.py", argv)
@@ -253,6 +257,7 @@ def build_parser():
                    default="correlation")
     s.add_argument("--beta", type=float, default=3.0)
     s.add_argument("--modern-corr-threshold", type=float, default=0.8)
+    s.add_argument("--modern-input-margin-threshold", type=float, default=0.15)
     s.add_argument("--modern-integration-time", type=float, default=30.0)
     s.add_argument("--require-valid-beta", action="store_true")
     s.set_defaults(func=cmd_validate_external)
@@ -266,6 +271,8 @@ def build_parser():
     s.add_argument("--keep-stage-iv", action="store_true")
     s.add_argument("--bootstrap-iterations", type=int, default=200)
     s.add_argument("--bootstrap-seed", type=int, default=2026)
+    s.add_argument("--calibration-horizons", nargs="+", type=float, default=[36.0, 60.0])
+    s.add_argument("--no-loco", action="store_true")
     s.add_argument("--output", default="results_pooled_cox")
     s.set_defaults(func=cmd_pooled_cox)
 
@@ -280,7 +287,8 @@ def build_parser():
     s.add_argument("--no-stratify", action="store_true",
                     help="NO estratificar por cohorte (solo comparacion/debug)")
     s.add_argument("--time-cutoff", type=float, default=36.0)
-    s.add_argument("--no-time-varying-cms4", action="store_true")
+    s.add_argument("--no-time-varying-cms", "--no-time-varying-cms4",
+                   dest="no_time_varying_cms", action="store_true")
     s.add_argument("--output")
     s.set_defaults(func=cmd_cox_diagnostics)
 
