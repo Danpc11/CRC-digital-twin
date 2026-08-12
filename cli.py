@@ -11,6 +11,8 @@ USO:
     python3 cli.py classify --patterns P.tsv --input X.tsv --output results/
     python3 cli.py validate-external --patterns P.tsv --input X.tsv --output results/
     python3 cli.py pooled-cox --cohort NOMBRE ruta.tsv [--cohort ...] --output results/
+    python3 cli.py cox-diagnostics --input scored.tsv [--input ...] --adjust-stage --output results/
+    python3 cli.py dynamics-diagnostics --patterns P.tsv --output results/
     python3 cli.py prognosis --patterns P.tsv
     python3 cli.py simulate-treatment --patterns P.tsv --treatment immunotherapy_antiPD1
     python3 cli.py app                       # lanza la interfaz Streamlit
@@ -114,6 +116,13 @@ def cmd_cox_diagnostics(args):
     _run_module("cox_diagnostics.py", argv)
 
 
+def cmd_dynamics_diagnostics(args):
+    argv = ["--patterns", args.patterns, "--beta", str(args.beta), "--n-samples", str(args.n_samples)]
+    if args.output:
+        argv += ["--output", args.output]
+    _run_module("dynamics_diagnostics.py", argv)
+
+
 def cmd_prognosis(args):
     argv = ["--patterns", args.patterns]
     if args.recurrence_target:
@@ -145,7 +154,7 @@ def cmd_app(args):
 
 
 def cmd_test(args):
-    subprocess.run([sys.executable, "-m", "pytest", str(ROOT / "tests"), "-v"], check=False)
+    _run_command([sys.executable, "-m", "pytest", str(ROOT / "tests"), "-v"])
 
 
 def build_parser():
@@ -196,6 +205,14 @@ def build_parser():
                     help="NO estratificar por cohorte (solo comparacion/debug)")
     s.add_argument("--output")
     s.set_defaults(func=cmd_cox_diagnostics)
+
+    s = sub.add_parser("dynamics-diagnostics",
+                        help="Equilibrios y estabilidad reales de la dinamica no lineal (jacobiano, cuencas de atraccion)")
+    s.add_argument("--patterns", required=True)
+    s.add_argument("--beta", type=float, default=2.0)
+    s.add_argument("--n-samples", type=int, default=300)
+    s.add_argument("--output")
+    s.set_defaults(func=cmd_dynamics_diagnostics)
 
     s = sub.add_parser("prognosis", help="Demo de pronostico longitudinal post-quirurgico")
     s.add_argument("--patterns", required=True)
