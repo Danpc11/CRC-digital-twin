@@ -173,3 +173,72 @@ no un predictor validado de respuesta a tratamiento.
 | $\hat\mu = \arg\max_\mu \mathrm{corr}(x, p^\mu)$ | Clasificación | `classify_current_state()` / `risk_score_from_expression()` |
 | $h(t) = \|x(t)\|$ | Riesgo ordinal | `hazard_from_trajectory()` |
 | $I_{\text{tx}} = -\varepsilon(x)\, x$ | Perturbación de tratamiento | `apply_treatment_perturbation()` |
+
+## 9. Verificación real
+
+Para que quede explícito: este modelo no es entrenado por optimización (no hay pérdida, no
+hay gradientes); no es una red neuronal en el sentido de tener pesos aprendidos capa por
+capa (los "pesos" $W$ son una proyección algebraica cerrada, determinística dados los
+patrones); no predice magnitud de respuesta a tratamiento (solo dirección); y el riesgo que
+produce es ordinal, no una probabilidad de supervivencia calibrada.
+
+**Sobre la palabra "atractor" específicamente**: $Wp^\mu = p^\mu$ solo está probado para el
+sistema **linealizado** ($dx/dt = -x + Wx$). Verificado con `dynamics_diagnostics.py`
+(jacobiano confirmado contra diferenciación numérica, error $10^{-10}$) que con
+$\beta=2.0$ — el valor usado en todo el proyecto — **ninguno de los 4 patrones calibrados
+es un atractor genuino del sistema no lineal completo** ($dx/dt = -x + W\tanh(\beta x)$):
+o bien colapsan al origen trivial (β<1), o el equilibrio real se desplaza y pierde
+estabilidad local (β≥1, partes reales del jacobiano positivas).
+
+**Región de β donde sí califican, con la imagen completa (no un solo intervalo)**: usando
+un criterio corregido (estable + distinto del origen + correlación ≥0.8 con el patrón +
+separado de los otros 3 equilibrios — un hallazgo anterior que solo exigía estabilidad
+del jacobiano resultó estar contaminado por colapso al origen), el barrido real muestra
+**varios tramos separados por huecos pequeños** — aproximadamente [9.4, 11.8], [12.0, 14.4],
+y una cola sin resolver desde 14.6 hasta el límite explorado (15.0, límite superior
+indeterminado) — no un único intervalo continuo. Buscarlo con
+`python3 cli.py dynamics-diagnostics --find-interval` (guarda el barrido completo a TSV).
+
+**Las cuencas de atracción en esa región son débiles y con estructura, no difusas**:
+muestreando 100 estados iniciales aleatorios (gaussiana centrada en el origen) con
+$\beta=10$, solo 18% termina claramente en alguno de los 4 patrones CMS — el 82%
+restante no es ruido sin estructura: se agrupa en **~10 equilibrios adicionales
+genuinos** (convergen, jacobiano estable, correlación máxima 0.36-0.64 con cualquier
+patrón CMS — muy por debajo del umbral 0.8), el fenómeno de **atractores espurios**
+conocido en redes asociativas saturadas. Sin embargo, muestreando *cerca* de cada patrón
+(perturbación pequeña, no exploración global) las cuencas locales son razonablemente
+robustas para CMS1/CMS2/CMS4 (80-95% de retorno) pero frágil para CMS3 (30%) — ambas
+estrategias de muestreo miden cosas distintas (cobertura global del espacio de estados
+vs. robustez local alrededor de la posición pretendida del atractor), y ninguna por sí
+sola cuenta la historia completa.
+
+**El umbral de correlación no es el problema; el ruido inicial sí importa mucho**: barrido
+de sensibilidad confirma que variar el umbral de clasificación (0.7 / 0.8 / 0.9) no
+cambia la conclusión cualitativa, pero la tasa de retorno cae fuerte con la escala de
+ruido inicial (0.99 → 0.65 → 0.35 → 0.18 según crece la perturbación).
+
+**Recomendación explícita: NO se cambió $\beta=2.0$ en ningún lugar operativo** (modelo
+base, `prognosis_demo.py`, simulación de tratamiento, CLI, esta misma documentación).
+Antes de considerar subir β, hace falta entender mejor los atractores espurios (¿son
+consistentes entre calibraciones distintas, o dependen de la muestra?) — la sola
+existencia de un intervalo con 4 atractores genuinos no basta si compiten con ~10
+atractores espurios por la mayor parte del espacio de estados.
+
+**Dato que sí es tranquilizador**: comparando las trayectorias clínicas *prácticas* (con
+el forzamiento continuo real que usa `prognosis_demo.py`, no dinámica libre) entre
+$\beta=2$ y $\beta=10$, la correlación final con el patrón objetivo es alta en ambos
+casos para la mayoría de los subtipos — el forzamiento activo sostiene la trayectoria
+independientemente de si el equilibrio libre subyacente es genuinamente estable. La
+preocupación matemática sobre "atractor genuino" no se traduce, hasta donde se ha
+verificado, en un malfuncionamiento visible del simulador de trayectorias tal como se
+usa hoy.
+
+Esto no invalida la clasificación (kappa=0.679, validación externa, todo el Cox) — esa
+ruta usa correlación estática, nunca corre la dinámica. Lo que no está probado es la
+afirmación específica "los 4 subtipos son atractores de una red tipo Hopfield continua"
+tal como está configurado el proyecto hoy. La descripción más precisa del estado actual:
+**clasificador de centroides CMS acoplado a un sistema dinámico forzado para simulaciones
+exploratorias** — las trayectorias de recaída en `prognosis_demo.py` funcionan porque
+incluyen forzamiento externo continuo en la dirección del patrón (verificado: correlación
+0.99 sostenida durante la ventana práctica de ~27 meses), no porque el patrón sea un
+atractor autónomo del sistema sin ese forzamiento.
