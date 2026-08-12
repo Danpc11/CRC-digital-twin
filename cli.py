@@ -123,6 +123,8 @@ def cmd_dynamics_diagnostics(args):
         argv += ["--beta-min-busqueda", str(args.beta_min_busqueda)]
         argv += ["--beta-max-busqueda", str(args.beta_max_busqueda)]
         argv += ["--n-steps-busqueda", str(args.n_steps_busqueda)]
+        argv += ["--correlation-threshold", str(args.correlation_threshold)]
+        argv += ["--origin-threshold", str(args.origin_threshold)]
     if args.full:
         argv.append("--full")
     if args.output:
@@ -225,6 +227,10 @@ def build_parser():
                     help="Si el resultado anterior dijo 'limite superior NO determinado', "
                          "subir este valor y repetir")
     s.add_argument("--n-steps-busqueda", type=int, default=150)
+    s.add_argument("--correlation-threshold", type=float, default=0.8,
+                    help="ARBITRARIO -- hallazgo real: cambia la conclusion cualitativa "
+                         "de 'existe/no existe un beta valido', reportar siempre junto al valor")
+    s.add_argument("--origin-threshold", type=float, default=0.5)
     s.add_argument("--full", action="store_true",
                     help="Correr y guardar analisis avanzados de cuencas y atractores espurios")
     s.add_argument("--output")
