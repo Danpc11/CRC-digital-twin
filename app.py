@@ -47,7 +47,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from attractor_model import build_model_from_patterns
 from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
 from clinical_selection import assess_molecular_eligibility, hybrid_mechanism_hypotheses
-from modern_hopfield import patterns_to_matrix, score_cohort_modern_hopfield
+from modern_hopfield import (
+    patterns_to_matrix,
+    score_cohort_modern_hopfield,
+    validate_modern_hopfield_beta,
+)
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from prognosis_demo import (
     EVIDENCE_STRENGTH,
@@ -166,28 +170,36 @@ def readout(eyebrow: str, value: str, unit: str = "", accent: str = "#4A5058") -
 @st.cache_data(show_spinner=False)
 def cached_trajectory(model_matrix, gene_order, driver_vector, n_genes, n_timepoints,
                       recurrence_onset_month, dynamics_model="modern_hopfield",
-                      dynamics_beta=3.0):
+                      dynamics_beta=3.0, max_forcing_strength=5.0):
     return simulate_longitudinal_patient(
         model_matrix, gene_order, driver_vector, n_genes,
         n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
-        dynamics_model=dynamics_model, beta=dynamics_beta)
+        dynamics_model=dynamics_model, beta=dynamics_beta,
+        max_forcing_strength=max_forcing_strength)
 
 
 @st.cache_data(show_spinner=False)
 def cached_treatment_sim(model_matrix, n_genes, gene_order, driver_vector, patterns, treatment,
                           treatment_onset_month, ras_braf_wildtype, n_timepoints,
-                          recurrence_onset_month, dynamics_model, dynamics_beta):
+                          recurrence_onset_month, dynamics_model, dynamics_beta,
+                          max_forcing_strength):
     return simulate_with_optional_treatment(
         model_matrix, n_genes, gene_order, driver_vector, patterns, treatment=treatment,
         treatment_onset_month=treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
         n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
-        dynamics_model=dynamics_model, beta=dynamics_beta)
+        dynamics_model=dynamics_model, beta=dynamics_beta,
+        max_forcing_strength=max_forcing_strength)
+
+
+@st.cache_data(show_spinner=False)
+def cached_validate_modern_beta(patterns, beta):
+    return validate_modern_hopfield_beta(patterns, beta, correlation_threshold=0.9)
 
 
 def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, patterns,
                              recurrence_onset_month=15, treatment_onset_month=18,
                              ras_braf_wildtype=None, dynamics_model="modern_hopfield",
-                             dynamics_beta=3.0):
+                             dynamics_beta=3.0, max_forcing_strength=5.0):
     """
     Corre los mecanismos de tratamiento disponibles contra el vector de
     UN paciente, devuelve un resumen ordenado de mayor a menor
@@ -200,7 +212,7 @@ def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, pa
     _, x_base = cached_treatment_sim(
         model_matrix, n_genes, gene_order, driver_vector, patterns, None,
         treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
-        dynamics_model, dynamics_beta)
+        dynamics_model, dynamics_beta, max_forcing_strength)
     h_base = hazard_from_trajectory(x_base)[-1]
 
     results = []
@@ -208,7 +220,7 @@ def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, pa
         _, x_tx = cached_treatment_sim(
             model_matrix, n_genes, gene_order, driver_vector, patterns, name,
             treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
-            dynamics_model, dynamics_beta)
+            dynamics_model, dynamics_beta, max_forcing_strength)
         h_tx = hazard_from_trajectory(x_tx)[-1]
         results.append({
             "treatment": name, "h_base": h_base, "h_tx": h_tx,
@@ -366,10 +378,15 @@ with st.sidebar:
         if dynamics_model == "modern_hopfield":
             dynamics_beta = st.number_input(
                 "β dinámico", 0.1, 20.0, 3.0, 0.1, key="modern_hopfield_beta")
+            max_forcing_strength = st.number_input(
+                "Fuerza máxima del driver", 0.1, 20.0, 5.0, 0.1,
+                key="modern_hopfield_forcing",
+                help="Magnitud experimental específica de esta calibración; no es una dosis clínica.")
             st.caption("Reposo estabilizado, transición suave y driver normalizado.")
         else:
             dynamics_beta = st.number_input(
                 "β dinámico", 0.1, 20.0, 2.0, 0.1, key="projection_legacy_beta")
+            max_forcing_strength = 0.7
             st.warning("Modelo histórico disponible para comparación; no es el recomendado.")
 
     st.divider()
@@ -419,7 +436,19 @@ st.caption(
     "Motor dinámico activo: "
     + ("Modern Hopfield V2" if dynamics_model == "modern_hopfield"
        else "proyección continua (legacy)")
-    + f" · β={dynamics_beta:.2f}")
+    + f" · β={dynamics_beta:.2f}"
+    + (f" · fuerza={max_forcing_strength:.2f}" if dynamics_model == "modern_hopfield" else ""))
+
+if dynamics_model == "modern_hopfield":
+    beta_validation = cached_validate_modern_beta(patterns, dynamics_beta)
+    if not beta_validation["valid"]:
+        invalid = ", ".join(beta_validation["invalid_patterns"])
+        st.error(
+            f"β={dynamics_beta:.2f} no conserva los cuatro atractores CMS con "
+            f"correlación ≥0.90. No califican: {invalid}. Las trayectorias con este β "
+            "son exploratorias y no deben interpretarse como recuperación CMS estable.")
+    else:
+        st.success("β validado: los cuatro centroides convergen a atractores estables.")
 
 if dynamics_model == "modern_hopfield":
     dynamics_matrix, _labels = patterns_to_matrix(patterns)
@@ -607,7 +636,7 @@ with tab_paciente:
         with st.spinner("Simulando trayectoria..."):
             t_p, x_p = cached_trajectory(
                 dynamics_matrix, cohort_genes_p, driver_p, n_genes, 10, 15,
-                dynamics_model, dynamics_beta)
+                dynamics_model, dynamics_beta, max_forcing_strength)
             hazard_p = hazard_from_trajectory(x_p)
             alert_p, idx_p = detect_recurrence_signal(hazard_p, baseline_window=2, threshold_sigma=3.0)
 
@@ -737,7 +766,8 @@ with tab_paciente:
         with st.spinner("Evaluando mecanismos de tratamiento..."):
             resultados_tx = evaluate_all_treatments(
                 dynamics_matrix, n_genes, cohort_genes_p, driver_p, patterns,
-                dynamics_model=dynamics_model, dynamics_beta=dynamics_beta)
+                dynamics_model=dynamics_model, dynamics_beta=dynamics_beta,
+                max_forcing_strength=max_forcing_strength)
 
         aplican = [r for r in resultados_tx if r["aplica"]]
         if aplican:
@@ -839,7 +869,8 @@ with tab_traj:
     t_checks, x_series = simulate_longitudinal_patient(
         dynamics_matrix, gene_order, driver_vector, n_genes,
         n_timepoints=n_checks, recurrence_onset_month=onset,
-        dynamics_model=dynamics_model, beta=dynamics_beta)
+        dynamics_model=dynamics_model, beta=dynamics_beta,
+        max_forcing_strength=max_forcing_strength)
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
 
@@ -961,12 +992,14 @@ with tab_tx:
     _, x_base = simulate_with_optional_treatment(
         dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns,
         treatment=None, n_timepoints=10, recurrence_onset_month=15,
-        dynamics_model=dynamics_model, beta=dynamics_beta)
+        dynamics_model=dynamics_model, beta=dynamics_beta,
+        max_forcing_strength=max_forcing_strength)
     t_checks, x_tx = simulate_with_optional_treatment(
         dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns, treatment=treatment,
         treatment_onset_month=tx_onset, ras_braf_wildtype=ras_map[ras],
         n_timepoints=10, recurrence_onset_month=15,
-        dynamics_model=dynamics_model, beta=dynamics_beta)
+        dynamics_model=dynamics_model, beta=dynamics_beta,
+        max_forcing_strength=max_forcing_strength)
     h_base, h_tx = hazard_from_trajectory(x_base), hazard_from_trajectory(x_tx)
     delta = h_base[-1] - h_tx[-1]
 
