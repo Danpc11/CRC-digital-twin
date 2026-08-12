@@ -100,17 +100,56 @@ def infer_gene_columns(df: pd.DataFrame, non_gene_cols: set[str] | None = None) 
     return numeric
 
 
-def zscore_genes(df: pd.DataFrame, gene_cols: list[str]) -> pd.DataFrame:
-    """Normaliza cada gen a z-score a traves de todas las muestras."""
+def zscore_genes(
+    df: pd.DataFrame, gene_cols: list[str], stats: dict[str, tuple[float, float]] | None = None
+) -> pd.DataFrame:
+    """
+    Normaliza cada gen a z-score.
+
+    stats: opcional, {gen: (media, sigma)} -- si se da, usa estos valores
+    CONGELADOS (de la cohorte de calibracion) en vez de recalcular
+    media/desviacion del propio df. Necesario para clasificar un
+    PACIENTE INDIVIDUAL: con n=1, la varianza de una sola muestra es
+    exactamente cero, z-score sin referencia externa es matematicamente
+    imposible -- ver load_gene_reference_stats().
+
+    Para cohortes (n grande, ej. validacion externa), el comportamiento
+    por defecto (auto-normalizar cada cohorte contra si misma, stats=None)
+    sigue siendo el correcto: ayuda a corregir efectos de lote/plataforma
+    entre estudios. NO forzar stats congelados ahi tambien.
+    """
     z = df.copy()
+    n = len(df)
     for gene in gene_cols:
-        mu = df[gene].mean()
-        sigma = df[gene].std(ddof=0)
-        if sigma == 0 or np.isnan(sigma):
-            raise ValueError(
-                f"El gen '{gene}' tiene desviacion estandar cero o NaN -- "
-                "revisa la columna, no se puede z-score."
-            )
+        if stats is not None and gene in stats:
+            mu, sigma = stats[gene]
+            if sigma == 0 or np.isnan(sigma):
+                raise ValueError(
+                    f"El gen '{gene}' tiene sigma de referencia congelado invalido "
+                    "(cero o NaN) -- revisa el archivo de calibracion."
+                )
+        else:
+            if n < 10:
+                print(
+                    f"AVISO: normalizando '{gene}' con solo {n} muestra(s) SIN "
+                    "referencia externa congelada -- estadisticamente inestable "
+                    "o directamente imposible si n=1. Si estas clasificando un "
+                    "paciente individual, pasa 'stats' de "
+                    "load_gene_reference_stats() en vez de dejar que se "
+                    "autocalcule."
+                )
+            mu = df[gene].mean()
+            sigma = df[gene].std(ddof=0)
+            if sigma == 0 or np.isnan(sigma):
+                raise ValueError(
+                    f"El gen '{gene}' tiene desviacion estandar cero o NaN en "
+                    f"esta muestra/cohorte (n={n}). Si estas clasificando UN "
+                    "paciente individual, esto es ESPERADO (la varianza de un "
+                    "solo punto es cero por definicion) -- necesitas pasar "
+                    "'stats' congelados de la cohorte de calibracion "
+                    "(load_gene_reference_stats), no recalcular desde este "
+                    "archivo de una sola muestra."
+                )
         z[gene] = (df[gene] - mu) / sigma
     return z
 
@@ -127,6 +166,18 @@ def warn_low_n(df: pd.DataFrame) -> dict[str, int]:
                 "El centroide calibrado para esta clase sera inestable."
             )
     return counts
+
+
+def compute_gene_stats(df: pd.DataFrame, gene_cols: list[str]) -> dict[str, tuple[float, float]]:
+    """
+    Media y desviacion estandar por gen, para CONGELAR como referencia
+    de normalizacion -- se calculan una vez sobre la cohorte de
+    calibracion (con n grande, estadisticamente estables) y se guardan
+    junto con los patrones. Necesarias para clasificar un paciente
+    individual despues (n=1, donde no se puede calcular varianza
+    propia).
+    """
+    return {g: (float(df[g].mean()), float(df[g].std(ddof=0))) for g in gene_cols}
 
 
 def calibrate_patterns_from_data(
@@ -160,18 +211,52 @@ def calibrate_patterns_from_data(
 
 
 def save_calibrated_patterns(
-    patterns: dict[str, np.ndarray], gene_cols: list[str], path: str | Path
+    patterns: dict[str, np.ndarray], gene_cols: list[str], path: str | Path,
+    gene_stats: dict[str, tuple[float, float]] | None = None,
 ) -> None:
-    """Guarda los patrones calibrados en TSV (gen x subtipo)."""
+    """
+    Guarda los patrones calibrados en TSV (gen x subtipo).
+
+    gene_stats: opcional -- si se da (ver compute_gene_stats), se
+    guardan como dos columnas extra (_ref_mean, _ref_std) en el mismo
+    archivo. Permite clasificar un paciente individual despues sin
+    tener que recalcular estadisticas sobre n=1 (ver
+    load_gene_reference_stats / zscore_genes).
+    """
     df = pd.DataFrame(patterns, index=gene_cols)
+    if gene_stats is not None:
+        df["_ref_mean"] = [gene_stats[g][0] for g in gene_cols]
+        df["_ref_std"] = [gene_stats[g][1] for g in gene_cols]
     df.index.name = "gene"
     df.to_csv(path, sep="\t")
     print(f"Patrones calibrados guardados en: {path}")
+    if gene_stats is not None:
+        print("  (incluye estadisticas de referencia -- permite clasificar pacientes individuales)")
 
 
 def load_calibrated_patterns(path: str | Path) -> tuple[dict[str, np.ndarray], list[str]]:
-    """Carga patrones calibrados previamente guardados."""
+    """
+    Carga patrones calibrados previamente guardados. Firma sin cambios
+    (2-tuple) para no romper a los llamadores existentes -- las
+    columnas _ref_mean/_ref_std (si existen) se excluyen aqui de los
+    patrones CMS y se leen aparte con load_gene_reference_stats().
+    """
     df = pd.read_csv(path, sep="\t", index_col="gene")
     gene_cols = list(df.index)
-    patterns = {col: df[col].to_numpy() for col in df.columns}
+    pattern_cols = [c for c in df.columns if not c.startswith("_ref_")]
+    patterns = {col: df[col].to_numpy() for col in pattern_cols}
     return patterns, gene_cols
+
+
+def load_gene_reference_stats(path: str | Path) -> dict[str, tuple[float, float]] | None:
+    """
+    Carga las estadisticas de referencia congeladas (media, sigma por
+    gen) de un archivo de patrones calibrados, si las tiene.
+
+    Devuelve None si el archivo es de una version anterior sin estas
+    columnas (compatibilidad hacia atras).
+    """
+    df = pd.read_csv(path, sep="\t", index_col="gene")
+    if "_ref_mean" not in df.columns or "_ref_std" not in df.columns:
+        return None
+    return {gene: (float(row["_ref_mean"]), float(row["_ref_std"])) for gene, row in df.iterrows()}
