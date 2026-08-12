@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from attractor_model import build_model_from_patterns
-from calibration import load_calibrated_patterns, zscore_genes
+from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from prognosis_demo import (
     EVIDENCE_STRENGTH,
@@ -312,18 +312,23 @@ with st.sidebar:
     mode = st.radio("Origen", ["Ruta local", "Subir archivo"], horizontal=True,
                      label_visibility="collapsed")
 
-    patterns, gene_order = None, None
+    patterns, gene_order, gene_stats = None, None, None
     if mode == "Subir archivo":
         up = st.file_uploader("calibrated_patterns.tsv", type=["tsv", "txt"])
         if up is not None:
             _df = pd.read_csv(up, sep="\t", index_col="gene")
             gene_order = list(_df.index)
-            patterns = {c: _df[c].to_numpy() for c in _df.columns}
+            pattern_cols = [c for c in _df.columns if not c.startswith("_ref_")]
+            patterns = {c: _df[c].to_numpy() for c in pattern_cols}
+            if "_ref_mean" in _df.columns and "_ref_std" in _df.columns:
+                gene_stats = {g: (float(_df.loc[g, "_ref_mean"]), float(_df.loc[g, "_ref_std"]))
+                               for g in gene_order}
     else:
         path = st.text_input("Ruta", value=default or "results_demo/calibrated_patterns.tsv",
                               label_visibility="collapsed")
         if Path(path).exists():
             patterns, gene_order = load_calibrated_patterns(path)
+            gene_stats = load_gene_reference_stats(path)
         else:
             st.info("Sin patrones cargados. Genera unos con `python3 cli.py demo`, "
                     "o sube un archivo.")
@@ -333,6 +338,11 @@ with st.sidebar:
         with st.expander("Ver panel"):
             st.markdown('<span class="mono" style="font-size:0.8rem">'
                         + " · ".join(gene_order) + "</span>", unsafe_allow_html=True)
+        if gene_stats is None:
+            st.caption("⚠️ Sin estadísticas de referencia congeladas — no se podrán "
+                      "clasificar muestras individuales (n=1), solo cohortes. "
+                      "Recalibra con `run_pipeline.py` actualizado para habilitarlo.")
+        st.session_state["gene_stats"] = gene_stats
 
     st.divider()
     st.markdown(
@@ -409,8 +419,44 @@ with tab_muestras:
                 f"`{', '.join(missing)}`. Agrégalos o carga un panel que coincida."
             )
         else:
+            gene_stats = st.session_state.get("gene_stats")
+            n_muestras = len(df)
+
+            # Con pocas muestras, normalizar contra la propia tabla es
+            # estadisticamente inestable (n chico) o directamente
+            # imposible (n=1, varianza de un punto es cero). Usar
+            # estadisticas congeladas de la calibracion en ese caso --
+            # PERO para cohortes grandes (validacion externa), NO forzar
+            # esto: cada cohorte auto-normalizandose contra si misma es
+            # la practica correcta ahi.
+            usar_stats_congeladas = n_muestras < 10
+
+            if usar_stats_congeladas and gene_stats is None:
+                if n_muestras == 1:
+                    st.error(
+                        "Estás clasificando **una sola muestra** (un paciente), pero los "
+                        "patrones cargados no traen estadísticas de referencia congeladas "
+                        "-- con n=1 es matemáticamente imposible calcular varianza propia. "
+                        "Recalibra con `run_pipeline.py` (versión actual) para generar un "
+                        "`calibrated_patterns.tsv` que sí las incluya, y vuelve a cargarlo "
+                        "en la barra lateral."
+                    )
+                    st.stop()
+                else:
+                    st.warning(
+                        f"Solo {n_muestras} muestras, sin estadísticas de referencia "
+                        "congeladas disponibles -- la normalización contra esta tabla "
+                        "chica puede ser inestable. Recomendado: recalibra con "
+                        "`run_pipeline.py` actual para habilitar referencia congelada."
+                    )
+
+            stats_a_usar = gene_stats if usar_stats_congeladas else None
+            if usar_stats_congeladas and gene_stats is not None:
+                st.caption(f"Normalizando con estadísticas de referencia congeladas "
+                          f"de la calibración (apropiado para n={n_muestras} muestra(s)).")
+
             try:
-                z = zscore_genes(df, gene_order)
+                z = zscore_genes(df, gene_order, stats=stats_a_usar)
             except ValueError as err:
                 st.error(
                     f"No se puede normalizar la tabla: {err}\n\n"
