@@ -111,3 +111,25 @@ def test_run_full_diagnostics_no_stratify_flag_fits_pooled_model():
         df, "relapse_free_months", "relapse_event", ["cms_X"],
         cohort_col="cohort", stratify=False)
     assert resultado["cph"].strata is None
+
+
+def test_heterogeneity_interaction_handles_constant_covariate_cohort_gracefully():
+    """
+    Regresion de un hallazgo real con datos de produccion: GSE33113 es
+    una cohorte de estadio II homogeneo (stage_harmonized constante
+    dentro de ella) -- el termino de interaccion stage_harmonized x
+    dummy_GSE33113 queda perfectamente colineal con el dummy solo,
+    causando 'matriz singular' en lifelines. Debe detectarse
+    proactivamente con un mensaje claro, no dejar que lifelines truene
+    con su error interno.
+    """
+    df = _make_two_cohorts(hr_a=2.0, hr_b=2.0, seed=7)
+    df["stage_harmonized"] = 2  # CONSTANTE en ambas cohortes -- caso extremo
+    df.loc[df["cohort"] == "B", "stage_harmonized"] = df.loc[df["cohort"] == "B"].apply(
+        lambda r: 2, axis=1)  # A y B ambas constantes=2 (mismo valor, sigue siendo constante por cohorte)
+
+    resultado = check_heterogeneity_across_cohorts(
+        df, "relapse_free_months", "relapse_event", ["x", "stage_harmonized"], cohort_col="cohort")
+    fila = resultado["test_interaccion"].loc["stage_harmonized"]
+    assert "No estimable" in str(fila["error"])
+    assert "constante" in str(fila["error"])
