@@ -289,6 +289,19 @@ def test_investigate_unclassified_basins_finds_genuine_spurious_equilibria(synth
         # deben ser equilibrios genuinos (no solo ruido sin estructura)
         genuinos = [c for c in resultado["clusters"] if c["es_equilibrio_genuino"]]
         assert len(genuinos) > 0
+        assert all(c["residuo_maximo"] <= 1e-6 for c in genuinos)
+        assert all(c["max_parte_real_eigenvalor"] < 0 for c in genuinos)
+
+
+def test_spurious_equilibria_are_deduplicated_by_distance(synthetic_df):
+    patterns, _ = calibrate_patterns_from_data(synthetic_df)
+    W, _, _ = build_model_from_patterns(patterns)
+    resultado = investigate_unclassified_basins(
+        patterns, W, beta=10.0, n_samples=30, seed=7,
+        equilibrium_distance_threshold=0.25)
+    clusters = resultado["clusters"]
+    assert sum(c["n_miembros"] for c in clusters) == resultado["n_refinados_validos"]
+    assert len({c["equilibrio_id"] for c in clusters}) == len(clusters)
 
 
 def test_compare_clinical_trajectories_uses_different_beta_per_row():
