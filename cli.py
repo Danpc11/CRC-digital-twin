@@ -132,6 +132,15 @@ def cmd_dynamics_diagnostics(args):
     _run_module("dynamics_diagnostics.py", argv)
 
 
+def cmd_modern_hopfield(args):
+    argv = ["--patterns", args.patterns, "--beta", str(args.beta), "--n-samples", str(args.n_samples)]
+    if args.sweep:
+        argv.append("--sweep")
+    if args.output:
+        argv += ["--output", args.output]
+    _run_module("modern_hopfield.py", argv)
+
+
 def cmd_prognosis(args):
     argv = ["--patterns", args.patterns]
     if args.recurrence_target:
@@ -235,6 +244,18 @@ def build_parser():
                     help="Correr y guardar analisis avanzados de cuencas y atractores espurios")
     s.add_argument("--output")
     s.set_defaults(func=cmd_dynamics_diagnostics)
+
+    s = sub.add_parser("modern-hopfield",
+                        help="Verifica el REDISENIO de la dinamica (energia de Hopfield moderno, "
+                             "Ramsauer et al. 2020) -- flujo de gradiente genuino, alternativa a "
+                             "dynamics-diagnostics/attractor_model.py")
+    s.add_argument("--patterns", required=True)
+    s.add_argument("--beta", type=float, default=2.0)
+    s.add_argument("--n-samples", type=int, default=300)
+    s.add_argument("--sweep", action="store_true",
+                    help="Barrer varios valores de beta ademas del especificado")
+    s.add_argument("--output")
+    s.set_defaults(func=cmd_modern_hopfield)
 
     s = sub.add_parser("prognosis", help="Demo de pronostico longitudinal post-quirurgico")
     s.add_argument("--patterns", required=True)
