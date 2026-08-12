@@ -134,15 +134,17 @@ def cmd_dynamics_diagnostics(args):
 
 def cmd_modern_hopfield(args):
     argv = ["--patterns", args.patterns, "--beta", str(args.beta), "--n-samples", str(args.n_samples)]
+    argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
     if args.sweep:
         argv.append("--sweep")
     if args.compare_forced:
         argv.append("--compare-forced")
-        argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
     if args.find_forcing_threshold:
         argv += ["--find-forcing-threshold", args.find_forcing_threshold]
     if args.find_bias_threshold:
         argv += ["--find-bias-threshold", args.find_bias_threshold]
+    if args.verify_stabilizer:
+        argv.append("--verify-stabilizer")
     if args.output:
         argv += ["--output", args.output]
     _run_module("modern_hopfield.py", argv)
@@ -272,6 +274,10 @@ def build_parser():
     s.add_argument("--find-bias-threshold",
                     help="Igual pero con el mecanismo alternativo (sesgo en softmax) -- "
                          "NO verificado como solucion, probar sin asumir que funciona")
+    s.add_argument("--verify-stabilizer", action="store_true",
+                    help="Verifica el termino estabilizador para la fase pre-recaida (origen "
+                         "estable + simulacion completa contra los 4 patrones) -- pendiente de "
+                         "confirmar en datos reales, ver docstring del modulo")
     s.add_argument("--output")
     s.set_defaults(func=cmd_modern_hopfield)
 
