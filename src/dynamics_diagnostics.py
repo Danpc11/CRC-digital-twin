@@ -169,6 +169,60 @@ def empirical_basin_membership(
     return resumen
 
 
+def es_atractor_cms(
+    converged: bool, stable: bool, x_eq: np.ndarray, p_original: np.ndarray,
+    origin_threshold: float = 0.5, correlation_threshold: float = 0.8,
+) -> bool:
+    """
+    Criterio CORREGIDO tras revision externa -- "localmente_estable" NO
+    basta. El sistema linealizado en el origen tambien es estable para
+    beta<1 (ver docstring de sweep_beta_stability), asi que un
+    equilibrio puede ser "estable" simplemente por haber colapsado al
+    origen trivial, no por ser un atractor CMS genuino. Verificado
+    empiricamente: con beta=0.5, las 4 "estabilidades" reportadas
+    correspondian a un desplazamiento ~2.2 (la norma completa del
+    patron original) y correlacion NaN -- exactamente el patron de
+    colapso al origen.
+
+    Un atractor CMS genuino requiere las 4 condiciones:
+      1. converged -- fsolve encontro un equilibrio real
+      2. stable -- localmente estable (jacobiano, partes reales < 0)
+      3. NO es el origen -- ||x_eq|| > origin_threshold
+      4. SI se parece al patron original -- corr(x_eq, p) >= correlation_threshold
+    """
+    if not converged or not stable:
+        return False
+    if np.linalg.norm(x_eq) <= origin_threshold:
+        return False
+    if np.std(x_eq) < 1e-12 or np.std(p_original) < 1e-12:
+        return False
+    corr = float(np.corrcoef(x_eq, p_original)[0, 1])
+    return corr >= correlation_threshold
+
+
+def check_equilibria_separation(equilibria: dict, min_separation: float = 0.5) -> pd.DataFrame:
+    """
+    Verifica que los equilibrios encontrados para los distintos
+    patrones sean genuinamente DISTINTOS entre si (no que los 4
+    hayan colapsado al mismo punto, incluso si ese punto no es el
+    origen). Devuelve la matriz de distancias par a par.
+    """
+    labels = list(equilibria.keys())
+    n = len(labels)
+    dist = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            dist[i, j] = np.linalg.norm(equilibria[labels[i]] - equilibria[labels[j]])
+    df = pd.DataFrame(dist, index=labels, columns=labels)
+    colapsados = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if dist[i, j] < min_separation:
+                colapsados.append((labels[i], labels[j], dist[i, j]))
+    df.attrs["colapsados"] = colapsados
+    return df
+
+
 def sweep_beta_stability(patterns: dict, W: np.ndarray, beta_values=None) -> pd.DataFrame:
     """
     Barre beta buscando la transicion de estabilidad. Justificacion
@@ -177,16 +231,128 @@ def sweep_beta_stability(patterns: dict, W: np.ndarray, beta_values=None) -> pd.
     proyector ortogonal (eigenvalores en {0,1}), estabilidad en el
     origen requiere beta < 1 -- el mismo fenomeno de "ganancia critica"
     conocido en redes tipo Hopfield con no linealidad saturante.
+
+    CORREGIDO tras revision externa: "todos_estables" ahora exige
+    es_atractor_cms() (estable + no-origen + correlacionado), no solo
+    estabilidad del jacobiano -- antes beta<1 se reportaba
+    "todos_estables=True" cuando en realidad los 4 equilibrios habian
+    colapsado al origen trivial (verificado: desplazamiento~norma
+    completa del patron, correlacion NaN). Tambien reporta separacion
+    entre los 4 equilibrios, para detectar colapso mutuo (los 4
+    patrones convergiendo al MISMO punto no-origen).
     """
     if beta_values is None:
         beta_values = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2, 1.5, 2.0, 3.0]
     rows = []
     for beta in beta_values:
-        tabla = verify_all_patterns(patterns, W, beta)
+        equilibria = {}
+        es_atractor_por_patron = {}
+        peor_parte_real = -np.inf
+        for label, p in patterns.items():
+            x_eq, converged, _ = find_true_equilibrium(p, W, beta)
+            _, stable, max_real = stability_at_equilibrium(x_eq, W, beta)
+            peor_parte_real = max(peor_parte_real, max_real)
+            equilibria[label] = x_eq
+            es_atractor_por_patron[label] = es_atractor_cms(converged, stable, x_eq, p)
+
+        separacion = check_equilibria_separation(equilibria)
+        colapsados_entre_si = len(separacion.attrs["colapsados"]) > 0
+
         rows.append({
             "beta": beta,
-            "todos_estables": bool(tabla["localmente_estable"].all()),
-            "peor_parte_real": float(tabla["max_parte_real_eigenvalor"].max()),
+            "todos_son_atractores_cms_genuinos": bool(all(es_atractor_por_patron.values())),
+            "cuantos_son_atractores_cms": sum(es_atractor_por_patron.values()),
+            "equilibrios_colapsados_entre_si": colapsados_entre_si,
+            "min_separacion_entre_equilibrios": float(
+                separacion.values[np.triu_indices(len(patterns), k=1)].min()
+            ) if len(patterns) > 1 else float("nan"),
+            "peor_parte_real": float(peor_parte_real),
+        })
+    return pd.DataFrame(rows)
+
+
+def find_valid_beta_interval(
+    patterns: dict, W: np.ndarray, beta_min: float = 0.1, beta_max: float = 15.0,
+    n_steps: int = 150, min_separation: float = 0.5,
+) -> pd.DataFrame:
+    """
+    Busca automaticamente el/los intervalos de beta donde los 4
+    patrones califican SIMULTANEAMENTE como atractores CMS genuinos
+    (es_atractor_cms para los 4, mas separados entre si). Usa fsolve
+    independiente sembrado en el patron original en cada paso (no
+    continuacion/warm-start) -- necesario porque warm-start desde un
+    punto ya colapsado nunca puede recuperar ramas distintas.
+
+    Hallazgo verificado con la calibracion real del proyecto: con
+    beta=2.0 (el valor actual por defecto), CERO patrones califican.
+    Existe un intervalo robusto (no un punto aislado) mas arriba,
+    aproximadamente beta in [9.4, 11.9], donde los 4 SI califican,
+    bien separados entre si (todas las distancias par a par > 3.8).
+    """
+    betas = np.linspace(beta_min, beta_max, n_steps)
+    rows = []
+    for beta in betas:
+        equilibria = {}
+        atractores = {}
+        for label, p in patterns.items():
+            x_eq, converged, _ = find_true_equilibrium(p, W, beta)
+            _, stable, _ = stability_at_equilibrium(x_eq, W, beta)
+            equilibria[label] = x_eq
+            atractores[label] = es_atractor_cms(converged, stable, x_eq, p)
+        separacion = check_equilibria_separation(equilibria, min_separation)
+        rows.append({
+            "beta": beta,
+            "n_atractores_genuinos": sum(atractores.values()),
+            "todos_4_califican": sum(atractores.values()) == len(patterns),
+            "min_separacion": float(
+                separacion.values[np.triu_indices(len(patterns), k=1)].min()
+            ) if len(patterns) > 1 else float("nan"),
+        })
+    return pd.DataFrame(rows)
+
+
+def continuation_search(
+    patterns: dict, W: np.ndarray,
+    beta_start: float = 0.05, beta_end: float = 5.0, n_steps: int = 100,
+) -> pd.DataFrame:
+    """
+    Busqueda por CONTINUACION (warm-start secuencial), no fsolve
+    independiente en cada beta -- cada paso usa como semilla el
+    equilibrio encontrado en el paso anterior (empezando en beta_start
+    desde el propio patron calibrado), siguiendo una rama continua en
+    vez de arriesgarse a que fsolve salte a una rama distinta o al
+    origen en cada llamada independiente.
+
+    LIMITACION HONESTA: esto es continuacion secuencial simple, no
+    continuacion pseudo-arclength -- no maneja bien puntos de giro
+    (fold bifurcations) donde la rama podria doblarse sobre si misma.
+    Para una confirmacion definitiva de que existe (o no) un intervalo
+    de beta con 4 atractores CMS distintos y estables, hace falta un
+    paquete de continuacion numerica dedicado (ej. AUTO, MatCont, o
+    pseudo-arclength implementado a mano) -- esto es una primera
+    aproximacion razonable, no la palabra final.
+    """
+    betas = np.linspace(beta_start, beta_end, n_steps)
+    current_eq = {label: p.copy() for label, p in patterns.items()}
+    rows = []
+    for beta in betas:
+        equilibria = {}
+        es_atractor_por_patron = {}
+        for label, p in patterns.items():
+            x_eq, converged, _ = find_true_equilibrium(current_eq[label], W, beta)
+            _, stable, max_real = stability_at_equilibrium(x_eq, W, beta)
+            equilibria[label] = x_eq
+            current_eq[label] = x_eq  # warm-start para el siguiente paso
+            es_atractor_por_patron[label] = es_atractor_cms(converged, stable, x_eq, p)
+
+        separacion = check_equilibria_separation(equilibria)
+        rows.append({
+            "beta": beta,
+            "todos_son_atractores_cms_genuinos": bool(all(es_atractor_por_patron.values())),
+            "cuantos_son_atractores_cms": sum(es_atractor_por_patron.values()),
+            "min_separacion_entre_equilibrios": float(
+                separacion.values[np.triu_indices(len(patterns), k=1)].min()
+            ) if len(patterns) > 1 else float("nan"),
         })
     return pd.DataFrame(rows)
 
@@ -196,6 +362,10 @@ def main():
     parser.add_argument("--patterns", required=True)
     parser.add_argument("--beta", type=float, default=2.0)
     parser.add_argument("--n-samples", type=int, default=300)
+    parser.add_argument("--find-interval", action="store_true",
+                         help="Buscar automaticamente un intervalo de beta donde los 4 "
+                              "patrones califiquen como atractores CMS genuinos (busqueda "
+                              "mas lenta, no corre por default)")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -213,16 +383,42 @@ def main():
     tabla = verify_all_patterns(patterns, W, args.beta)
     print(tabla.to_string(index=False))
 
-    if not tabla["localmente_estable"].all():
-        inestables = tabla[~tabla["localmente_estable"]]["patron"].tolist()
-        print(f"\nAVISO: {inestables} NO son localmente estables en el sistema no lineal "
-              f"con beta={args.beta} -- no califican como atractores en sentido estricto. "
-              "Corriendo un barrido de beta para ubicar el punto de transicion...")
-        barrido = sweep_beta_stability(patterns, W)
-        print(barrido.to_string(index=False))
+    # CRITERIO CORREGIDO tras revision externa: "localmente_estable" no
+    # basta -- un equilibrio puede ser estable por haber colapsado al
+    # origen trivial (verificado: pasaba exactamente esto para beta<1
+    # con la calibracion real de este proyecto). Se exige
+    # es_atractor_cms (estable + no-origen + correlacionado) para los 4.
+    equilibria = {label: None for label in patterns}
+    atractores_genuinos = {}
+    for label, p in patterns.items():
+        x_eq, converged, _ = find_true_equilibrium(p, W, args.beta)
+        _, stable, _ = stability_at_equilibrium(x_eq, W, args.beta)
+        equilibria[label] = x_eq
+        atractores_genuinos[label] = es_atractor_cms(converged, stable, x_eq, p)
+
+    if not all(atractores_genuinos.values()):
+        no_califican = [k for k, v in atractores_genuinos.items() if not v]
+        print(f"\nAVISO: {no_califican} NO califican como atractores CMS genuinos con "
+              f"beta={args.beta} (estable + distinto del origen + correlacionado con el "
+              "patron original) -- puede ser inestabilidad, o puede ser colapso al origen "
+              "trivial (revisar 'desplazamiento_vs_patron_calibrado' en la tabla de arriba: "
+              "~norma del patron completo = colapso al origen).")
+        if args.find_interval:
+            print("\nBuscando un intervalo de beta donde los 4 SI califiquen "
+                  "(puede tardar unos segundos)...")
+            busqueda = find_valid_beta_interval(patterns, W)
+            validos = busqueda[busqueda["todos_4_califican"]]
+            if len(validos) > 0:
+                print(f"Encontrado: beta en [{validos['beta'].min():.2f}, "
+                      f"{validos['beta'].max():.2f}] -- los 4 califican en ese rango.")
+            else:
+                print("No se encontro ningun beta en [0.1, 15.0] donde los 4 califiquen "
+                      "simultaneamente. Considerar un rango mas amplio, o rediseñar la "
+                      "dinamica (ver docstring del modulo).")
     else:
-        print("\nTodos los patrones son equilibrios localmente estables del sistema no "
-              "lineal completo -- confirmado, no solo asumido.")
+        print(f"\nLos 4 patrones califican como atractores CMS genuinos con beta={args.beta} "
+              "-- estables, distintos del origen, y correlacionados con su patron calibrado. "
+              "Confirmado, no solo asumido.")
 
     print("\n" + "=" * 78)
     print(f"3. CUENCAS DE ATRACCION (empirico, n={args.n_samples} muestras aleatorias)")
