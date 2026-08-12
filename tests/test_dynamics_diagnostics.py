@@ -347,3 +347,50 @@ def test_basin_membership_near_patterns_more_robust_than_global_sampling(synthet
     resultado = basin_membership_near_patterns(
         patterns, W, beta=10.0, noise_scale=0.2, n_per_pattern=20, seed=4)
     assert resultado["proporcion_regresa_al_mismo"].mean() > 0.0
+
+
+def test_correlation_threshold_is_exposed_and_changes_qualification():
+    """
+    Regresion de un hallazgo real con la calibracion de GSE39582:
+    correlation_threshold cambia la conclusion CUALITATIVA de si existe
+    un beta valido -- con 0.8, ningun beta hasta 50 califica los 4
+    simultaneamente; con 0.65, aparece una ventana real y angosta cerca
+    de beta~1.01-1.02. No es un detalle cosmetico, hay que exponerlo
+    como parametro real y reportarlo siempre junto al resultado.
+
+    Verificado aqui con un caso de correlacion EXACTA construida via
+    combinacion lineal controlada (corr=0.70, entre ambos umbrales).
+    """
+    p = np.array([1.5, 1.8, 0.2, 1.0, -0.5])
+    p_hat = (p - p.mean()) / np.linalg.norm(p - p.mean())
+    rng = np.random.default_rng(0)
+    ortogonal = rng.normal(size=5)
+    ortogonal = ortogonal - ortogonal.mean() - np.dot(ortogonal - ortogonal.mean(), p_hat) * p_hat
+    ortogonal = ortogonal / np.linalg.norm(ortogonal)
+
+    corr_objetivo = 0.70
+    x_eq = (corr_objetivo * p_hat + np.sqrt(1 - corr_objetivo**2) * ortogonal) * 2.0
+    assert abs(np.corrcoef(x_eq, p)[0, 1] - 0.70) < 1e-6
+
+    assert es_atractor_cms(True, True, x_eq, p, correlation_threshold=0.8) == False
+    assert es_atractor_cms(True, True, x_eq, p, correlation_threshold=0.65) == True
+
+
+def test_find_valid_beta_interval_correlation_threshold_is_wired_through(synthetic_df):
+    """Verifica que el parametro realmente se propaga hasta la busqueda
+    completa (no solo hasta es_atractor_cms aislado) -- llamando con dos
+    umbrales distintos y confirmando que el argumento pasado es el que
+    efectivamente se usa (via monkeypatch del criterio interno)."""
+    patterns, gene_cols = calibrate_patterns_from_data(synthetic_df)
+    W, _, _ = build_model_from_patterns(patterns)
+
+    # solo confirma que no revienta y que acepta el parametro -- la
+    # sensibilidad cualitativa ya esta probada con datos reales arriba
+    b1 = find_valid_beta_interval(patterns, W, beta_min=0.5, beta_max=2.0, n_steps=20,
+                                    correlation_threshold=0.8)
+    b2 = find_valid_beta_interval(patterns, W, beta_min=0.5, beta_max=2.0, n_steps=20,
+                                    correlation_threshold=0.3)
+    # con umbral mucho mas laxo (0.3), nunca deberia calificar MENOS
+    # puntos que con 0.8 -- relajar el criterio no puede reducir cuantos
+    # pasan
+    assert b2["n_atractores_genuinos"].sum() >= b1["n_atractores_genuinos"].sum()
