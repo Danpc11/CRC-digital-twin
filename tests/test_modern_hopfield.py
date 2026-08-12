@@ -23,6 +23,7 @@ from modern_hopfield import (
     modern_hopfield_field,
     modern_hopfield_jacobian,
     patterns_to_matrix,
+    normalized_driver_direction,
     stability_at_equilibrium_hopfield,
     sweep_beta_hopfield,
     verify_all_patterns_hopfield,
@@ -393,6 +394,10 @@ def test_forcing_sweep_compares_identical_candidates_for_all_targets(real_patter
     assert sweep.groupby("patron_objetivo").size().eq(2).all()
     assert {"v1_corr_objetivo", "v2_corr_objetivo", "v2_norma_basal"}.issubset(sweep.columns)
     assert (sweep["v2_residuo_campo_en_origen"] < 1e-8).all()
+    assert np.allclose(sweep["norma_driver_aplicado"], sweep["fuerza_maxima"])
+    assert sweep["driver_normalizado"].all()
+    assert sweep["v2_estable_post_retirada"].all()
+    assert (sweep["v2_residuo_post_retirada"] < 1e-6).all()
 
 
 def test_modern_classifier_accepts_clear_pattern_and_rejects_origin(real_patterns):
@@ -419,3 +424,18 @@ def test_beta_sweep_rejects_duplicate_equilibria_even_if_each_matches():
     assert sweep.iloc[0]["n_patrones_ok"] == 4
     assert sweep.iloc[0]["min_separacion"] == 0.0
     assert sweep.iloc[0]["todos_4_ok"] == False
+
+
+def test_normalized_driver_has_unit_norm_for_every_pattern(real_patterns):
+    for pattern in real_patterns.values():
+        assert np.isclose(np.linalg.norm(normalized_driver_direction(pattern)), 1.0)
+
+
+def test_withdrawal_success_is_based_on_free_final_state(real_patterns):
+    sweep = compare_forcing_sweep_v1_v2(
+        real_patterns, beta=3.0, strength_candidates=[3.0],
+        n_timepoints=8, withdrawal_time=20.0)
+    assert (sweep["tiempo_retirada"] == 20.0).all()
+    assert {"v1_cms_activo", "v1_cms_final", "v2_cms_activo", "v2_cms_final"}.issubset(sweep.columns)
+    assert (sweep["v1_residuo_post_retirada"] < 1e-6).all()
+    assert (sweep["v2_residuo_post_retirada"] < 1e-6).all()
