@@ -1,8 +1,26 @@
 # Historial de cambios
 
-**Formato:** más reciente primero. 
+**Formato:** más reciente primero.
 No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
+
+## Modern Hopfield: estabilización basal, barrido V1/V2 y clasificación experimental
+
+- Se agregó la energía Modern Hopfield y su flujo de gradiente continuo, con Jacobiano
+  simétrico, verificación de energía, equilibrios, estabilidad y cuencas.
+- La fase de reposo ahora resta el campo basal uniforme
+  $b=X(1/M)$ y añade $-kx$; así $F(0)=0$ incluso cuando los centroides reales no suman
+  cero sin ponderar. La energía modificada es $E+b^Tx+(k/2)||x||^2$.
+- La transición hacia recaída apaga gradualmente la corrección basal y el estabilizador en
+  vez de retirarlos cuando la fuerza todavía vale cero.
+- Nuevo `--compare-stabilized-sweep`: compara V1 y V2 con idénticos β, tiempos, objetivos
+  y candidatos de fuerza para los cuatro CMS; guarda detalle y umbrales en TSV.
+- La app conserva la correlación CMS como clasificación principal y permite ejecutar una
+  recuperación Modern Hopfield experimental con criterios explícitos de convergencia,
+  estabilidad, residuo y correlación. Las discordancias no se fuerzan.
+- El análisis de cuencas ahora refina y verifica estabilidad/residuo; el barrido de β exige
+  separación mínima real entre los equilibrios.
+- Suite actual: **135 pruebas aprobadas**.
 
 ## Ronda de coherencia: panel y números de evidencia alineados en todo el código
 
