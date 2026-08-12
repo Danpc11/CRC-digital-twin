@@ -130,6 +130,19 @@ def test_dynamics_diagnostics_subcommand_is_registered():
 
 
 @patch("cli.subprocess.run")
+def test_modern_hopfield_dispatches_stabilized_sweep(mock_run):
+    mock_run.return_value = MagicMock(returncode=0)
+    args = cli.build_parser().parse_args([
+        "modern-hopfield", "--patterns", "p.tsv", "--compare-stabilized-sweep",
+        "--forcing-candidates", "0.7", "1.5", "3.0",
+    ])
+    cli.cmd_modern_hopfield(args)
+    called_cmd = mock_run.call_args[0][0]
+    assert "--compare-stabilized-sweep" in called_cmd
+    assert called_cmd[called_cmd.index("--forcing-candidates") + 1:] == ["0.7", "1.5", "3.0"]
+
+
+@patch("cli.subprocess.run")
 def test_cmd_dynamics_diagnostics_dispatches_correct_args(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     args = cli.build_parser().parse_args([
