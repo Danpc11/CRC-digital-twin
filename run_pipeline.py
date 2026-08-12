@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from calibration import (
     calibrate_patterns_from_data,
+    compute_gene_stats,
     infer_gene_columns,
     load_labeled_dataset,
     save_calibrated_patterns,
@@ -73,7 +74,8 @@ def main():
 
     print("\n--- Calibracion ---")
     patterns, gene_cols = calibrate_patterns_from_data(df, gene_cols)
-    save_calibrated_patterns(patterns, gene_cols, out_dir / "calibrated_patterns.tsv")
+    gene_stats = compute_gene_stats(df, gene_cols)
+    save_calibrated_patterns(patterns, gene_cols, out_dir / "calibrated_patterns.tsv", gene_stats)
 
     if args.skip_survival:
         print("\nValidacion de supervivencia omitida (--skip-survival).")
