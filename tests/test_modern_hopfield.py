@@ -182,3 +182,39 @@ def test_forcing_strength_1_5_converges_correctly_to_any_target(real_patterns):
     x_final = x[:, -1]
     corr_target = np.corrcoef(x_final, p_target)[0, 1] if np.std(x_final) > 1e-12 else np.nan
     assert corr_target > 0.95
+
+
+def test_find_minimum_forcing_strength_finds_correct_threshold(real_patterns):
+    """
+    Regresion de un hallazgo real: el umbral de fuerza suficiente NO es
+    universal (1.5 basto con datos sinteticos de prueba pero fallo con
+    la calibracion real de GSE39582, donde CMS2 termino con correlacion
+    NEGATIVA respecto al objetivo). find_minimum_forcing_strength debe
+    encontrar el umbral real para CUALQUIER calibracion, buscando en
+    vez de asumir un numero fijo.
+    """
+    from modern_hopfield import find_minimum_forcing_strength, patterns_to_matrix
+    X, labels = patterns_to_matrix(real_patterns)
+    normas = {l: np.linalg.norm(X[:, i]) for i, l in enumerate(labels)}
+    no_dominante = min(normas, key=normas.get)
+
+    resultado = find_minimum_forcing_strength(
+        real_patterns, no_dominante, beta=3.0,
+        strength_candidates=[0.7, 1.5, 3.0, 5.0, 8.0, 12.0])
+
+    assert resultado["umbral_minimo_encontrado"] is not None, (
+        "deberia encontrar ALGUN umbral suficiente dentro de los candidatos probados"
+    )
+    # verificar que el umbral encontrado realmente funciona (corr alta)
+    detalle_en_umbral = next(
+        d for d in resultado["detalle"] if d["fuerza"] == resultado["umbral_minimo_encontrado"])
+    assert detalle_en_umbral["corr_con_objetivo"] >= 0.9
+
+    # y que el candidato ANTERIOR (mas chico) en la lista, si existe, NO
+    # bastaba -- confirma que es el minimo, no cualquier valor que funcione
+    candidatos_ordenados = sorted(d["fuerza"] for d in resultado["detalle"])
+    idx_umbral = candidatos_ordenados.index(resultado["umbral_minimo_encontrado"])
+    if idx_umbral > 0:
+        fuerza_anterior = candidatos_ordenados[idx_umbral - 1]
+        detalle_anterior = next(d for d in resultado["detalle"] if d["fuerza"] == fuerza_anterior)
+        assert detalle_anterior["corr_con_objetivo"] < 0.9
