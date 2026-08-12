@@ -488,6 +488,7 @@ def sweep_beta_stability(patterns: dict, W: np.ndarray, beta_values=None) -> pd.
 def find_valid_beta_interval(
     patterns: dict, W: np.ndarray, beta_min: float = 0.1, beta_max: float = 15.0,
     n_steps: int = 150, min_separation: float = 0.5, output_path: str | Path | None = None,
+    correlation_threshold: float = 0.8, origin_threshold: float = 0.5,
 ) -> pd.DataFrame:
     """
     Busca automaticamente el/los rangos de beta donde los 4 patrones
@@ -501,6 +502,17 @@ def find_valid_beta_interval(
     solo contaba cuantos pasaban es_atractor_cms() individualmente, sin
     verificar que no hubieran colapsado unos con otros (4 podrian
     "calificar" cada uno por separado y aun asi ser el mismo punto).
+
+    correlation_threshold/origin_threshold: EXPUESTOS explicitamente
+    tras un hallazgo real con la calibracion de GSE39582 -- el umbral
+    de correlacion importa mucho, no es un detalle cosmetico. Con
+    threshold=0.8, NINGUN beta hasta 50 califica los 4 simultaneamente;
+    con threshold=0.65, aparece una ventana real y angosta en
+    beta~[1.011, 1.020] (justo pegada a la transicion de estabilidad
+    del origen, no en beta alto). La conclusion cualitativa
+    ("existe/no existe un beta valido") depende del umbral elegido --
+    reportar siempre junto con el threshold usado, nunca como un hecho
+    absoluto sin esa salvedad.
 
     Devuelve la tabla completa del barrido (una fila por beta). Usar
     find_contiguous_valid_segments() sobre el resultado para agrupar en
@@ -516,7 +528,9 @@ def find_valid_beta_interval(
             x_eq, converged, _ = find_true_equilibrium(p, W, beta)
             _, stable, _ = stability_at_equilibrium(x_eq, W, beta)
             equilibria[label] = x_eq
-            atractores[label] = es_atractor_cms(converged, stable, x_eq, p)
+            atractores[label] = es_atractor_cms(
+                converged, stable, x_eq, p,
+                origin_threshold=origin_threshold, correlation_threshold=correlation_threshold)
         separacion = check_equilibria_separation(equilibria, min_separation)
         colapsados_entre_si = len(separacion.attrs["colapsados"]) > 0
         min_sep = float(
@@ -645,6 +659,13 @@ def main():
     parser.add_argument("--n-steps-busqueda", type=int, default=150,
                          help="Resolucion del barrido de --find-interval (mas pasos = mas lento "
                               "pero menos probable de saltarse un tramo angosto)")
+    parser.add_argument("--correlation-threshold", type=float, default=0.8,
+                         help="Umbral de correlacion para es_atractor_cms -- ARBITRARIO, hallazgo "
+                              "real con GSE39582: con 0.8 no aparece ningun beta valido hasta 50, "
+                              "con 0.65 si aparece una ventana angosta cerca de beta~1.01-1.02. "
+                              "Reportar SIEMPRE junto con este valor, nunca como conclusion absoluta.")
+    parser.add_argument("--origin-threshold", type=float, default=0.5,
+                         help="Norma minima para no considerar el equilibrio como el origen colapsado")
     parser.add_argument("--full", action="store_true",
                          help="Correr analisis avanzados: equilibrios espurios, cuencas "
                               "locales, sensibilidad y comparacion beta=2 vs beta=10")
@@ -688,6 +709,8 @@ def main():
         if args.find_interval:
             print(f"\nBuscando un intervalo de beta en [{args.beta_min_busqueda}, "
                   f"{args.beta_max_busqueda}] donde los 4 SI califiquen "
+                  f"(umbral de correlacion={args.correlation_threshold} -- ARBITRARIO, la "
+                  "conclusion puede cambiar con otro umbral, ver docstring) "
                   "(puede tardar unos segundos)...")
             beta_min_busqueda, beta_max_busqueda = args.beta_min_busqueda, args.beta_max_busqueda
             ruta_tsv = None
@@ -696,7 +719,9 @@ def main():
                 ruta_tsv = str(Path(args.output) / "dynamics_beta_interval_search.tsv")
             busqueda = find_valid_beta_interval(
                 patterns, W, beta_min=beta_min_busqueda, beta_max=beta_max_busqueda,
-                n_steps=args.n_steps_busqueda, output_path=ruta_tsv)
+                n_steps=args.n_steps_busqueda, output_path=ruta_tsv,
+                correlation_threshold=args.correlation_threshold,
+                origin_threshold=args.origin_threshold)
             tramos = find_contiguous_valid_segments(busqueda, beta_max_explored=beta_max_busqueda)
             if tramos:
                 for t in tramos:
