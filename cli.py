@@ -120,6 +120,9 @@ def cmd_dynamics_diagnostics(args):
     argv = ["--patterns", args.patterns, "--beta", str(args.beta), "--n-samples", str(args.n_samples)]
     if args.find_interval:
         argv.append("--find-interval")
+        argv += ["--beta-min-busqueda", str(args.beta_min_busqueda)]
+        argv += ["--beta-max-busqueda", str(args.beta_max_busqueda)]
+        argv += ["--n-steps-busqueda", str(args.n_steps_busqueda)]
     if args.full:
         argv.append("--full")
     if args.output:
@@ -217,6 +220,11 @@ def build_parser():
     s.add_argument("--n-samples", type=int, default=300)
     s.add_argument("--find-interval", action="store_true",
                     help="Buscar automaticamente un intervalo de beta con 4 atractores CMS genuinos")
+    s.add_argument("--beta-min-busqueda", type=float, default=0.1)
+    s.add_argument("--beta-max-busqueda", type=float, default=15.0,
+                    help="Si el resultado anterior dijo 'limite superior NO determinado', "
+                         "subir este valor y repetir")
+    s.add_argument("--n-steps-busqueda", type=int, default=150)
     s.add_argument("--full", action="store_true",
                     help="Correr y guardar analisis avanzados de cuencas y atractores espurios")
     s.add_argument("--output")
