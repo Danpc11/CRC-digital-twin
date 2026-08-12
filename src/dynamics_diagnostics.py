@@ -779,7 +779,14 @@ def main():
             patterns, W, args.beta, n_per_pattern=max(10, args.n_samples // (2 * len(patterns))))
         resultados_full["sensibilidad"] = sensibilidad
 
-        comparacion = compare_clinical_trajectories(patterns, W, gene_order, betas=(2.0, 10.0))
+        # Incluir SIEMPRE el beta que el usuario pidio explicitamente
+        # (args.beta), ademas de las referencias 2.0/10.0 -- bug real
+        # encontrado en produccion: antes esto ignoraba --beta por
+        # completo, comparando siempre 2.0 vs 10.0 fijos aunque se
+        # pidiera --beta 1.015, dando una tabla que nunca mostraba el
+        # punto que realmente interesaba.
+        betas_comparar = sorted(set([2.0, args.beta, 10.0]))
+        comparacion = compare_clinical_trajectories(patterns, W, gene_order, betas=tuple(betas_comparar))
         resultados_full["comparacion"] = comparacion
         print("\nComparacion de trayectorias clinicas forzadas:")
         print(comparacion.to_string(index=False))
