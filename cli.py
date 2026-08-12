@@ -29,13 +29,18 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 
-def _run_module(module_name: str, args: list):
-    """Ejecuta un script de src/ como subproceso, propagando su codigo de salida."""
-    cmd = [sys.executable, str(SRC / module_name)] + args
+def _run_command(cmd: list):
+    """Ejecuta un comando como subproceso, propagando su codigo de salida
+    de forma limpia (sys.exit), sin traceback crudo de CalledProcessError."""
     print(f"$ {' '.join(cmd)}\n", flush=True)
     result = subprocess.run(cmd)
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+def _run_module(module_name: str, args: list):
+    """Ejecuta un script de src/ como subproceso, propagando su codigo de salida."""
+    _run_command([sys.executable, str(SRC / module_name)] + args)
 
 
 def cmd_demo(args):
@@ -68,7 +73,7 @@ def cmd_calibrate(args):
     extra = ["--input", args.input, "--output", args.output]
     if args.skip_survival:
         extra.append("--skip-survival")
-    subprocess.run([sys.executable, str(ROOT / "run_pipeline.py")] + extra, check=True)
+    _run_command([sys.executable, str(ROOT / "run_pipeline.py")] + extra)
 
 
 def cmd_classify(args):
