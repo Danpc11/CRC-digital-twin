@@ -126,3 +126,13 @@ def test_counterfactual_treated_trajectory_has_lower_final_hazard(real_calibrate
     hazard_baseline_final = hazard_from_trajectory(x_baseline)[-1]
     hazard_treated_final = hazard_from_trajectory(x_treated)[-1]
     assert hazard_treated_final < hazard_baseline_final
+
+
+def test_modern_treatment_rejects_legacy_weight_matrix(real_calibrated_patterns):
+    """W no debe aceptarse silenciosamente como la matriz de patrones X."""
+    patterns, gene_order = real_calibrated_patterns
+    W, _, _ = build_model_from_patterns(patterns)
+    with pytest.raises(ValueError, match="No pases la matriz W"):
+        simulate_with_optional_treatment(
+            W, len(gene_order), gene_order, patterns["CMS1_MSI_immune"], patterns,
+            dynamics_model="modern_hopfield")

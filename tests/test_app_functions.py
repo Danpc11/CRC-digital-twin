@@ -133,9 +133,10 @@ def test_cached_trajectory_produces_expected_shape(app_functions, real_calibrati
 
 def test_evaluate_all_treatments_returns_sorted_by_delta_descending(app_functions, real_calibration):
     patterns, gene_order, W = real_calibration
+    X, _ = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
     driver = patterns["CMS1_MSI_immune"] * 0.8
-    resultados = app_functions["evaluate_all_treatments"](W, n_genes, gene_order, driver, patterns)
+    resultados = app_functions["evaluate_all_treatments"](X, n_genes, gene_order, driver, patterns)
     assert len(resultados) == len(TREATMENT_MECHANISMS)
     deltas = [r["delta"] for r in resultados]
     assert deltas == sorted(deltas, reverse=True)
@@ -146,10 +147,11 @@ def test_evaluate_all_treatments_immunotherapy_applies_near_cms1(app_functions, 
     """Regresion de comportamiento esperado: inmunoterapia debe tener
     efecto para un paciente cerca de CMS1, no para uno cerca de CMS4."""
     patterns, gene_order, W = real_calibration
+    X, _ = patterns_to_matrix(patterns)
     n_genes = len(gene_order)
 
     driver_cms1 = patterns["CMS1_MSI_immune"] * 0.8
-    res_cms1 = app_functions["evaluate_all_treatments"](W, n_genes, gene_order, driver_cms1, patterns)
+    res_cms1 = app_functions["evaluate_all_treatments"](X, n_genes, gene_order, driver_cms1, patterns)
     aplica_cms1 = {r["treatment"]: r["aplica"] for r in res_cms1}
     assert aplica_cms1["immunotherapy_antiPD1"] == True
 
@@ -165,7 +167,7 @@ def test_build_patient_pdf_produces_valid_pdf_bytes(app_functions, real_calibrat
     t, x = app_functions["cached_trajectory"](X, gene_order, driver, n_genes, 10, 15)
     hazard = hazard_from_trajectory(x)
     alert, idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
-    resultados = app_functions["evaluate_all_treatments"](W, n_genes, gene_order, driver, patterns)
+    resultados = app_functions["evaluate_all_treatments"](X, n_genes, gene_order, driver, patterns)
     ev = EVIDENCE_STRENGTH.get("CMS4_mesenchymal", {})
 
     pdf_bytes = app_functions["build_patient_pdf"](
@@ -189,7 +191,7 @@ def test_build_patient_pdf_does_not_crash_without_alert(app_functions, real_cali
     alert, idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
     assert alert is False
 
-    resultados = app_functions["evaluate_all_treatments"](W, n_genes, gene_order, driver, patterns)
+    resultados = app_functions["evaluate_all_treatments"](X, n_genes, gene_order, driver, patterns)
     ev = EVIDENCE_STRENGTH.get("CMS4_mesenchymal", {})
     pdf_bytes = app_functions["build_patient_pdf"](
         "TEST-002", "CMS4_mesenchymal", 0.85, ev, t, hazard, alert, idx, resultados, gene_order)

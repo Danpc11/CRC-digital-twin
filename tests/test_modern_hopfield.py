@@ -28,6 +28,8 @@ from modern_hopfield import (
     sweep_beta_hopfield,
     verify_all_patterns_hopfield,
     verify_energy_decreases,
+    validate_modern_hopfield_beta,
+    validate_modern_pattern_matrix,
 )
 from calibration import calibrate_patterns_from_data
 from synthetic_data import generate_synthetic_cohort
@@ -36,6 +38,11 @@ from synthetic_data import generate_synthetic_cohort
 @pytest.fixture(scope="module")
 def synthetic_df():
     return generate_synthetic_cohort(n_per_class=60, noise_sigma=1.0, seed=1)
+
+
+def test_modern_pattern_matrix_rejects_square_legacy_matrix():
+    with pytest.raises(ValueError, match="No pases la matriz W"):
+        validate_modern_pattern_matrix(np.eye(10), n_genes=10, n_patterns=4)
 
 
 @pytest.fixture(scope="module")

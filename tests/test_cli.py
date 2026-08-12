@@ -136,6 +136,8 @@ def test_modern_hopfield_is_default_for_clinical_simulations():
         "simulate-treatment", "--patterns", "p.tsv", "--treatment", "anti_egfr"])
     assert prognosis.dynamics_model == "modern_hopfield"
     assert treatment.dynamics_model == "modern_hopfield"
+    assert prognosis.max_forcing_strength == 5.0
+    assert treatment.max_forcing_strength == 5.0
 
 
 @patch("cli.subprocess.run")
