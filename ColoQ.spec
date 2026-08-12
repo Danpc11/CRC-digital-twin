@@ -81,8 +81,23 @@ exe = EXE(
     upx=False,               # UPX comprime el binario pero dispara falsos
     upx_exclude=[],          # positivos de antivirus en Windows con frecuencia --
     runtime_tmpdir=None,     # no vale la pena el ahorro de tamano
-    console=True,             # deja la consola visible -- el usuario ve el
-                               # estado de arranque y como cerrar la app
+    console=False,            # sin consola visible -- app.py ya tiene su
+                               # propio boton "Salir" que mata el proceso
+                               # (os._exit(0), verificado que funciona desde
+                               # el hilo de Streamlit). Con consola=True, en
+                               # Mac via clic derecho->Abrir, Terminal.app
+                               # no cierra la ventana solo al terminar el
+                               # proceso (configuracion propia del emulador,
+                               # no controlable desde Python) -- quitarla
+                               # evita el problema de raiz.
+                               # RIESGO ACEPTADO: si algo falla ANTES de que
+                               # el navegador abra, no hay ningun mensaje de
+                               # error visible en ninguna plataforma. Si
+                               # aparece un problema de arranque nuevo (como
+                               # el de 'lifelines' faltante en Mac), va a ser
+                               # mas dificil de diagnosticar sin consola --
+                               # considerar volver a console=True temporalmente
+                               # para depurar si eso pasa.
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
