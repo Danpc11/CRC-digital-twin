@@ -58,11 +58,10 @@ son la base biologica del criterio de eficacia, no la direccion de la fuerza:
 
   3. Quimioterapia citotoxica (ej. FOLFOX)
      Efecto general (mecanismo no CMS-especifico), pero
-     consistentemente menos eficaz en tumores CMS4 -- patron
-     establecido en literatura CMS y confirmado empiricamente en este
-     mismo proyecto (CMS4 es el eje de peor pronostico mas robusto en
-     las 4 cohortes de validacion externa, HR=2.06 ajustado por
-     estadio, ver PROJECT_STATUS.md).
+     con hipotesis de eficacia relativa dependiente del contexto CMS.
+     En este proyecto CMS4 presenta HR promedio=2.06 ajustado por
+     estadio, pero viola riesgos proporcionales y no puede describirse
+     como efecto uniforme ni como respuesta terapeutica confirmada.
 """
 
 import numpy as np
@@ -89,9 +88,10 @@ TREATMENT_MECHANISMS = {
         "target_genes": ["VIM", "TGFB1"],
         "criterio": "reduced_efficacy_cms4",
         "evidence": (
-            "CMS4 = peor pronostico consistente en las 4 cohortes externas de "
-            "este proyecto (HR=2.06 ajustado por estadio, p=0.018) + literatura "
-            "CMS general de quimiorresistencia relativa."
+            "CMS4 muestra HR promedio=2.06 ajustado por estadio (p=0.018), con "
+            "violacion de riesgos proporcionales; esto es evidencia pronostica "
+            "retrospectiva, NO evidencia de respuesta a quimioterapia. La direccion "
+            "mecanistica se apoya solo como hipotesis en literatura CMS."
         ),
     },
 }

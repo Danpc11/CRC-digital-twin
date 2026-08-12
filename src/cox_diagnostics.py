@@ -39,8 +39,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from lifelines import CoxPHFitter
+from lifelines import CoxPHFitter, CoxTimeVaryingFitter
 from lifelines.statistics import proportional_hazard_test
+from scipy.stats import norm
 
 
 def check_proportional_hazards(cph: CoxPHFitter, df: pd.DataFrame, p_threshold: float = 0.05) -> pd.DataFrame:
@@ -73,6 +74,79 @@ def check_influential_observations(
     out = residuals.loc[idx_top].copy()
     out["magnitud_total"] = magnitud.loc[idx_top]
     return out.sort_values("magnitud_total", ascending=False)
+
+
+def fit_piecewise_cms4_effect(
+    df: pd.DataFrame, duration_col: str, event_col: str,
+    covariate_cols: list[str], cutoff: float = 36.0,
+    cohort_col: str = "cohort", stratify: bool = True,
+) -> dict:
+    """Estima HR de CMS4 antes y despues de un corte preespecificado.
+
+    Cada paciente se transforma al formato start-stop. El indicador CMS4
+    constante se reemplaza por dos covariables dependientes del tiempo,
+    evitando interpretar un unico HR promedio si el efecto no es proporcional.
+    """
+    cms4_col = "cms_CMS4_mesenchymal"
+    if cms4_col not in covariate_cols:
+        raise ValueError(f"No se encontro la covariable requerida '{cms4_col}'")
+    if cutoff <= 0:
+        raise ValueError("time_cutoff debe ser > 0")
+
+    constant_covariates = [c for c in covariate_cols if c != cms4_col]
+    required = [duration_col, event_col, cms4_col] + constant_covariates
+    if stratify:
+        required.append(cohort_col)
+    clean = df[required].dropna().copy()
+    clean = clean[clean[duration_col] > 0]
+    rows = []
+    for patient_id, (_, row) in enumerate(clean.iterrows()):
+        duration = float(row[duration_col])
+        event = int(row[event_col])
+        intervals = [(0.0, min(duration, cutoff), "early")]
+        if duration > cutoff:
+            intervals.append((cutoff, duration, "late"))
+        for start, stop, period in intervals:
+            if stop <= start:
+                continue
+            record = {
+                "patient_id": patient_id, "start": start, "stop": stop,
+                "event": int(event and np.isclose(stop, duration)),
+                "cms4_early": float(row[cms4_col]) if period == "early" else 0.0,
+                "cms4_late": float(row[cms4_col]) if period == "late" else 0.0,
+            }
+            for covariate in constant_covariates:
+                record[covariate] = float(row[covariate])
+            if stratify:
+                record[cohort_col] = row[cohort_col]
+            rows.append(record)
+    tv_df = pd.DataFrame(rows)
+    if tv_df.empty or tv_df["event"].sum() == 0:
+        raise ValueError("No hay intervalos/eventos suficientes para el Cox temporal")
+
+    ctv = CoxTimeVaryingFitter()
+    ctv.fit(
+        tv_df, id_col="patient_id", start_col="start", stop_col="stop",
+        event_col="event", strata=[cohort_col] if stratify else None,
+    )
+    covariance = ctv.variance_matrix_.to_numpy()
+    param_names = list(ctv.params_.index)
+    early_idx = param_names.index("cms4_early")
+    late_idx = param_names.index("cms4_late")
+    beta_early = float(ctv.params_["cms4_early"])
+    beta_late = float(ctv.params_["cms4_late"])
+    variance_diff = float(
+        covariance[early_idx, early_idx]
+        + covariance[late_idx, late_idx]
+        - 2 * covariance[early_idx, late_idx])
+    z_difference = (beta_early - beta_late) / np.sqrt(max(variance_diff, 1e-15))
+    return {
+        "model": ctv, "summary": ctv.summary.copy(), "cutoff": float(cutoff),
+        "n_patients": int(len(clean)), "n_events": int(tv_df["event"].sum()),
+        "hr_early": float(np.exp(beta_early)), "hr_late": float(np.exp(beta_late)),
+        "z_early_vs_late": float(z_difference),
+        "p_early_vs_late": float(2 * norm.sf(abs(z_difference))),
+    }
 
 
 def check_heterogeneity_across_cohorts(
@@ -170,6 +244,7 @@ def run_full_diagnostics(
     df: pd.DataFrame, duration_col: str, event_col: str, covariate_cols: list,
     cohort_col: str = "cohort", stratify: bool = True,
     output_dir: str | Path | None = None,
+    time_varying_cms4: bool = True, time_cutoff: float = 36.0,
 ) -> dict:
     """
     Corre los tres diagnosticos sobre EL MISMO MODELO que produce los HR
@@ -208,6 +283,27 @@ def run_full_diagnostics(
     else:
         print("\nSupuesto de riesgos proporcionales no rechazado para ninguna covariable.")
 
+    temporal = None
+    temporal_error = None
+    if time_varying_cms4 and "cms_CMS4_mesenchymal" in covariate_cols:
+        print("\n" + "=" * 78)
+        print(f"1b. SENSIBILIDAD TEMPORAL CMS4 (corte preespecificado={time_cutoff:g} meses)")
+        print("=" * 78)
+        try:
+            temporal = fit_piecewise_cms4_effect(
+                df, duration_col, event_col, covariate_cols,
+                cutoff=time_cutoff, cohort_col=cohort_col, stratify=stratify)
+            print(temporal["summary"].to_string())
+            print(
+                f"\nHR CMS4 temprano (<= {time_cutoff:g} meses): {temporal['hr_early']:.3f}\n"
+                f"HR CMS4 tardio  (>  {time_cutoff:g} meses): {temporal['hr_late']:.3f}\n"
+                f"Contraste temprano vs tardio: p={temporal['p_early_vs_late']:.4g}")
+            print("El corte debe declararse antes de inspeccionar resultados; probar muchos "
+                  "cortes y elegir el mas significativo inflaria el error tipo I.")
+        except Exception as exc:
+            temporal_error = str(exc)
+            print(f"No se pudo estimar el modelo temporal CMS4: {temporal_error}")
+
     print("\n" + "=" * 78)
     print("2. OBSERVACIONES INFLUYENTES (residuos delta-beta)")
     print("=" * 78)
@@ -240,9 +336,22 @@ def run_full_diagnostics(
         if het is not None:
             het["tabla_por_cohorte"].to_csv(out / "cox_diag_heterogeneity_by_cohort.tsv", sep="\t")
             het["test_interaccion"].to_csv(out / "cox_diag_heterogeneity_test.tsv", sep="\t")
+        if temporal is not None:
+            temporal["summary"].to_csv(out / "cox_diag_cms4_time_varying.tsv", sep="\t")
+            pd.DataFrame([{
+                "cutoff_months": temporal["cutoff"],
+                "n_patients": temporal["n_patients"], "n_events": temporal["n_events"],
+                "hr_early": temporal["hr_early"], "hr_late": temporal["hr_late"],
+                "z_early_vs_late": temporal["z_early_vs_late"],
+                "p_early_vs_late": temporal["p_early_vs_late"],
+            }]).to_csv(out / "cox_diag_cms4_time_contrast.tsv", sep="\t", index=False)
         print(f"\nTablas guardadas en: {out}")
 
-    return {"cph": cph, "proportional_hazards": ph_result, "influential": influential, "heterogeneity": het}
+    return {
+        "cph": cph, "proportional_hazards": ph_result,
+        "time_varying_cms4": temporal, "time_varying_cms4_error": temporal_error,
+        "influential": influential, "heterogeneity": het,
+    }
 
 
 def main():
@@ -259,6 +368,10 @@ def main():
     parser.add_argument("--no-stratify", action="store_true",
                          help="NO estratificar por cohorte (solo para comparacion/debug -- "
                               "el modelo principal SI estratifica, ver pooled_cox_validation.py)")
+    parser.add_argument("--time-cutoff", type=float, default=36.0,
+                        help="Corte preespecificado para HR temprano/tardio de CMS4")
+    parser.add_argument("--no-time-varying-cms4", action="store_true",
+                        help="Omitir el analisis temporal de sensibilidad de CMS4")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -295,7 +408,9 @@ def main():
     print(f"Referencia: {reference} | covariables: {covariate_cols} | n={len(df)}\n")
     run_full_diagnostics(df, args.duration_col, args.event_col, covariate_cols,
                           cohort_col="cohort", stratify=not args.no_stratify,
-                          output_dir=args.output)
+                          output_dir=args.output,
+                          time_varying_cms4=not args.no_time_varying_cms4,
+                          time_cutoff=args.time_cutoff)
 
 
 if __name__ == "__main__":

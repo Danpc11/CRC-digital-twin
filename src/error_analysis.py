@@ -1,6 +1,6 @@
 """
 error_analysis.py
-Análisis detallado de errores de clasificación en la cohorte externa GSE17536.
+Análisis detallado de errores de clasificación en cualquier cohorte externa.
 
 Preguntas que responde:
   1. ¿Los errores son de baja confianza (el modelo sabe que no sabe)?
@@ -39,9 +39,27 @@ SHORT = {
 }
 
 
-def load(path: str) -> pd.DataFrame:
+def load(
+    path: str, prediction_col: str = "predicted_cms",
+    confidence_col: str | None = None,
+) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t")
+    confidence_col = confidence_col or (
+        "modern_hopfield_correlation"
+        if prediction_col == "modern_hopfield_cms" else "classification_confidence")
+    missing = {"cms_label", prediction_col, confidence_col} - set(df.columns)
+    if missing:
+        raise ValueError(f"Faltan columnas para analizar errores: {missing}")
     df = df[df["cms_label"] != "none"].copy()
+    if prediction_col == "modern_hopfield_cms":
+        n_indeterminate = int((df[prediction_col] == "indeterminado").sum())
+        if n_indeterminate:
+            print(f"Modern Hopfield: {n_indeterminate} abstenciones excluidas del error condicionado")
+        df = df[df[prediction_col] != "indeterminado"].copy()
+    # Las funciones internas usan nombres canonicos; se conserva el origen.
+    df["analysis_prediction_source"] = prediction_col
+    df["predicted_cms"] = df[prediction_col]
+    df["classification_confidence"] = df[confidence_col]
     df["correct"] = df["cms_label"] == df["predicted_cms"]
     df["error_type"] = df.apply(
         lambda r: "correct" if r["correct"]
@@ -71,7 +89,7 @@ def confidence_analysis(df: pd.DataFrame) -> dict:
 
 
 # ── 2. Threshold sweep ───────────────────────────────────────────────────────
-def threshold_sweep(df: pd.DataFrame, out_dir: Path):
+def threshold_sweep(df: pd.DataFrame, out_dir: Path, cohort_name: str = "cohorte externa"):
     thresholds = np.linspace(0.1, 0.9, 81)
     rows = []
     for t in thresholds:
@@ -90,7 +108,7 @@ def threshold_sweep(df: pd.DataFrame, out_dir: Path):
     best = sweep.loc[sweep["f"].idxmax()]
 
     print(f"\n── 2. THRESHOLD SWEEP ──────────────────────────────────────────")
-    print(f"  Threshold óptimo (max F_acc×cov): {best['threshold']:.2f}")
+    print(f"  Threshold exploratorio in-sample (max F_acc×cov): {best['threshold']:.2f}")
     print(f"    → accuracy={best['accuracy']:.1%}  cobertura={best['coverage']:.1%}  "
           f"n={best['n']:.0f}/{len(df)}")
     print(f"  A conf ≥ 0.60: "
@@ -116,7 +134,7 @@ def threshold_sweep(df: pd.DataFrame, out_dir: Path):
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, frameon=False, fontsize=9,
                loc="lower left")
-    ax1.set_title("Accuracy vs cobertura por umbral de confianza\n(GSE17536 externa)",
+    ax1.set_title(f"Accuracy vs cobertura por umbral de confianza\n({cohort_name})",
                   fontsize=10)
     fig.tight_layout()
     fig.savefig(out_dir / "threshold_sweep.png", dpi=180)
@@ -136,7 +154,9 @@ def _at_threshold(sweep, t):
 
 
 # ── 3. Error breakdown por subtipo ───────────────────────────────────────────
-def error_breakdown(df: pd.DataFrame, out_dir: Path):
+def error_breakdown(
+    df: pd.DataFrame, out_dir: Path, cohort_name: str = "cohorte externa"
+) -> pd.Series:
     errors = df[~df["correct"]].copy()
 
     print(f"\n── 3. BREAKDOWN DE ERRORES (n={len(errors)}) ───────────────────")
@@ -154,7 +174,8 @@ def error_breakdown(df: pd.DataFrame, out_dir: Path):
               f"min={cms1_4['classification_confidence'].min():.3f}  "
               f"max={cms1_4['classification_confidence'].max():.3f}")
         print(f"    genes (media z-score de estos {len(cms1_4)} pacientes):")
-        gene_means = cms1_4[GENES].mean().sort_values()
+        available_genes = [gene for gene in GENES if gene in cms1_4.columns]
+        gene_means = cms1_4[available_genes].mean().sort_values()
         for g, v in gene_means.items():
             bar = "█" * int(abs(v) * 5) if abs(v) > 0.1 else "·"
             sign = "+" if v > 0 else "-"
@@ -173,7 +194,7 @@ def error_breakdown(df: pd.DataFrame, out_dir: Path):
         ax.set_xticks(range(1, len(top_errors) + 1))
         ax.set_xticklabels(top_errors, rotation=30, ha="right", fontsize=9)
         ax.set_ylabel("Confianza de clasificación")
-        ax.set_title("Distribución de confianza por tipo de error\n(GSE17536 externa)",
+        ax.set_title(f"Distribución de confianza por tipo de error\n({cohort_name})",
                      fontsize=10)
         ax.axhline(0.5, ls="--", color="gray", lw=1, label="conf=0.5")
         ax.legend(frameon=False, fontsize=8)
@@ -181,10 +202,17 @@ def error_breakdown(df: pd.DataFrame, out_dir: Path):
         fig.savefig(out_dir / "error_confidence_by_type.png", dpi=180)
         plt.close(fig)
         print(f"  → figura: {out_dir}/error_confidence_by_type.png")
+    return counts
 
 
 # ── 4. Heatmap de expresión génica: CMS1 correctos vs CMS1→CMS4 ─────────────
-def cms1_gene_heatmap(df: pd.DataFrame, out_dir: Path):
+def cms1_gene_heatmap(
+    df: pd.DataFrame, out_dir: Path, cohort_name: str = "cohorte externa"
+):
+    available_genes = [gene for gene in GENES if gene in df.columns]
+    if not available_genes:
+        print("\n── 4. EXPRESIÓN GÉNICA omitida: no hay genes del panel en el TSV ──")
+        return
     cms1_all = df[df["cms_label"] == "CMS1_MSI_immune"].copy()
     cms1_all["group"] = cms1_all["predicted_cms"].map(
         lambda x: "Correcto (CMS1)" if x == "CMS1_MSI_immune" else
@@ -194,7 +222,7 @@ def cms1_gene_heatmap(df: pd.DataFrame, out_dir: Path):
     print(f"\n── 4. EXPRESIÓN GÉNICA: CMS1 (n={len(cms1_all)}) ──────────────")
     for grp, sub in cms1_all.groupby("group"):
         print(f"\n  [{grp}  n={len(sub)}]")
-        gene_m = sub[GENES].mean().sort_values(ascending=False)
+        gene_m = sub[available_genes].mean().sort_values(ascending=False)
         for g, v in gene_m.items():
             bar = "█" * max(0, int(v * 3))
             print(f"    {g:8s}  {v:+.3f}  {bar}")
@@ -209,17 +237,17 @@ def cms1_gene_heatmap(df: pd.DataFrame, out_dir: Path):
         if sub.empty:
             ax.set_title(f"{grp}\n(sin datos)")
             continue
-        mat = sub[GENES].values
+        mat = sub[available_genes].values
         im = ax.imshow(mat.T, aspect="auto", cmap="RdBu_r",
                        vmin=vmin, vmax=vmax)
-        ax.set_yticks(range(len(GENES)))
-        ax.set_yticklabels(GENES, fontsize=9)
+        ax.set_yticks(range(len(available_genes)))
+        ax.set_yticklabels(available_genes, fontsize=9)
         ax.set_xlabel("Pacientes")
         ax.set_title(f"{grp}\n(n={len(sub)})", fontsize=10)
         ax.set_xticks([])
 
     fig.colorbar(im, ax=axes, shrink=0.7, label="z-score expresión")
-    fig.suptitle("Expresión génica: CMS1 clasificados correctamente vs error CMS1→CMS4",
+    fig.suptitle(f"Expresión génica: CMS1 correcto vs CMS1→CMS4 — {cohort_name}",
                  fontsize=10, y=1.02)
     fig.tight_layout()
     fig.savefig(out_dir / "cms1_vs_cms4_heatmap.png", dpi=180, bbox_inches="tight")
@@ -228,7 +256,26 @@ def cms1_gene_heatmap(df: pd.DataFrame, out_dir: Path):
 
 
 # ── 5. Resumen ejecutivo ─────────────────────────────────────────────────────
-def summary(df: pd.DataFrame, best_threshold: pd.Series):
+def cohen_kappa_from_labels(observed: pd.Series, predicted: pd.Series) -> float:
+    """Calcula kappa de Cohen a partir de las etiquetas observadas/predichas."""
+    labels = sorted(set(observed.dropna()) | set(predicted.dropna()))
+    if not labels or len(observed) == 0:
+        return float("nan")
+    observed_cat = pd.Categorical(observed, categories=labels)
+    predicted_cat = pd.Categorical(predicted, categories=labels)
+    table = pd.crosstab(observed_cat, predicted_cat, dropna=False).reindex(
+        index=labels, columns=labels, fill_value=0)
+    matrix = table.to_numpy(dtype=float)
+    n = matrix.sum()
+    agreement = np.trace(matrix) / n
+    expected = np.dot(matrix.sum(axis=1), matrix.sum(axis=0)) / n**2
+    return float((agreement - expected) / (1.0 - expected)) if expected < 1 else float("nan")
+
+
+def summary(
+    df: pd.DataFrame, best_threshold: pd.Series,
+    cohort_name: str = "cohorte externa",
+) -> dict:
     n_total   = len(df)
     n_correct = df["correct"].sum()
     n_error   = n_total - n_correct
@@ -236,22 +283,40 @@ def summary(df: pd.DataFrame, best_threshold: pd.Series):
     print("\n" + "=" * 65)
     print("RESUMEN EJECUTIVO")
     print("=" * 65)
-    print(f"  Cohorte externa: GSE17536  (n={n_total})")
+    kappa = cohen_kappa_from_labels(df["cms_label"], df["predicted_cms"])
+    errors = df.loc[~df["correct"], "error_type"].value_counts()
+    top_error = errors.index[0] if not errors.empty else "ninguno"
+    top_count = int(errors.iloc[0]) if not errors.empty else 0
+
+    print(f"  Cohorte externa: {cohort_name}  (n={n_total})")
     print(f"  Accuracy global:  {n_correct/n_total:.1%}  ({n_correct}/{n_total})")
     print(f"  Errores totales:  {n_error}")
-    print(f"  Kappa ≈ 0.687  (buena concordancia)")
+    print(f"  Kappa de Cohen: {kappa:.3f}")
     print()
-    print(f"  Threshold óptimo confianza: {best_threshold['threshold']:.2f}")
+    print(f"  Threshold exploratorio in-sample: {best_threshold['threshold']:.2f}")
     print(f"    → accuracy {best_threshold['accuracy']:.1%}  "
           f"con cobertura {best_threshold['coverage']:.1%}")
     print()
-    print("  Error más frecuente: CMS1→CMS4  (6/31 CMS1 = 19.4%)")
-    print("  Interpretación: CMS1 y CMS4 comparten baja expresión de")
-    print("  marcadores WNT/metabólicos; MLH1 y el eje inmune (GNLY/USP18)")
-    print("  son los genes que los separan — revisar si estos pacientes")
-    print("  tienen MLH1/GNLY/USP18 bajos para ser CMS1 genuinos vs")
-    print("  casos MSS-mesenquimales.")
+    print(f"  Error más frecuente: {top_error} (n={top_count})")
+    if not errors.empty and (errors == top_count).sum() > 1:
+        tied = ", ".join(errors[errors == top_count].index)
+        print(f"  Empate entre tipos de error: {tied}")
+    print("  AVISO: el umbral fue seleccionado y evaluado en la misma cohorte;")
+    print("  debe congelarse y validarse en otra cohorte antes de reportarlo.")
     print("=" * 65)
+    return {
+        "cohort": cohort_name,
+        "n": n_total,
+        "n_correct": int(n_correct),
+        "n_errors": int(n_error),
+        "accuracy": float(n_correct / n_total),
+        "cohen_kappa": kappa,
+        "exploratory_threshold": float(best_threshold["threshold"]),
+        "threshold_accuracy": float(best_threshold["accuracy"]),
+        "threshold_coverage": float(best_threshold["coverage"]),
+        "most_frequent_error": top_error,
+        "most_frequent_error_n": top_count,
+    }
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -261,19 +326,29 @@ def main():
                         help="scored_external_cohort.tsv")
     parser.add_argument("--out-dir", default=None,
                         help="directorio de salida (default: mismo dir que --input)")
+    parser.add_argument("--cohort-name", default=None,
+                        help="Nombre mostrado en tablas/figuras; default: directorio padre")
+    parser.add_argument("--prediction-col", default="predicted_cms",
+                        choices=["predicted_cms", "modern_hopfield_cms"])
+    parser.add_argument("--confidence-col", default=None,
+                        help="Default automatico segun --prediction-col")
     args = parser.parse_args()
 
     in_path = Path(args.input)
     out_dir = Path(args.out_dir) if args.out_dir else in_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
+    cohort_name = args.cohort_name or in_path.parent.name.removeprefix("results_external_")
 
-    df = load(args.input)
+    df = load(args.input, args.prediction_col, args.confidence_col)
 
     confidence_analysis(df)
-    sweep, best = threshold_sweep(df, out_dir)
-    error_breakdown(df, out_dir)
-    cms1_gene_heatmap(df, out_dir)
-    summary(df, best)
+    sweep, best = threshold_sweep(df, out_dir, cohort_name)
+    error_breakdown(df, out_dir, cohort_name)
+    cms1_gene_heatmap(df, out_dir, cohort_name)
+    metrics = summary(df, best, cohort_name)
+    sweep.to_csv(out_dir / "classification_threshold_sweep.tsv", sep="\t", index=False)
+    pd.DataFrame([metrics]).to_csv(
+        out_dir / "classification_error_summary.tsv", sep="\t", index=False)
 
 
 if __name__ == "__main__":

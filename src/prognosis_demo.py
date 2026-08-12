@@ -73,11 +73,12 @@ EVIDENCE_STRENGTH = {
                   "se puede concluir ausencia de efecto.",
     },
     "CMS4_mesenchymal": {
-        "level": "fuerte",
-        "detail": "HR=2.06 vs. CMS2, p=0.018 (ajustado por estadio; modelo global "
-                  "p<0.001) -- consistente en las 4 cohortes externas (GSE17536, "
-                  "GSE17537, GSE14333, GSE33113) y robusto al ajuste: el HR apenas "
-                  "cambia entre el modelo crudo restringido (2.34) y el ajustado (2.06).",
+        "level": "moderada/provisional",
+        "detail": "HR promedio=2.06 vs. CMS2, p=0.018 (ajustado por estadio), pero "
+                  "CMS4 viola el supuesto de riesgos proporcionales (Schoenfeld p=0.036). "
+                  "Dos cohortes no permiten estimar HR ajustados por separado por pocos "
+                  "eventos. Reportar HR temprano/tardio y validar en otra cohorte antes "
+                  "de describir el efecto como consistente o confirmatorio.",
     },
 }
 
@@ -250,7 +251,8 @@ def main():
         print(f"Al final de la rampa activa: {final_attractor} "
               f"(correlacion={final_corr:.3f})")
         if confirmation is not None:
-            status = "CONFIRMADO" if confirmation["converged"] and confirmation["stable"] else "NO CONFIRMADO"
+            status = ("ATRACTOR SIMULADO ESTABLE" if confirmation["converged"] and confirmation["stable"]
+                      else "ATRACTOR SIMULADO NO ESTABLECIDO")
             print(f"Tras retirar el driver: {confirmed_attractor} "
                   f"(correlacion={confirmed_corr:.3f}, {status}, "
                   f"residuo={confirmation['residual']:.2e})")
@@ -262,7 +264,7 @@ def main():
             print(f"Fuerza de evidencia externa de este atractor: {ev['level'].upper()}")
             print(f"  {ev['detail']}")
 
-        print(f"\n--- Tratamientos con mecanismo aplicable al estado final confirmado ---")
+        print(f"\n--- Mecanismos simulados para el atractor final del modelo ---")
         treatments = applicable_treatments(
             confirmation["state"] if confirmation is not None else x_final,
             gene_order, patterns)

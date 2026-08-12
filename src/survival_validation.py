@@ -145,11 +145,12 @@ def interpret_validation_result(result: dict) -> str:
     n = result["n_patients"]
     endpoint = result.get("endpoint_label", "supervivencia (endpoint no especificado)")
     group_col = result.get("group_col", "predicted_cms")
-    group_desc = (
-        "etiqueta CMS OFICIAL del consorcio (linea base, no depende del panel reducido)"
-        if group_col == "cms_label"
-        else "subtipo RECLASIFICADO por el panel reducido del modelo"
-    )
+    group_descriptions = {
+        "cms_label": "etiqueta CMS OFICIAL del consorcio (linea base)",
+        "predicted_cms": "subtipo RECLASIFICADO por correlacion con el panel reducido",
+        "modern_hopfield_cms": "subtipo recuperado dinamicamente por Modern Hopfield",
+    }
+    group_desc = group_descriptions.get(group_col, f"grupos de la columna '{group_col}'")
     lines = [
         f"Endpoint: {endpoint}",
         f"Agrupacion: {group_desc}",
@@ -158,15 +159,16 @@ def interpret_validation_result(result: dict) -> str:
         f"log-rank p = {p:.4g}",
     ]
     if p < 0.05:
+        subject = "La agrupacion CMS oficial" if group_col == "cms_label" else "El subtipo predicho por el modelo"
         lines.append(
-            f"El subtipo predicho por el modelo separa significativamente las "
+            f"{subject} separa significativamente las "
             f"curvas de {endpoint} en esta cohorte. Esto es evidencia de "
             "utilidad pronostica para ESTE endpoint especificamente -- NO "
             "generaliza automaticamente a otro desenlace (ej. supervivencia "
             "global no implica lo mismo que supervivencia libre de recidiva), "
             "y NO es lo mismo que validacion clinica, que requeriria "
-            "replicacion en cohorte externa independiente (ej. GSE17536/"
-            "GSE17537) antes de cualquier uso mas alla de investigacion."
+            "replicacion en una cohorte confirmatoria que no haya intervenido "
+            "en decisiones del modelo antes de cualquier uso mas alla de investigacion."
         )
     else:
         lines.append(

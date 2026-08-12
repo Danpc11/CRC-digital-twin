@@ -290,18 +290,22 @@ def classify_expression_modern_hopfield(
 
 def score_cohort_modern_hopfield(
     df, gene_cols: list[str], patterns: dict, beta: float = 3.0,
-    corr_threshold: float = 0.8,
+    corr_threshold: float = 0.8, integration_time: float = 30.0,
 ):
     """Agrega columnas de recuperacion Modern Hopfield a una cohorte."""
     out = df.copy()
     results = [classify_expression_modern_hopfield(
         row.to_numpy(dtype=float), patterns, beta=beta,
-        corr_threshold=corr_threshold) for _, row in df[gene_cols].iterrows()]
+        corr_threshold=corr_threshold,
+        integration_time=integration_time) for _, row in df[gene_cols].iterrows()]
     out["modern_hopfield_cms"] = [r["label"] for r in results]
     out["modern_hopfield_correlation"] = [r["correlation"] for r in results]
     out["modern_hopfield_margin"] = [r["margin"] for r in results]
     out["modern_hopfield_residual"] = [r["residual"] for r in results]
+    out["modern_hopfield_converged"] = [r["converged"] for r in results]
     out["modern_hopfield_stable"] = [r["stable"] for r in results]
+    out["modern_hopfield_displacement"] = [r["displacement"] for r in results]
+    out["modern_hopfield_energy_drop"] = [r["energy_drop"] for r in results]
     if "predicted_cms" in out.columns:
         out["modern_hopfield_concordant"] = (
             out["modern_hopfield_cms"] == out["predicted_cms"])

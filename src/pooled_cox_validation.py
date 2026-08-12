@@ -25,11 +25,93 @@ import argparse
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter
+from scipy.stats import chi2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clinical_covariates import prepare_covariates
+
+
+def build_cox_frame(
+    data: pd.DataFrame, duration_col: str, event_col: str,
+    reference: str, clinical_covariates: list[str] | None = None,
+    include_cms: bool = True, cms_levels: list[str] | None = None,
+    group_col: str = "predicted_cms",
+) -> pd.DataFrame:
+    """Construye exactamente la misma muestra para modelos Cox anidados."""
+    clinical_covariates = clinical_covariates or []
+    base_cols = [duration_col, event_col, "cohort"] + clinical_covariates
+    base = data[base_cols].reset_index(drop=True).copy()
+    base = base.rename(columns={duration_col: "duration", event_col: "event"})
+    if include_cms:
+        levels = cms_levels or sorted(data[group_col].dropna().unique())
+        if reference not in levels:
+            raise ValueError(f"La referencia '{reference}' no aparece en {group_col}")
+        groups = pd.Categorical(data[group_col], categories=levels)
+        dummies = pd.get_dummies(groups, prefix="cms", dtype=float)
+        dummies = dummies.drop(columns=[f"cms_{reference}"], errors="ignore")
+        base = pd.concat([base, dummies.reset_index(drop=True)], axis=1)
+    return base.dropna()
+
+
+def nested_model_increment(reduced: CoxPHFitter, full: CoxPHFitter) -> dict:
+    """Prueba LRT del aporte conjunto de las covariables añadidas."""
+    df_added = len(full.params_) - len(reduced.params_)
+    if df_added <= 0:
+        raise ValueError("El modelo completo debe contener mas parametros que el reducido")
+    statistic = max(0.0, 2.0 * (full.log_likelihood_ - reduced.log_likelihood_))
+    return {
+        "lr_chi2": float(statistic), "df": int(df_added),
+        "p_incremental": float(chi2.sf(statistic, df_added)),
+        "c_index_stage_only": float(reduced.concordance_index_),
+        "c_index_stage_plus_cms": float(full.concordance_index_),
+        "delta_c_index": float(full.concordance_index_ - reduced.concordance_index_),
+        "aic_partial_stage_only": float(reduced.AIC_partial_),
+        "aic_partial_stage_plus_cms": float(full.AIC_partial_),
+    }
+
+
+def bootstrap_cindex_increment(
+    data: pd.DataFrame, duration_col: str, event_col: str, reference: str,
+    iterations: int = 200, seed: int = 2026,
+    group_col: str = "predicted_cms",
+) -> pd.DataFrame:
+    """Bootstrap estratificado por cohorte del cambio de C-index al añadir CMS."""
+    if iterations < 0:
+        raise ValueError("bootstrap_iterations debe ser >= 0")
+    if iterations == 0:
+        return pd.DataFrame(columns=["iteration", "delta_c_index"])
+    rng = np.random.default_rng(seed)
+    levels = sorted(data[group_col].dropna().unique())
+    rows = []
+    for iteration in range(iterations):
+        pieces = []
+        for _, cohort_df in data.groupby("cohort", sort=False):
+            sampled_positions = rng.integers(0, len(cohort_df), size=len(cohort_df))
+            pieces.append(cohort_df.iloc[sampled_positions].copy())
+        sample = pd.concat(pieces, ignore_index=True)
+        try:
+            stage_df = build_cox_frame(
+                sample, duration_col, event_col, reference,
+                ["stage_harmonized"], include_cms=False, group_col=group_col)
+            full_df = build_cox_frame(
+                sample, duration_col, event_col, reference,
+                ["stage_harmonized"], include_cms=True, cms_levels=levels,
+                group_col=group_col)
+            stage_model = CoxPHFitter().fit(
+                stage_df, "duration", "event", strata=["cohort"])
+            full_model = CoxPHFitter().fit(
+                full_df, "duration", "event", strata=["cohort"])
+            rows.append({
+                "iteration": iteration,
+                "delta_c_index": full_model.concordance_index_ - stage_model.concordance_index_,
+            })
+        except Exception:
+            # Algunos remuestreos con muy pocos eventos pueden ser singulares.
+            rows.append({"iteration": iteration, "delta_c_index": np.nan})
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -41,6 +123,8 @@ def main():
     )
     parser.add_argument("--duration-col", default="relapse_free_months")
     parser.add_argument("--event-col", default="relapse_event")
+    parser.add_argument("--group-col", default="predicted_cms",
+                        help="Columna CMS: predicted_cms o modern_hopfield_cms")
     parser.add_argument("--reference", default=None,
                          help="Subtipo CMS a usar como referencia (default: el mas frecuente en el pool)")
     parser.add_argument("--adjust-stage", action="store_true",
@@ -49,6 +133,9 @@ def main():
     parser.add_argument("--keep-stage-iv", action="store_true",
                          help="No excluir pacientes en estadio IV del modelo ajustado "
                               "(por default se excluyen: ya tienen metastasis al diagnostico)")
+    parser.add_argument("--bootstrap-iterations", type=int, default=200,
+                        help="Remuestreos para IC del cambio de C-index; 0 lo desactiva")
+    parser.add_argument("--bootstrap-seed", type=int, default=2026)
     parser.add_argument("--output", default="results_pooled_cox")
     args = parser.parse_args()
 
@@ -58,7 +145,7 @@ def main():
     frames = []
     for name, path in args.cohort:
         df = pd.read_csv(path, sep="\t")
-        missing = {args.duration_col, args.event_col, "predicted_cms"} - set(df.columns)
+        missing = {args.duration_col, args.event_col, args.group_col} - set(df.columns)
         if missing:
             raise ValueError(f"'{path}' no tiene las columnas requeridas: {missing}")
         df["cohort"] = name
@@ -66,13 +153,17 @@ def main():
         print(f"{name}: {len(df)} muestras cargadas desde {path}")
 
     pooled = pd.concat(frames, ignore_index=True)
-    pooled = pooled.dropna(subset=[args.duration_col, args.event_col, "predicted_cms"])
+    pooled = pooled.dropna(subset=[args.duration_col, args.event_col, args.group_col])
+    if args.group_col == "modern_hopfield_cms":
+        n_before = len(pooled)
+        pooled = pooled[pooled[args.group_col] != "indeterminado"]
+        print(f"Modern Hopfield: {n_before-len(pooled)} muestras indeterminadas excluidas")
 
     print(f"\nn total combinado (con datos completos): {len(pooled)}")
     print("\nMuestras por cohorte:")
     print(pooled.groupby("cohort").size())
     print("\nMuestras por subtipo predicho:")
-    print(pooled["predicted_cms"].value_counts())
+    print(pooled[args.group_col].value_counts())
 
     if pooled["cohort"].nunique() < 2:
         print(
@@ -80,20 +171,20 @@ def main():
             "no aporta nada sobre un log-rank simple en ese caso, pero se corre igual."
         )
 
-    reference = args.reference or pooled["predicted_cms"].value_counts().idxmax()
+    reference = args.reference or pooled[args.group_col].value_counts().idxmax()
     print(f"\nSubtipo de referencia (hazard ratio = 1.0 para este grupo): {reference}")
 
-    def fit_cox(data: pd.DataFrame, covariates: list, label: str):
-        """Ajusta un Cox estratificado por cohorte con las covariables dadas."""
-        dummies = pd.get_dummies(data["predicted_cms"], prefix="cms", dtype=float)
-        ref_col = f"cms_{reference}"
-        if ref_col in dummies.columns:
-            dummies = dummies.drop(columns=[ref_col])
+    cms_levels = sorted(pooled[args.group_col].dropna().unique())
 
-        base = data[[args.duration_col, args.event_col, "cohort"] + covariates].reset_index(drop=True)
-        cox_df = pd.concat([base, dummies.reset_index(drop=True)], axis=1)
-        cox_df = cox_df.rename(columns={args.duration_col: "duration", args.event_col: "event"})
-        cox_df = cox_df.dropna()
+    def fit_cox(
+        data: pd.DataFrame, covariates: list, label: str,
+        include_cms: bool = True,
+    ):
+        """Ajusta un Cox estratificado por cohorte con las covariables dadas."""
+        cox_df = build_cox_frame(
+            data, args.duration_col, args.event_col, reference,
+            covariates, include_cms=include_cms, cms_levels=cms_levels,
+            group_col=args.group_col)
 
         print(f"\n{'=' * 66}\n{label}  (n = {len(cox_df)})\n{'=' * 66}")
         cph = CoxPHFitter()
@@ -110,7 +201,7 @@ def main():
     cph_crude.summary.to_csv(out_dir / "cox_summary_crude.tsv", sep="\t")
 
     # --- Modelo 2: AJUSTADO por estadio (si hay datos) ---
-    cph_adj = lr_adj = cph_restr = None
+    cph_adj = lr_adj = cph_restr = cph_stage_only = None
     n_adj = n_restr = 0
     if args.adjust_stage:
         if "stage" not in pooled.columns:
@@ -138,10 +229,44 @@ def main():
                     "MODELO CRUDO RESTRINGIDO -- misma muestra que el ajustado, SIN estadio")
                 cph_restr.summary.to_csv(out_dir / "cox_summary_crude_restricted.tsv", sep="\t")
 
+                cph_stage_only, _, _ = fit_cox(
+                    adj_data, ["stage_harmonized"],
+                    "MODELO CLINICO BASE -- solo estadio", include_cms=False)
+                cph_stage_only.summary.to_csv(
+                    out_dir / "cox_summary_stage_only.tsv", sep="\t")
+
                 cph_adj, lr_adj, n_adj = fit_cox(
                     adj_data, ["stage_harmonized"],
                     "MODELO AJUSTADO -- subtipo CMS + estadio")
                 cph_adj.summary.to_csv(out_dir / "cox_summary_adjusted.tsv", sep="\t")
+
+                incremental = nested_model_increment(cph_stage_only, cph_adj)
+                print(f"\n{'=' * 78}\nAPORTE INCREMENTAL DE CMS SOBRE ESTADIO\n{'=' * 78}")
+                print(
+                    f"LRT estadio vs. estadio+CMS: chi2={incremental['lr_chi2']:.3f}, "
+                    f"df={incremental['df']}, p={incremental['p_incremental']:.4g}")
+                print(
+                    f"C-index: estadio={incremental['c_index_stage_only']:.3f}, "
+                    f"estadio+CMS={incremental['c_index_stage_plus_cms']:.3f}, "
+                    f"delta={incremental['delta_c_index']:+.3f}")
+
+                boot = bootstrap_cindex_increment(
+                    adj_data, args.duration_col, args.event_col, reference,
+                    iterations=args.bootstrap_iterations, seed=args.bootstrap_seed,
+                    group_col=args.group_col)
+                valid_delta = boot["delta_c_index"].dropna()
+                incremental["bootstrap_iterations_requested"] = args.bootstrap_iterations
+                incremental["bootstrap_iterations_valid"] = len(valid_delta)
+                if len(valid_delta):
+                    low, high = np.quantile(valid_delta, [0.025, 0.975])
+                    incremental["delta_c_index_bootstrap_low95"] = float(low)
+                    incremental["delta_c_index_bootstrap_high95"] = float(high)
+                    print(
+                        f"IC95% bootstrap del delta C-index: [{low:+.3f}, {high:+.3f}] "
+                        f"({len(valid_delta)}/{args.bootstrap_iterations} remuestreos validos)")
+                pd.DataFrame([incremental]).to_csv(
+                    out_dir / "cox_incremental_value.tsv", sep="\t", index=False)
+                boot.to_csv(out_dir / "cox_incremental_cindex_bootstrap.tsv", sep="\t", index=False)
 
     # --- Comparacion de los tres modelos: la pregunta que importa ---
     if cph_adj is not None:
@@ -217,6 +342,7 @@ def main():
         f.write(f"n total combinado: {len(pooled)}\n")
         f.write(f"Cohortes: {dict(pooled.groupby('cohort').size())}\n")
         f.write(f"Subtipo de referencia: {reference}\n\n")
+        f.write(f"Columna de clasificacion: {args.group_col}\n\n")
         f.write(str(summary))
         f.write(
             f"\n\nLog-likelihood ratio test (significancia global): "
