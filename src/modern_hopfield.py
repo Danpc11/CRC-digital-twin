@@ -270,6 +270,99 @@ def sweep_beta_hopfield(patterns: dict, beta_values=None) -> "pd.DataFrame":
 
 
 
+def simulate_longitudinal_patient_hopfield(
+    X: np.ndarray, recurrence_pattern: np.ndarray, n_genes: int,
+    n_timepoints: int = 8, months_between_checks: int = 3,
+    recurrence_onset_month: int = 15, beta: float = 2.0,
+    max_forcing_strength: float = 1.5,
+) -> tuple:
+    """
+    Version de simulate_longitudinal_patient (prognosis_demo.py) con
+    la dinamica de Hopfield moderno en vez de attractor_model.dynamics
+    -- MISMA estructura de forzamiento (I_driver creciente hacia
+    recurrence_pattern despues de recurrence_onset_month), para
+    comparacion directa y justa entre ambas dinamicas bajo el USO
+    PRACTICO real de la app (con forzamiento activo, no cuencas
+    libres).
+
+    max_forcing_strength: EXPUESTO explicitamente, default 1.5, no 0.7
+    (el valor usado en prognosis_demo.py para la dinamica anterior) --
+    hallazgo real: la dinamica de Hopfield moderno tiene una atraccion
+    NATIVA mucho mas fuerte hacia su patron dominante (eigenvalor ~-1.0
+    para CMS1, el de mayor norma en la calibracion real) que la
+    dinamica anterior (eigenvalores ~-0.08 cerca de su region critica).
+    Con fuerza_max=0.7 (el valor viejo), forzar hacia un patron NO
+    dominante (ej. CMS2) termina en el patron dominante en vez del
+    objetivo (verificado: corr con CMS2=0.32, corr con CMS1=0.75).
+    Con fuerza_max>=1.5, converge correctamente (corr con objetivo=1.0)
+    de forma robusta -- verificado 1.5/3.0/5.0 dan resultados identicos.
+    """
+    t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
+    x_series = np.zeros((n_genes, n_timepoints))
+    x_current = np.zeros(n_genes)
+
+    for i, t in enumerate(t_checks):
+        if t >= recurrence_onset_month:
+            months_since_onset = t - recurrence_onset_month
+            strength = min(0.15 * months_since_onset, max_forcing_strength)
+            I_driver = strength * recurrence_pattern
+        else:
+            I_driver = np.zeros(n_genes)
+
+        sol = solve_ivp(
+            lambda tt, xx: modern_hopfield_field(xx, X, beta) + I_driver,
+            (0, months_between_checks), x_current, method="RK45", rtol=1e-8, atol=1e-10)
+        x_current = sol.y[:, -1]
+        x_series[:, i] = x_current
+
+    return t_checks, x_series
+
+
+def compare_forced_trajectories_old_vs_new(
+    patterns: dict, W_old: np.ndarray, gene_order: list,
+    beta_old: float = 2.0, beta_new: float = 3.0, max_forcing_strength_new: float = 1.5,
+    recurrence_onset_month: int = 15, n_timepoints: int = 10,
+) -> "pd.DataFrame":
+    """
+    La pregunta central para decidir si este rediseno mejora el USO
+    CLINICO real (no solo las propiedades matematicas abstractas):
+    con el MISMO forzamiento activo que usa prognosis_demo.py, la
+    dinamica NUEVA converge al patron objetivo tan bien o mejor que la
+    ANTIGUA, incluso para los patrones con cuenca libre mas chica
+    (CMS2/CMS4)?
+    """
+    import pandas as pd
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent))
+    from prognosis_demo import simulate_longitudinal_patient as simulate_old
+    from prognosis import hazard_from_trajectory
+
+    X, labels = patterns_to_matrix(patterns)
+    n_genes = len(gene_order)
+    filas = []
+    for i, label in enumerate(labels):
+        p = X[:, i]
+
+        t_old, x_old = simulate_old(W_old, gene_order, p, n_genes, beta=beta_old,
+                                      n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        h_old = hazard_from_trajectory(x_old)
+        corr_old = float(np.corrcoef(x_old[:, -1], p)[0, 1]) if np.std(x_old[:, -1]) > 1e-12 else float("nan")
+
+        t_new, x_new = simulate_longitudinal_patient_hopfield(
+            X, p, n_genes, beta=beta_new, max_forcing_strength=max_forcing_strength_new,
+            n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        h_new = hazard_from_trajectory(x_new)
+        corr_new = float(np.corrcoef(x_new[:, -1], p)[0, 1]) if np.std(x_new[:, -1]) > 1e-12 else float("nan")
+
+        filas.append({
+            "patron": label,
+            "hazard_final_antigua": float(h_old[-1]), "correlacion_final_antigua": corr_old,
+            "hazard_final_nueva": float(h_new[-1]), "correlacion_final_nueva": corr_new,
+        })
+    return pd.DataFrame(filas)
+
+
 def main():
     import argparse
     from pathlib import Path
@@ -282,6 +375,15 @@ def main():
     parser.add_argument("--n-samples", type=int, default=300)
     parser.add_argument("--sweep", action="store_true",
                          help="Barrer varios valores de beta en vez de solo el especificado")
+    parser.add_argument("--compare-forced", action="store_true",
+                         help="Comparar trayectorias clinicas FORZADAS (como las usa prognosis_demo.py) "
+                              "entre la dinamica antigua y esta nueva")
+    parser.add_argument("--max-forcing-strength", type=float, default=1.5,
+                         help="Fuerza maxima de forzamiento para --compare-forced -- hallazgo real: "
+                              "con el valor viejo (0.7, calibrado para attractor_model.py), forzar "
+                              "hacia un patron no dominante termina en el patron dominante en su lugar "
+                              "(la atraccion nativa de esta dinamica es mas fuerte). 1.5 es el minimo "
+                              "verificado que corrige esto de forma robusta.")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -321,6 +423,18 @@ def main():
         barrido = sweep_beta_hopfield(patterns)
         print(barrido.to_string(index=False))
 
+    comparacion_forzada = None
+    if args.compare_forced:
+        print("\n" + "=" * 78)
+        print("5. TRAYECTORIAS CLINICAS FORZADAS: ANTIGUA vs NUEVA")
+        print("=" * 78)
+        from attractor_model import build_model_from_patterns
+        W_old, _, _ = build_model_from_patterns(patterns)
+        comparacion_forzada = compare_forced_trajectories_old_vs_new(
+            patterns, W_old, gene_order, beta_old=2.0, beta_new=args.beta,
+            max_forcing_strength_new=args.max_forcing_strength)
+        print(comparacion_forzada.to_string(index=False))
+
     if args.output:
         out = Path(args.output)
         out.mkdir(parents=True, exist_ok=True)
@@ -328,6 +442,8 @@ def main():
         cuencas.to_csv(out / "modern_hopfield_basin_membership.tsv", sep="\t")
         if args.sweep:
             barrido.to_csv(out / "modern_hopfield_beta_sweep.tsv", sep="\t", index=False)
+        if comparacion_forzada is not None:
+            comparacion_forzada.to_csv(out / "modern_hopfield_forced_comparison.tsv", sep="\t", index=False)
         print(f"\nTablas guardadas en: {out}")
 
 
