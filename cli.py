@@ -139,6 +139,8 @@ def cmd_modern_hopfield(args):
     if args.compare_forced:
         argv.append("--compare-forced")
         argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
+    if args.find_forcing_threshold:
+        argv += ["--find-forcing-threshold", args.find_forcing_threshold]
     if args.output:
         argv += ["--output", args.output]
     _run_module("modern_hopfield.py", argv)
@@ -260,8 +262,11 @@ def build_parser():
     s.add_argument("--compare-forced", action="store_true",
                     help="Comparar trayectorias clinicas forzadas (dinamica antigua vs nueva)")
     s.add_argument("--max-forcing-strength", type=float, default=1.5,
-                    help="Ver docstring de simulate_longitudinal_patient_hopfield -- 1.5, no 0.7 "
-                         "(el valor viejo), es el minimo verificado que funciona para todos los patrones")
+                    help="CUIDADO: el umbral suficiente es especifico de cada calibracion, no "
+                         "universal -- usar --find-forcing-threshold para verificar en tus datos")
+    s.add_argument("--find-forcing-threshold",
+                    help="Buscar la fuerza minima necesaria para converger al patron dado "
+                         "(nombre exacto, ej. CMS2_canonical_WNT)")
     s.add_argument("--output")
     s.set_defaults(func=cmd_modern_hopfield)
 
