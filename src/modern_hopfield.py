@@ -421,6 +421,103 @@ def find_minimum_forcing_strength(
     }
 
 
+def compute_stabilizing_k(X: np.ndarray, beta: float, safety_margin: float = 1.0) -> float:
+    """
+    Calcula la constante k MINIMA necesaria para estabilizar el origen
+    bajo esta calibracion especifica -- NO un valor universal (misma
+    leccion que con la fuerza de forzamiento: lo que basta para un
+    dataset no basta para otro). Se calcula a partir del eigenvalor
+    positivo mas grande del jacobiano en el origen (verificado con
+    datos reales de GSE39582: hasta +4.25) mas un margen de seguridad.
+
+    Con k = eigenvalor_max_positivo + safety_margin, el jacobiano
+    modificado en el origen (J(0) - k*I) tiene TODOS los eigenvalores
+    negativos -- el origen pasa de silla inestable a minimo local
+    genuino.
+    """
+    n = X.shape[0]
+    origin = np.zeros(n)
+    _, _, max_eig = stability_at_equilibrium_hopfield(origin, X, beta)
+    return max(0.0, max_eig) + safety_margin
+
+
+def modern_hopfield_field_stabilized(x: np.ndarray, X: np.ndarray, beta: float, k: float = 0.0) -> np.ndarray:
+    """
+    Campo con termino estabilizador extra -k*x, para usar SOLO durante
+    la fase pre-recaida (k=0 durante la fase de forzamiento/sesgo --
+    ahi se quiere la dinamica genuina, sin distorsionar el paisaje de
+    energia que ya se verifico que tiene los 4 atractores correctos).
+
+    Sigue siendo un flujo de gradiente (el termino extra -k*x es
+    tambien un gradiente, de (k/2)||x||^2 -- sumar dos gradientes sigue
+    siendo un gradiente), asi que las garantias de decrecimiento de
+    energia se preservan mientras k este activo.
+    """
+    return modern_hopfield_field(x, X, beta) - k * x
+
+
+def modern_hopfield_jacobian_stabilized(x: np.ndarray, X: np.ndarray, beta: float, k: float = 0.0) -> np.ndarray:
+    """Jacobiano del campo estabilizado -- simplemente J - k*I."""
+    n = len(x)
+    return modern_hopfield_jacobian(x, X, beta) - k * np.eye(n)
+
+
+def simulate_longitudinal_patient_hopfield_v2(
+    X: np.ndarray, recurrence_pattern: np.ndarray, n_genes: int,
+    n_timepoints: int = 8, months_between_checks: int = 3,
+    recurrence_onset_month: int = 15, beta: float = 2.0,
+    max_forcing_strength: float = 1.5, stabilizing_k: float | None = None,
+    mechanism: str = "additive",
+) -> tuple:
+    """
+    Version CORREGIDA de simulate_longitudinal_patient_hopfield -- usa
+    el termino estabilizador -k*x SOLO durante la fase pre-recaida
+    (manteniendo el origen como reposo genuino, no una silla que
+    colapsa por ruido numerico antes de que empiece el forzamiento),
+    y lo QUITA por completo durante la fase de recaida (donde se quiere
+    la dinamica genuina + forzamiento/sesgo, sin distorsion).
+
+    stabilizing_k: si es None, se calcula automaticamente con
+    compute_stabilizing_k() para esta calibracion especifica.
+    mechanism: "additive" (fuerza sumada al campo) o "bias" (sesgo en
+    softmax, ver modern_hopfield_field_biased) para la fase de recaida.
+    """
+    if stabilizing_k is None:
+        stabilizing_k = compute_stabilizing_k(X, beta)
+
+    n_patterns = X.shape[1]
+    t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
+    x_series = np.zeros((n_genes, n_timepoints))
+    x_current = np.zeros(n_genes)
+
+    target_idx = None
+    if mechanism == "bias":
+        labels_idx = np.where((X.T == recurrence_pattern).all(axis=1))[0]
+        target_idx = int(labels_idx[0]) if len(labels_idx) > 0 else None
+
+    for i, t in enumerate(t_checks):
+        if t >= recurrence_onset_month:
+            months_since_onset = t - recurrence_onset_month
+            strength = min(0.15 * months_since_onset, max_forcing_strength)
+            if mechanism == "bias" and target_idx is not None:
+                bias = np.zeros(n_patterns)
+                bias[target_idx] = strength
+                field = lambda tt, xx: modern_hopfield_field_biased(xx, X, beta, bias)
+            else:
+                I_driver = strength * recurrence_pattern
+                field = lambda tt, xx: modern_hopfield_field(xx, X, beta) + I_driver
+        else:
+            field = lambda tt, xx: modern_hopfield_field_stabilized(xx, X, beta, stabilizing_k)
+
+        sol = solve_ivp(field, (0, months_between_checks), x_current,
+                         method="RK45", rtol=1e-8, atol=1e-10)
+        x_current = sol.y[:, -1]
+        x_series[:, i] = x_current
+
+    return t_checks, x_series
+
+
+
 def modern_hopfield_field_biased(x: np.ndarray, X: np.ndarray, beta: float, bias: np.ndarray) -> np.ndarray:
     """
     Mecanismo ALTERNATIVO al forzamiento aditivo (I_driver sumado
@@ -604,6 +701,11 @@ def main():
                               "(sesgo en softmax en vez de fuerza aditiva) -- NO VERIFICADO como "
                               "solucion, un intento de reproduccion sintetica del problema real dio "
                               "resultados inconsistentes. Probar directamente, sin asumir que funciona.")
+    parser.add_argument("--verify-stabilizer", action="store_true",
+                         help="Verifica el termino estabilizador para la fase pre-recaida: calcula k "
+                              "automaticamente, confirma que el origen pasa a ser estable, y prueba "
+                              "la simulacion v2 completa (estabilizador + forzamiento) contra los 4 "
+                              "patrones -- la verificacion definitiva pendiente en datos reales.")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -672,6 +774,37 @@ def main():
         else:
             print("\nAVISO: el mecanismo de sesgo TAMPOCO logro correlacion >= 0.9 con "
                   "los candidatos probados.")
+
+    if args.verify_stabilizer:
+        print("\n" + "=" * 78)
+        print("VERIFICACION DEL TERMINO ESTABILIZADOR (fase pre-recaida)")
+        print("=" * 78)
+        k = compute_stabilizing_k(X, args.beta)
+        print(f"k calculado automaticamente para esta calibracion: {k:.3f}")
+
+        origen = np.zeros(X.shape[0])
+        J0 = modern_hopfield_jacobian_stabilized(origen, X, args.beta, k)
+        eigvals0 = np.linalg.eigvalsh(J0)
+        print(f"Eigenvalores en el origen CON estabilizador: {np.round(eigvals0, 3)}")
+        print(f"Origen genuinamente estable ahora: {bool(np.all(eigvals0 < 0))}")
+
+        x_current = np.zeros(X.shape[0])
+        for t in np.arange(0, 15, 3):
+            sol = solve_ivp(lambda tt, xx: modern_hopfield_field_stabilized(xx, X, args.beta, k),
+                             (0, 3), x_current, method="RK45", rtol=1e-8, atol=1e-10)
+            x_current = sol.y[:, -1]
+        print(f"\nNorma del estado al final de la fase pre-recaida (deberia ser ~0): "
+              f"{np.linalg.norm(x_current):.6f}")
+
+        print("\nSimulacion v2 completa (estabilizador + forzamiento) contra los 4 patrones:")
+        for i, label in enumerate(labels):
+            p = X[:, i]
+            _, x_sim = simulate_longitudinal_patient_hopfield_v2(
+                X, p, X.shape[0], beta=args.beta, max_forcing_strength=args.max_forcing_strength,
+                stabilizing_k=k, n_timepoints=10, recurrence_onset_month=15)
+            x_final = x_sim[:, -1]
+            corr = float(np.corrcoef(x_final, p)[0, 1]) if np.std(x_final) > 1e-12 else float("nan")
+            print(f"  {label:20s} corr_con_objetivo={corr:+.3f}")
 
     comparacion_forzada = None
     if args.compare_forced:
