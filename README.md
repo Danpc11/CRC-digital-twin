@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-42%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-84%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -19,7 +19,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (42 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (84 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -85,7 +85,7 @@ python3 cli.py test                  # suite de regresión
 ```
 
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
-`prognosis`, `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
+`cox-diagnostics`, `prognosis`, `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
 
 ### Interfaz web
@@ -138,6 +138,8 @@ src/
   prognosis_demo.py                  demo end-to-end con patrones calibrados reales
   external_validation.py             aplica patrones YA calibrados a cohorte externa (sin recalibrar)
   pooled_cox_validation.py           Cox estratificado combinando múltiples cohortes externas
+  cox_diagnostics.py                 diagnósticos formales del Cox (Schoenfeld, influyentes, heterogeneidad)
+  dynamics_diagnostics.py            equilibrios/estabilidad reales de la dinámica no lineal
   concordance_analysis.py            matriz de concordancia modelo vs. etiqueta oficial
   feature_selection.py               selección data-driven de genes (AUC/ANOVA/Random Forest)
   synthetic_data.py                  generador de datos de prueba
@@ -156,6 +158,7 @@ src/
   download_geo_gse39582.py           descarga los datos de GSE39582 desde GEO
   error_analysis.py                  analiza errores y umbrales de clasificación
   pooled_cox_validation.py           ejecuta análisis de Cox estratificado entre cohortes
+  cox_diagnostics.py                 verifica supuestos del Cox (mismo modelo estratificado)
   power_analysis.py                  estima el poder estadístico del análisis de supervivencia
   treatment_perturbation.py          define las perturbaciones de tratamiento
   treatment_simulation_demo.py       simula trayectorias con y sin tratamiento
@@ -250,6 +253,23 @@ python3 src/pooled_cox_validation.py \
 Para ajustar el análisis por estadio clínico, indique primero `--stage-col` al construir cada
 cohorte y después use `--adjust-stage` en `pooled-cox`. Consulte la ayuda de ambos comandos
 para conocer los nombres de columna y las opciones disponibles.
+
+Antes de reportar los HR de `pooled-cox` como definitivos, corra los diagnósticos formales
+sobre el mismo modelo estratificado (supuesto de riesgos proporcionales, observaciones
+influyentes, heterogeneidad entre cohortes):
+
+```bash
+python3 src/cox_diagnostics.py \
+  --input results_external_gse17536/scored_external_cohort.tsv \
+  --input results_external_gse17537/scored_external_cohort.tsv \
+  --adjust-stage --output results_cox_diagnostics/
+```
+
+`--adjust-stage` agrega `stage_harmonized` como covariable adicional (requiere que las
+cohortes de entrada ya traigan columna `stage`). Por defecto el modelo se ajusta
+estratificado por cohorte (`strata=["cohort"]`), igual que `pooled-cox` — usar
+`--no-stratify` solo para comparación/depuración explícita, nunca para el resultado
+reportado.
 
 ### Agregar una cohorte nueva del CRCSC
 
