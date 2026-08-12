@@ -117,6 +117,33 @@ def check_heterogeneity_across_cohorts(
     interaction_tests = {}
     cohort_dummies = pd.get_dummies(df[cohort_col], prefix="cohort", drop_first=True, dtype=float)
     for cov in covariate_cols:
+        # Deteccion proactiva: si alguna cohorte tiene 'cov' CONSTANTE
+        # dentro de ella, el termino de interaccion cov*dummy_cohorte
+        # queda perfectamente colineal con el dummy solo (si cov=k
+        # constante, cov*dummy = k*dummy) -- causa matriz singular.
+        # Confirmado real: pasa exactamente esto con GSE33113 (estadio
+        # constante, cohorte de estadio II homogeneo por diseno) y
+        # stage_harmonized. Detectar ANTES de intentar el fit, con un
+        # mensaje que explique la causa real -- no es un bug de los
+        # datos, es un problema de identificabilidad: no se puede
+        # probar heterogeneidad de un efecto en una cohorte que no
+        # tiene ninguna variacion de ese covariable.
+        cohortes_constantes = [
+            c for c, sub in df.groupby(cohort_col) if sub[cov].nunique(dropna=True) <= 1
+        ]
+        if cohortes_constantes:
+            interaction_tests[cov] = {
+                "error": (
+                    f"No estimable: {cohortes_constantes} tiene(n) '{cov}' constante dentro "
+                    "de la cohorte -- el termino de interaccion queda perfectamente colineal "
+                    "con el dummy de esa cohorte (matriz singular, no es un bug). No se puede "
+                    "probar heterogeneidad de este efecto en una cohorte sin variacion de "
+                    "este covariable. Considerar excluir esa cohorte de este test especifico, "
+                    "o interpretar la heterogeneidad solo entre las cohortes que si varian."
+                )
+            }
+            continue
+
         inter_df = df[[duration_col, event_col, cov]].copy()
         inter_df = pd.concat([inter_df, cohort_dummies], axis=1)
         for cdum in cohort_dummies.columns:
