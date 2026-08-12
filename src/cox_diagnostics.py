@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter, CoxTimeVaryingFitter
 from lifelines.statistics import proportional_hazard_test
-from scipy.stats import norm
+from scipy.stats import combine_pvalues, norm
 
 
 def check_proportional_hazards(cph: CoxPHFitter, df: pd.DataFrame, p_threshold: float = 0.05) -> pd.DataFrame:
@@ -56,7 +56,32 @@ def check_proportional_hazards(cph: CoxPHFitter, df: pd.DataFrame, p_threshold: 
     result = proportional_hazard_test(cph, df, time_transform="rank")
     out = result.summary.copy()
     out["viola_supuesto"] = out["p"] < p_threshold
+    # Holm controla el error familiar sin asumir independencia entre tests.
+    order = out["p"].sort_values().index
+    adjusted = pd.Series(index=out.index, dtype=float)
+    running_max = 0.0
+    m = len(order)
+    for rank, covariate in enumerate(order):
+        running_max = max(running_max, min(1.0, (m - rank) * out.loc[covariate, "p"]))
+        adjusted.loc[covariate] = running_max
+    out["p_holm"] = adjusted
+    out["viola_supuesto_holm"] = out["p_holm"] < p_threshold
     return out
+
+
+def global_proportional_hazards_test(ph_result: pd.DataFrame) -> dict:
+    """Prueba ómnibus aproximada de Fisher sobre los tests de Schoenfeld.
+
+    Los tests por covariable están correlacionados, por lo que se reporta como
+    diagnóstico global aproximado y junto a los p ajustados por Holm, no como
+    sustituto de inspeccionar cada coeficiente temporal.
+    """
+    statistic, p_value = combine_pvalues(ph_result["p"].to_numpy(), method="fisher")
+    return {
+        "method": "Fisher omnibus aproximado",
+        "statistic": float(statistic), "df": int(2 * len(ph_result)),
+        "p_global": float(p_value), "n_covariates": int(len(ph_result)),
+    }
 
 
 def check_influential_observations(
@@ -76,25 +101,31 @@ def check_influential_observations(
     return out.sort_values("magnitud_total", ascending=False)
 
 
-def fit_piecewise_cms4_effect(
+def fit_piecewise_cms_effects(
     df: pd.DataFrame, duration_col: str, event_col: str,
     covariate_cols: list[str], cutoff: float = 36.0,
+    time_varying_covariates: list[str] | None = None,
     cohort_col: str = "cohort", stratify: bool = True,
 ) -> dict:
-    """Estima HR de CMS4 antes y despues de un corte preespecificado.
+    """Estima conjuntamente HR temprano/tardío para los indicadores CMS.
 
     Cada paciente se transforma al formato start-stop. El indicador CMS4
-    constante se reemplaza por dos covariables dependientes del tiempo,
-    evitando interpretar un unico HR promedio si el efecto no es proporcional.
+    y los demás indicadores solicitados se reemplazan por dos covariables
+    dependientes del tiempo. Así no se deja CMS1/CMS3 mal especificado mientras
+    se corrige únicamente CMS4.
     """
-    cms4_col = "cms_CMS4_mesenchymal"
-    if cms4_col not in covariate_cols:
-        raise ValueError(f"No se encontro la covariable requerida '{cms4_col}'")
     if cutoff <= 0:
         raise ValueError("time_cutoff debe ser > 0")
+    if time_varying_covariates is None:
+        time_varying_covariates = [c for c in covariate_cols if c.startswith("cms_")]
+    missing_tv = set(time_varying_covariates) - set(covariate_cols)
+    if missing_tv:
+        raise ValueError(f"Covariables temporales ausentes: {missing_tv}")
+    if not time_varying_covariates:
+        raise ValueError("No se proporcionaron covariables CMS temporales")
 
-    constant_covariates = [c for c in covariate_cols if c != cms4_col]
-    required = [duration_col, event_col, cms4_col] + constant_covariates
+    constant_covariates = [c for c in covariate_cols if c not in time_varying_covariates]
+    required = [duration_col, event_col] + time_varying_covariates + constant_covariates
     if stratify:
         required.append(cohort_col)
     clean = df[required].dropna().copy()
@@ -112,9 +143,12 @@ def fit_piecewise_cms4_effect(
             record = {
                 "patient_id": patient_id, "start": start, "stop": stop,
                 "event": int(event and np.isclose(stop, duration)),
-                "cms4_early": float(row[cms4_col]) if period == "early" else 0.0,
-                "cms4_late": float(row[cms4_col]) if period == "late" else 0.0,
             }
+            for covariate in time_varying_covariates:
+                record[f"{covariate}__early"] = (
+                    float(row[covariate]) if period == "early" else 0.0)
+                record[f"{covariate}__late"] = (
+                    float(row[covariate]) if period == "late" else 0.0)
             for covariate in constant_covariates:
                 record[covariate] = float(row[covariate])
             if stratify:
@@ -131,22 +165,45 @@ def fit_piecewise_cms4_effect(
     )
     covariance = ctv.variance_matrix_.to_numpy()
     param_names = list(ctv.params_.index)
-    early_idx = param_names.index("cms4_early")
-    late_idx = param_names.index("cms4_late")
-    beta_early = float(ctv.params_["cms4_early"])
-    beta_late = float(ctv.params_["cms4_late"])
-    variance_diff = float(
-        covariance[early_idx, early_idx]
-        + covariance[late_idx, late_idx]
-        - 2 * covariance[early_idx, late_idx])
-    z_difference = (beta_early - beta_late) / np.sqrt(max(variance_diff, 1e-15))
+    contrasts = []
+    for covariate in time_varying_covariates:
+        early_name = f"{covariate}__early"
+        late_name = f"{covariate}__late"
+        early_idx = param_names.index(early_name)
+        late_idx = param_names.index(late_name)
+        beta_early = float(ctv.params_[early_name])
+        beta_late = float(ctv.params_[late_name])
+        variance_diff = float(
+            covariance[early_idx, early_idx] + covariance[late_idx, late_idx]
+            - 2 * covariance[early_idx, late_idx])
+        z_difference = (beta_early - beta_late) / np.sqrt(max(variance_diff, 1e-15))
+        contrasts.append({
+            "covariate": covariate, "cutoff_months": float(cutoff),
+            "hr_early": float(np.exp(beta_early)), "hr_late": float(np.exp(beta_late)),
+            "z_early_vs_late": float(z_difference),
+            "p_early_vs_late": float(2 * norm.sf(abs(z_difference))),
+        })
     return {
         "model": ctv, "summary": ctv.summary.copy(), "cutoff": float(cutoff),
         "n_patients": int(len(clean)), "n_events": int(tv_df["event"].sum()),
-        "hr_early": float(np.exp(beta_early)), "hr_late": float(np.exp(beta_late)),
-        "z_early_vs_late": float(z_difference),
-        "p_early_vs_late": float(2 * norm.sf(abs(z_difference))),
+        "contrasts": pd.DataFrame(contrasts).set_index("covariate"),
     }
+
+
+def fit_piecewise_cms4_effect(
+    df: pd.DataFrame, duration_col: str, event_col: str,
+    covariate_cols: list[str], cutoff: float = 36.0,
+    cohort_col: str = "cohort", stratify: bool = True,
+) -> dict:
+    """Compatibilidad: modelo temporal únicamente para CMS4."""
+    result = fit_piecewise_cms_effects(
+        df, duration_col, event_col, covariate_cols, cutoff=cutoff,
+        time_varying_covariates=["cms_CMS4_mesenchymal"],
+        cohort_col=cohort_col, stratify=stratify)
+    contrast = result["contrasts"].loc["cms_CMS4_mesenchymal"]
+    result.update({key: float(contrast[key]) for key in [
+        "hr_early", "hr_late", "z_early_vs_late", "p_early_vs_late"]})
+    return result
 
 
 def check_heterogeneity_across_cohorts(
@@ -275,6 +332,13 @@ def run_full_diagnostics(
     print("=" * 78)
     ph_result = check_proportional_hazards(cph, fit_df)
     print(ph_result.to_string())
+    ph_global = global_proportional_hazards_test(ph_result)
+    print(
+        f"\nPrueba global ({ph_global['method']}): "
+        f"chi2={ph_global['statistic']:.3f}, df={ph_global['df']}, "
+        f"p={ph_global['p_global']:.4g}")
+    print("Los p_holm controlan comparaciones multiples por covariable; la prueba "
+          "global de Fisher es aproximada porque los residuos estan correlacionados.")
     if ph_result["viola_supuesto"].any():
         violadas = ph_result[ph_result["viola_supuesto"]].index.tolist()
         print(f"\nAVISO: el supuesto de riesgos proporcionales se viola para: {violadas}. "
@@ -285,24 +349,24 @@ def run_full_diagnostics(
 
     temporal = None
     temporal_error = None
-    if time_varying_cms4 and "cms_CMS4_mesenchymal" in covariate_cols:
+    cms_covariates = [c for c in covariate_cols if c.startswith("cms_")]
+    if time_varying_cms4 and cms_covariates:
         print("\n" + "=" * 78)
-        print(f"1b. SENSIBILIDAD TEMPORAL CMS4 (corte preespecificado={time_cutoff:g} meses)")
+        print(f"1b. EFECTOS CMS TEMPORALES CONJUNTOS (corte preespecificado={time_cutoff:g} meses)")
         print("=" * 78)
         try:
-            temporal = fit_piecewise_cms4_effect(
+            temporal = fit_piecewise_cms_effects(
                 df, duration_col, event_col, covariate_cols,
-                cutoff=time_cutoff, cohort_col=cohort_col, stratify=stratify)
+                cutoff=time_cutoff, time_varying_covariates=cms_covariates,
+                cohort_col=cohort_col, stratify=stratify)
             print(temporal["summary"].to_string())
-            print(
-                f"\nHR CMS4 temprano (<= {time_cutoff:g} meses): {temporal['hr_early']:.3f}\n"
-                f"HR CMS4 tardio  (>  {time_cutoff:g} meses): {temporal['hr_late']:.3f}\n"
-                f"Contraste temprano vs tardio: p={temporal['p_early_vs_late']:.4g}")
+            print("\nContrastes temprano vs tardio:")
+            print(temporal["contrasts"].to_string())
             print("El corte debe declararse antes de inspeccionar resultados; probar muchos "
                   "cortes y elegir el mas significativo inflaria el error tipo I.")
         except Exception as exc:
             temporal_error = str(exc)
-            print(f"No se pudo estimar el modelo temporal CMS4: {temporal_error}")
+            print(f"No se pudo estimar el modelo temporal CMS conjunto: {temporal_error}")
 
     print("\n" + "=" * 78)
     print("2. OBSERVACIONES INFLUYENTES (residuos delta-beta)")
@@ -332,23 +396,20 @@ def run_full_diagnostics(
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         ph_result.to_csv(out / "cox_diag_proportional_hazards.tsv", sep="\t")
+        pd.DataFrame([ph_global]).to_csv(
+            out / "cox_diag_proportional_hazards_global.tsv", sep="\t", index=False)
         influential.to_csv(out / "cox_diag_influential_observations.tsv", sep="\t")
         if het is not None:
             het["tabla_por_cohorte"].to_csv(out / "cox_diag_heterogeneity_by_cohort.tsv", sep="\t")
             het["test_interaccion"].to_csv(out / "cox_diag_heterogeneity_test.tsv", sep="\t")
         if temporal is not None:
-            temporal["summary"].to_csv(out / "cox_diag_cms4_time_varying.tsv", sep="\t")
-            pd.DataFrame([{
-                "cutoff_months": temporal["cutoff"],
-                "n_patients": temporal["n_patients"], "n_events": temporal["n_events"],
-                "hr_early": temporal["hr_early"], "hr_late": temporal["hr_late"],
-                "z_early_vs_late": temporal["z_early_vs_late"],
-                "p_early_vs_late": temporal["p_early_vs_late"],
-            }]).to_csv(out / "cox_diag_cms4_time_contrast.tsv", sep="\t", index=False)
+            temporal["summary"].to_csv(out / "cox_diag_cms_time_varying.tsv", sep="\t")
+            temporal["contrasts"].to_csv(out / "cox_diag_cms_time_contrasts.tsv", sep="\t")
         print(f"\nTablas guardadas en: {out}")
 
     return {
         "cph": cph, "proportional_hazards": ph_result,
+        "proportional_hazards_global": ph_global,
         "time_varying_cms4": temporal, "time_varying_cms4_error": temporal_error,
         "influential": influential, "heterogeneity": het,
     }
@@ -370,8 +431,9 @@ def main():
                               "el modelo principal SI estratifica, ver pooled_cox_validation.py)")
     parser.add_argument("--time-cutoff", type=float, default=36.0,
                         help="Corte preespecificado para HR temprano/tardio de CMS4")
-    parser.add_argument("--no-time-varying-cms4", action="store_true",
-                        help="Omitir el analisis temporal de sensibilidad de CMS4")
+    parser.add_argument("--no-time-varying-cms", "--no-time-varying-cms4",
+                        dest="no_time_varying_cms", action="store_true",
+                        help="Omitir el analisis temporal conjunto de los indicadores CMS")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -409,7 +471,7 @@ def main():
     run_full_diagnostics(df, args.duration_col, args.event_col, covariate_cols,
                           cohort_col="cohort", stratify=not args.no_stratify,
                           output_dir=args.output,
-                          time_varying_cms4=not args.no_time_varying_cms4,
+                          time_varying_cms4=not args.no_time_varying_cms,
                           time_cutoff=args.time_cutoff)
 
 

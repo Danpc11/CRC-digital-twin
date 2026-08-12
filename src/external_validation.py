@@ -54,6 +54,8 @@ def main():
                         help="Beta de Modern Hopfield (solo para modern_hopfield/both)")
     parser.add_argument("--modern-corr-threshold", type=float, default=0.8,
                         help="Correlacion minima para aceptar una recuperacion Modern Hopfield")
+    parser.add_argument("--modern-input-margin-threshold", type=float, default=0.15,
+                        help="Margen minimo PRE-relajacion; por debajo se abstiene como hibrido/ambiguo")
     parser.add_argument("--modern-integration-time", type=float, default=30.0)
     parser.add_argument("--require-valid-beta", action="store_true",
                         help="Abortar si beta no conserva estables los patrones congelados")
@@ -107,12 +109,16 @@ def main():
         scored = score_cohort_modern_hopfield(
             scored, use_genes, patterns, beta=args.beta,
             corr_threshold=args.modern_corr_threshold,
-            integration_time=args.modern_integration_time)
+            integration_time=args.modern_integration_time,
+            input_margin_threshold=args.modern_input_margin_threshold)
         accepted = scored["modern_hopfield_cms"] != "indeterminado"
         print(
             f"Cobertura Modern Hopfield: {accepted.sum()}/{len(scored)} "
             f"({accepted.mean():.1%}); indeterminadas={(~accepted).sum()}"
         )
+        if (~accepted).any():
+            print("Motivos de abstencion:")
+            print(scored.loc[~accepted, "modern_hopfield_abstention_reason"].value_counts())
         if "cms_label" in scored.columns:
             labeled = scored[scored["cms_label"] != "none"].copy()
             accepted_labeled = labeled[labeled["modern_hopfield_cms"] != "indeterminado"]
@@ -168,18 +174,21 @@ def main():
         if group_col == "modern_hopfield_cms":
             analysis_df = scored[scored[group_col] != "indeterminado"]
         print(f"\nValidacion del clasificador: {group_col}")
-        result = validate_survival_by_subtype(
-            analysis_df, duration_col=args.duration_col, event_col=args.event_col,
-            endpoint_label=args.endpoint_label, group_col=group_col,
-        )
-        report = interpret_validation_result(result)
+        try:
+            result = validate_survival_by_subtype(
+                analysis_df, duration_col=args.duration_col, event_col=args.event_col,
+                endpoint_label=args.endpoint_label, group_col=group_col,
+            )
+            report = interpret_validation_result(result)
+            model_results[group_col] = result
+        except ValueError as exc:
+            report = f"No evaluable para {group_col}: {exc}"
         print(report)
         reports.append(report)
-        model_results[group_col] = result
     print(
-        "\nIMPORTANTE: este resultado es sobre una cohorte que el modelo NUNCA vio "
-        "durante la calibracion -- si sale significativo, es evidencia bastante mas "
-        "fuerte que la validacion en la misma cohorte de entrenamiento."
+        "\nIMPORTANTE: los patrones permanecen congelados desde GSE39582, pero estas "
+        "cohortes ya han sido inspeccionadas durante el desarrollo. Tratar el resultado "
+        "como validacion retrospectiva de desarrollo, no confirmatoria."
     )
 
     report_full = ("\n\n" + "=" * 60 + "\n\n").join(reports)
@@ -199,25 +208,22 @@ def main():
             print(report_baseline)
             report_full += "\n\n" + "=" * 60 + "\n\n" + report_baseline
 
-            primary_group = model_group_cols[0]
-            p_model = model_results[primary_group]["logrank_p_value"]
             p_baseline = result_baseline["logrank_p_value"]
-            if p_baseline >= 0.05 and p_model >= 0.05:
-                diag = (
-                    "\nDIAGNOSTICO: NI la etiqueta oficial (p={:.4g}) NI el panel del modelo "
-                    "(p={:.4g}) separan supervivencia en esta cohorte externa. Esto apunta a "
-                    "que esta cohorte especificamente tiene una asociacion CMS-supervivencia "
-                    "mas debil o un tamano de muestra insuficiente, no necesariamente a un "
-                    "fallo de generalizacion especifico del panel reducido."
-                ).format(p_baseline, p_model)
-                print(diag)
-                report_full += "\n" + diag
-            elif p_baseline < 0.05 and p_model >= 0.05:
-                diag = (
-                    "\nDIAGNOSTICO: la etiqueta oficial SI separa supervivencia en esta cohorte "
-                    "externa (p={:.4g}) pero el panel congelado del modelo NO (p={:.4g}). Esto "
-                    "SI apunta a un problema de generalizacion del panel reducido especificamente."
-                ).format(p_baseline, p_model)
+            for group_col, result_model in model_results.items():
+                p_model = result_model["logrank_p_value"]
+                if p_baseline >= 0.05 and p_model >= 0.05:
+                    diag = (
+                        f"\nDIAGNOSTICO {group_col}: ni etiqueta oficial (p={p_baseline:.4g}) "
+                        f"ni modelo (p={p_model:.4g}) separan el endpoint."
+                    )
+                elif p_baseline < 0.05 and p_model >= 0.05:
+                    diag = (
+                        f"\nDIAGNOSTICO {group_col}: etiqueta oficial significativa "
+                        f"(p={p_baseline:.4g}) pero modelo no (p={p_model:.4g}); evidencia "
+                        "de perdida de generalizacion del panel/clasificador."
+                    )
+                else:
+                    continue
                 print(diag)
                 report_full += "\n" + diag
         except ValueError as e:

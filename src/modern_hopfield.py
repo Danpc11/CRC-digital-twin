@@ -243,7 +243,7 @@ def _correlation_profile(x: np.ndarray, X: np.ndarray, labels: list) -> dict:
 def classify_expression_modern_hopfield(
     expression: np.ndarray, patterns: dict, beta: float = 3.0,
     integration_time: float = 30.0, corr_threshold: float = 0.8,
-    residual_threshold: float = 1e-6,
+    residual_threshold: float = 1e-6, input_margin_threshold: float = 0.15,
 ) -> dict:
     """Recuperacion dinamica experimental de una muestra ya normalizada.
 
@@ -253,6 +253,8 @@ def classify_expression_modern_hopfield(
     """
     if beta <= 0:
         raise ValueError("beta debe ser > 0")
+    if input_margin_threshold < 0:
+        raise ValueError("input_margin_threshold debe ser >= 0")
     x0 = np.asarray(expression, dtype=float)
     X, labels = patterns_to_matrix(patterns)
     if x0.shape != (X.shape[0],):
@@ -265,7 +267,11 @@ def classify_expression_modern_hopfield(
             "margin": float("nan"), "converged": False, "stable": False,
             "residual": float("nan"), "displacement": 0.0,
             "energy_drop": 0.0, "correlations": {label: float("nan") for label in labels},
+            "input_label": "indeterminado", "input_correlation": float("nan"),
+            "input_margin": float("nan"), "abstention_reason": "entrada_degenerada",
         }
+
+    input_profile = _correlation_profile(x0, X, labels)
 
     sol = solve_ivp(
         lambda t, x: modern_hopfield_field(x, X, beta), (0, integration_time), x0,
@@ -276,11 +282,28 @@ def classify_expression_modern_hopfield(
     _, stable, max_eig = stability_at_equilibrium_hopfield(x_eq, X, beta)
     profile = _correlation_profile(x_eq, X, labels)
     converged = bool(sol.success and refined and residual <= residual_threshold)
-    accepted = bool(converged and stable and
-                    profile["best_correlation"] >= corr_threshold)
+    accepted = bool(
+        converged and stable
+        and profile["best_correlation"] >= corr_threshold
+        and input_profile["margin"] >= input_margin_threshold)
+    if not converged:
+        abstention_reason = "no_convergio"
+    elif not stable:
+        abstention_reason = "equilibrio_no_estable"
+    elif profile["best_correlation"] < corr_threshold:
+        abstention_reason = "correlacion_final_baja"
+    elif input_profile["margin"] < input_margin_threshold:
+        abstention_reason = "entrada_hibrida_o_ambigua"
+    else:
+        abstention_reason = ""
     return {
         "label": profile["best_label"] if accepted else "indeterminado",
         "correlation": profile["best_correlation"], "margin": profile["margin"],
+        "input_label": input_profile["best_label"],
+        "input_correlation": input_profile["best_correlation"],
+        "input_margin": input_profile["margin"],
+        "input_correlations": input_profile["correlations"],
+        "abstention_reason": abstention_reason,
         "converged": converged, "stable": stable, "max_eigenvalue": max_eig,
         "residual": residual, "displacement": float(np.linalg.norm(x_eq - x0)),
         "energy_drop": float(hopfield_energy(x0, X, beta) - hopfield_energy(x_eq, X, beta)),
@@ -291,16 +314,23 @@ def classify_expression_modern_hopfield(
 def score_cohort_modern_hopfield(
     df, gene_cols: list[str], patterns: dict, beta: float = 3.0,
     corr_threshold: float = 0.8, integration_time: float = 30.0,
+    input_margin_threshold: float = 0.15,
 ):
     """Agrega columnas de recuperacion Modern Hopfield a una cohorte."""
     out = df.copy()
     results = [classify_expression_modern_hopfield(
         row.to_numpy(dtype=float), patterns, beta=beta,
         corr_threshold=corr_threshold,
-        integration_time=integration_time) for _, row in df[gene_cols].iterrows()]
+        integration_time=integration_time,
+        input_margin_threshold=input_margin_threshold,
+    ) for _, row in df[gene_cols].iterrows()]
     out["modern_hopfield_cms"] = [r["label"] for r in results]
     out["modern_hopfield_correlation"] = [r["correlation"] for r in results]
     out["modern_hopfield_margin"] = [r["margin"] for r in results]
+    out["modern_hopfield_input_label"] = [r["input_label"] for r in results]
+    out["modern_hopfield_input_correlation"] = [r["input_correlation"] for r in results]
+    out["modern_hopfield_input_margin"] = [r["input_margin"] for r in results]
+    out["modern_hopfield_abstention_reason"] = [r["abstention_reason"] for r in results]
     out["modern_hopfield_residual"] = [r["residual"] for r in results]
     out["modern_hopfield_converged"] = [r["converged"] for r in results]
     out["modern_hopfield_stable"] = [r["stable"] for r in results]

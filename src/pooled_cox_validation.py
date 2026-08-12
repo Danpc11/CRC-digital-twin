@@ -27,7 +27,8 @@ import sys
 
 import numpy as np
 import pandas as pd
-from lifelines import CoxPHFitter
+from lifelines import CoxPHFitter, KaplanMeierFitter
+from lifelines.utils import concordance_index
 from scipy.stats import chi2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -114,6 +115,92 @@ def bootstrap_cindex_increment(
     return pd.DataFrame(rows)
 
 
+def leave_one_cohort_out_validation(
+    data: pd.DataFrame, duration_col: str, event_col: str, reference: str,
+    group_col: str = "predicted_cms",
+) -> pd.DataFrame:
+    """Entrena omitiendo cada cohorte y evalúa discriminación en la omitida.
+
+    El C-index de prueba usa el predictor lineal, que no necesita estimar una
+    función basal para la cohorte nueva. La calibración absoluta no puede
+    extrapolarse así desde un Cox estratificado y se reporta por separado.
+    """
+    levels = sorted(data[group_col].dropna().unique())
+    rows = []
+    for omitted in sorted(data["cohort"].unique()):
+        train = data[data["cohort"] != omitted]
+        test = data[data["cohort"] == omitted]
+        row = {
+            "cohort_omitted": omitted, "n_train": len(train),
+            "events_train": int(train[event_col].sum()), "n_test": len(test),
+            "events_test": int(test[event_col].sum()),
+        }
+        try:
+            train_stage = build_cox_frame(
+                train, duration_col, event_col, reference, ["stage_harmonized"],
+                include_cms=False, group_col=group_col)
+            train_full = build_cox_frame(
+                train, duration_col, event_col, reference, ["stage_harmonized"],
+                include_cms=True, cms_levels=levels, group_col=group_col)
+            stage_model = CoxPHFitter().fit(
+                train_stage, "duration", "event", strata=["cohort"])
+            full_model = CoxPHFitter().fit(
+                train_full, "duration", "event", strata=["cohort"])
+            row.update(nested_model_increment(stage_model, full_model))
+
+            test_stage = build_cox_frame(
+                test, duration_col, event_col, reference, ["stage_harmonized"],
+                include_cms=False, group_col=group_col)
+            test_full = build_cox_frame(
+                test, duration_col, event_col, reference, ["stage_harmonized"],
+                include_cms=True, cms_levels=levels, group_col=group_col)
+            stage_lp = test_stage[stage_model.params_.index] @ stage_model.params_
+            full_lp = test_full[full_model.params_.index] @ full_model.params_
+            row["c_index_test_stage_only"] = concordance_index(
+                test_stage["duration"], -stage_lp, test_stage["event"])
+            row["c_index_test_stage_plus_cms"] = concordance_index(
+                test_full["duration"], -full_lp, test_full["event"])
+            row["delta_c_index_test"] = (
+                row["c_index_test_stage_plus_cms"] - row["c_index_test_stage_only"])
+            for covariate in full_model.summary.index:
+                if covariate.startswith("cms_"):
+                    row[f"HR_{covariate}"] = float(
+                        full_model.summary.loc[covariate, "exp(coef)"])
+                    row[f"p_{covariate}"] = float(full_model.summary.loc[covariate, "p"])
+        except Exception as exc:
+            row["error"] = str(exc)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def apparent_calibration_at_horizons(
+    cph: CoxPHFitter, cox_df: pd.DataFrame,
+    horizons: list[float] | tuple[float, ...] = (36.0, 60.0),
+) -> pd.DataFrame:
+    """Compara riesgo medio predicho y riesgo KM dentro de cada estrato.
+
+    Es calibración aparente porque coeficientes y riesgos basales se estiman en
+    estas mismas cohortes. Se guarda para detectar desajustes gruesos, no como
+    validación externa de riesgo absoluto.
+    """
+    rows = []
+    for cohort, sub in cox_df.groupby("cohort"):
+        km = KaplanMeierFitter().fit(sub["duration"], sub["event"])
+        for horizon in horizons:
+            survival = cph.predict_survival_function(sub, times=[float(horizon)])
+            predicted_risk = float(1.0 - survival.iloc[0].mean())
+            observed_risk = float(1.0 - km.predict(float(horizon)))
+            rows.append({
+                "cohort": cohort, "horizon_months": float(horizon),
+                "n": len(sub), "events_total": int(sub["event"].sum()),
+                "predicted_risk_mean": predicted_risk,
+                "observed_risk_km": observed_risk,
+                "calibration_error_predicted_minus_observed": predicted_risk - observed_risk,
+                "calibration_type": "aparente_dentro_del_estrato",
+            })
+    return pd.DataFrame(rows)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -136,6 +223,11 @@ def main():
     parser.add_argument("--bootstrap-iterations", type=int, default=200,
                         help="Remuestreos para IC del cambio de C-index; 0 lo desactiva")
     parser.add_argument("--bootstrap-seed", type=int, default=2026)
+    parser.add_argument("--calibration-horizons", nargs="+", type=float,
+                        default=[36.0, 60.0],
+                        help="Horizontes para calibracion aparente dentro de cada cohorte")
+    parser.add_argument("--no-loco", action="store_true",
+                        help="Omitir validacion leave-one-cohort-out")
     parser.add_argument("--output", default="results_pooled_cox")
     args = parser.parse_args()
 
@@ -267,6 +359,29 @@ def main():
                 pd.DataFrame([incremental]).to_csv(
                     out_dir / "cox_incremental_value.tsv", sep="\t", index=False)
                 boot.to_csv(out_dir / "cox_incremental_cindex_bootstrap.tsv", sep="\t", index=False)
+
+                if not args.no_loco:
+                    print(f"\n{'=' * 78}\nVALIDACION LEAVE-ONE-COHORT-OUT\n{'=' * 78}")
+                    loco = leave_one_cohort_out_validation(
+                        adj_data, args.duration_col, args.event_col, reference,
+                        group_col=args.group_col)
+                    print(loco.to_string(index=False, float_format=lambda x: f"{x:.4g}"))
+                    loco.to_csv(
+                        out_dir / "cox_leave_one_cohort_out.tsv", sep="\t", index=False)
+
+                adjusted_cox_df = build_cox_frame(
+                    adj_data, args.duration_col, args.event_col, reference,
+                    ["stage_harmonized"], include_cms=True,
+                    cms_levels=cms_levels, group_col=args.group_col)
+                calibration = apparent_calibration_at_horizons(
+                    cph_adj, adjusted_cox_df, args.calibration_horizons)
+                print(f"\n{'=' * 78}\nCALIBRACION APARENTE POR COHORTE\n{'=' * 78}")
+                print(calibration.to_string(index=False, float_format=lambda x: f"{x:.4g}"))
+                print("AVISO: esta calibracion reutiliza las cohortes del ajuste. Un Cox "
+                      "estratificado no puede transferir riesgo absoluto a una cohorte nueva "
+                      "sin estimar su riesgo basal; no reportar esto como calibracion externa.")
+                calibration.to_csv(
+                    out_dir / "cox_apparent_calibration.tsv", sep="\t", index=False)
 
     # --- Comparacion de los tres modelos: la pregunta que importa ---
     if cph_adj is not None:

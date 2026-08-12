@@ -45,7 +45,7 @@ def load(
 ) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t")
     confidence_col = confidence_col or (
-        "modern_hopfield_correlation"
+        "modern_hopfield_input_margin"
         if prediction_col == "modern_hopfield_cms" else "classification_confidence")
     missing = {"cms_label", prediction_col, confidence_col} - set(df.columns)
     if missing:
@@ -80,17 +80,23 @@ def confidence_analysis(df: pd.DataFrame) -> dict:
     print(f"  Errores    (n={len(incorrect):3d})  media={incorrect.mean():.3f}  "
           f"mediana={incorrect.median():.3f}  p25={incorrect.quantile(0.25):.3f}")
 
-    # Mann-Whitney U
-    from scipy.stats import mannwhitneyu
-    stat, p = mannwhitneyu(correct, incorrect, alternative="greater")
-    print(f"  Mann-Whitney U (correct > error): U={stat:.0f}, p={p:.2e}")
+    if len(correct) and len(incorrect):
+        from scipy.stats import mannwhitneyu
+        stat, p = mannwhitneyu(correct, incorrect, alternative="greater")
+        print(f"  Mann-Whitney U (correct > error): U={stat:.0f}, p={p:.2e}")
+    else:
+        stat = p = float("nan")
+        print("  Mann-Whitney U: no estimable (falta al menos uno de los grupos)")
 
     return {"correct_mean": correct.mean(), "error_mean": incorrect.mean(), "p": p}
 
 
 # ── 2. Threshold sweep ───────────────────────────────────────────────────────
 def threshold_sweep(df: pd.DataFrame, out_dir: Path, cohort_name: str = "cohorte externa"):
-    thresholds = np.linspace(0.1, 0.9, 81)
+    if df.empty:
+        return pd.DataFrame(), None
+    max_confidence = float(df["classification_confidence"].max())
+    thresholds = np.linspace(0.0, max(0.9, max_confidence), 91)
     rows = []
     for t in thresholds:
         hi = df[df["classification_confidence"] >= t]
@@ -340,6 +346,19 @@ def main():
     cohort_name = args.cohort_name or in_path.parent.name.removeprefix("results_external_")
 
     df = load(args.input, args.prediction_col, args.confidence_col)
+    if df.empty:
+        message = (
+            "No hay muestras evaluables con etiqueta CMS oficial y prediccion aceptada; "
+            "se omite el analisis de errores. Esto es esperado en cohortes con cms_label='none'."
+        )
+        print(message)
+        pd.DataFrame([{
+            "cohort": cohort_name, "status": "no_evaluable",
+            "reason": "sin_etiquetas_oficiales_o_sin_predicciones_aceptadas",
+            "n": 0,
+        }]).to_csv(out_dir / "classification_error_summary.tsv", sep="\t", index=False)
+        (out_dir / "classification_error_report.txt").write_text(message + "\n")
+        return
 
     confidence_analysis(df)
     sweep, best = threshold_sweep(df, out_dir, cohort_name)
