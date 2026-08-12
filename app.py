@@ -46,6 +46,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from attractor_model import build_model_from_patterns
 from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
+from clinical_selection import assess_molecular_eligibility, hybrid_mechanism_hypotheses
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from prognosis_demo import (
     EVIDENCE_STRENGTH,
@@ -558,6 +559,58 @@ with tab_paciente:
         ev_p = EVIDENCE_STRENGTH.get(pred_p, {})
         st.markdown(evidence_meter(ev_p.get("level", "sin evidencia")), unsafe_allow_html=True)
         st.markdown(f'<div class="ev-note">{ev_p.get("detail", "")}</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown('<div class="eyebrow">Perfil CMS continuo</div>', unsafe_allow_html=True)
+        cms_score_cols = [c for c in ("cms1_tendency", "cms2_tendency", "cms3_tendency", "cms4_tendency")
+                          if c in fila.index]
+        if cms_score_cols:
+            cms_chart = pd.DataFrame({
+                "CMS": [c.split("_")[0].upper() for c in cms_score_cols],
+                "tendencia": [float(fila[c]) for c in cms_score_cols],
+            }).set_index("CMS")
+            st.bar_chart(cms_chart)
+            interpretation = fila.get("cms_interpretation", "indeterminado")
+            primary = CMS_SHORT.get(fila.get("cms_primary_tendency", "none"), "n/c")
+            secondary = CMS_SHORT.get(fila.get("cms_secondary_tendency", "none"), "n/c")
+            if interpretation == "hibrido":
+                st.info(f"Perfil híbrido: mayor tendencia {primary}, secundaria {secondary}. "
+                        "No se fuerza una etiqueta única.")
+            else:
+                st.success(f"Perfil dominante {primary}; tendencia secundaria {secondary}.")
+            profile_for_hypotheses = {
+                "scores": {
+                    "CMS1_MSI_immune": float(fila.get("cms1_tendency", 0.0)),
+                    "CMS2_canonical_WNT": float(fila.get("cms2_tendency", 0.0)),
+                    "CMS3_metabolic": float(fila.get("cms3_tendency", 0.0)),
+                    "CMS4_mesenchymal": float(fila.get("cms4_tendency", 0.0)),
+                }
+            }
+            with st.expander("Hipótesis mecanísticas del perfil híbrido"):
+                st.dataframe(pd.DataFrame(hybrid_mechanism_hypotheses(profile_for_hypotheses)),
+                             use_container_width=True, hide_index=True)
+                st.caption("Pesos transcriptómicos exploratorios; no justifican combinar tratamientos.")
+
+        st.markdown('<div class="eyebrow">Evaluación molecular de elegibilidad</div>',
+                    unsafe_allow_html=True)
+        st.caption("Las reglas requieren biomarcadores confirmados. CMS nunca sustituye MSI/MMR, RAS, BRAF, HER2, KRAS G12C o NTRK.")
+        with st.expander("Ingresar contexto clínico y biomarcadores", expanded=False):
+            metastatic = st.checkbox("Enfermedad avanzada/metastásica confirmada", key="clinical_metastatic")
+            side = st.selectbox("Localización primaria", ["unknown", "left", "right"], key="clinical_side")
+            msi = st.selectbox("MSI/MMR", ["unknown", "msi_h_dmmr", "mss_pmmr"], key="clinical_msi")
+            ras = st.selectbox("KRAS/NRAS", ["unknown", "wild_type", "mutated"], key="clinical_ras")
+            braf = st.selectbox("BRAF", ["unknown", "wild_type", "v600e"], key="clinical_braf")
+            her2 = st.selectbox("HER2", ["unknown", "positive", "negative"], key="clinical_her2")
+            kras_g12c = st.selectbox("KRAS G12C", ["unknown", "positive", "negative"], key="clinical_g12c")
+            ntrk = st.selectbox("NTRK", ["unknown", "fusion_positive", "negative"], key="clinical_ntrk")
+
+        molecular_results = assess_molecular_eligibility(
+            {"msi_mmr": msi, "ras": ras, "braf": braf, "her2": her2,
+             "kras_g12c": kras_g12c, "ntrk": ntrk},
+            {"metastatic": metastatic, "primary_side": side},
+        )
+        st.dataframe(pd.DataFrame(molecular_results), use_container_width=True, hide_index=True)
+        st.warning("Resultado para apoyo a investigación. La decisión requiere expediente completo, regulación local y comité/oncólogo tratante.")
 
         st.divider()
 
