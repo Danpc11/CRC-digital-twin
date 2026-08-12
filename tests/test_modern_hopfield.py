@@ -218,3 +218,58 @@ def test_find_minimum_forcing_strength_finds_correct_threshold(real_patterns):
         fuerza_anterior = candidatos_ordenados[idx_umbral - 1]
         detalle_anterior = next(d for d in resultado["detalle"] if d["fuerza"] == fuerza_anterior)
         assert detalle_anterior["corr_con_objetivo"] < 0.9
+
+
+def test_origin_is_fixed_point_but_unstable_saddle(real_patterns):
+    """
+    HALLAZGO CRITICO de produccion (con datos reales de GSE39582): el
+    origen SI es un punto fijo exacto (consecuencia de que los
+    patrones, z-scoreados contra la media global, suman cero), pero
+    es una SILLA inestable (eigenvalores positivos grandes), no un
+    reposo estable como en attractor_model.py. Esto rompe la fase
+    "sin recaida" de las simulaciones clinicas -- el ruido numerico se
+    amplifica exponencialmente y el estado colapsa a la cuenca
+    dominante ANTES de que cualquier forzamiento comience.
+    """
+    from modern_hopfield import patterns_to_matrix, modern_hopfield_field, stability_at_equilibrium_hopfield
+    X, labels = patterns_to_matrix(real_patterns)
+    n_genes = X.shape[0]
+    origen = np.zeros(n_genes)
+
+    campo_en_origen = modern_hopfield_field(origen, X, beta=3.0)
+    assert np.linalg.norm(campo_en_origen) < 1e-6, "el origen deberia ser un punto fijo (o casi)"
+
+    eigvals, stable, max_eig = stability_at_equilibrium_hopfield(origen, X, beta=3.0)
+    assert stable is False, "el origen deberia ser INESTABLE bajo esta dinamica (silla, no reposo)"
+    assert max_eig > 0, "deberia haber al menos un eigenvalor positivo (direccion inestable)"
+
+
+def test_quiescent_phase_drifts_away_from_origin_before_forcing_begins(real_patterns):
+    """
+    Regresion directa del hallazgo: simulando SOLO la fase "sin
+    recaida" (sin ningun forzamiento), el estado NO debe quedarse en
+    el origen -- debe alejarse sustancialmente por la inestabilidad de
+    silla, confirmando que la fase pre-recaida esta rota bajo esta
+    dinamica (a diferencia de attractor_model.py, donde SI se queda en
+    el origen establemente).
+    """
+    from modern_hopfield import patterns_to_matrix, modern_hopfield_field
+    from scipy.integrate import solve_ivp
+
+    X, labels = patterns_to_matrix(real_patterns)
+    n_genes = X.shape[0]
+    x_current = np.zeros(n_genes)
+
+    for t in np.arange(0, 15, 3):
+        sol = solve_ivp(lambda tt, xx: modern_hopfield_field(xx, X, beta=3.0), (0, 3), x_current,
+                         method="RK45", rtol=1e-8, atol=1e-10)
+        x_current = sol.y[:, -1]
+
+    # para mes 15 (cuando "empezaria" la recaida forzada), el estado
+    # NO deberia seguir cerca del origen -- deberia haber colapsado
+    # hacia alguna cuenca por la inestabilidad numerica amplificada
+    assert np.linalg.norm(x_current) > 1.0, (
+        "se esperaba que el estado se alejara sustancialmente del origen "
+        "durante la fase 'sin recaida' -- si esto falla, la inestabilidad "
+        "de silla pudo haberse corregido en una version posterior"
+    )
