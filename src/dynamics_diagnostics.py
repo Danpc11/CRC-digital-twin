@@ -169,6 +169,204 @@ def empirical_basin_membership(
     return resumen
 
 
+def investigate_unclassified_basins(
+    patterns: dict, W: np.ndarray, beta: float = 2.0,
+    n_samples: int = 300, corr_threshold: float = 0.8,
+    cluster_corr_threshold: float = 0.9, integration_time: float = 60.0, seed: int = 0,
+) -> dict:
+    """
+    Investiga a que convergen realmente las trayectorias que
+    empirical_basin_membership marca como "ninguno_claro" -- las
+    agrupa por similitud (clustering greedy simple por correlacion) y
+    verifica si el representante de cada grupo es un EQUILIBRIO
+    adicional genuino (fsolve converge, jacobiano estable). Si lo es y
+    no se parece a ninguno de los 4 patrones CMS, es evidencia de un
+    atractor espurio -- fenomeno conocido en redes asociativas
+    saturadas (demasiados "recuerdos" relativo a la dimension,
+    aparecen minimos falsos ademas de los patrones almacenados).
+
+    Motivado por revision externa: con beta alto (ej. 10), la mayoria
+    de las trayectorias desde una gaussiana centrada en el origen no
+    terminan cerca de ningun patron CMS -- antes de recomendar ese
+    beta, hay que saber si esas trayectorias van a un pequeno numero
+    de atractores espurios reales, o si es comportamiento difuso/caotico
+    sin estructura clara.
+    """
+    rng = np.random.default_rng(seed)
+    n_genes = len(next(iter(patterns.values())))
+    scale = float(np.mean([np.linalg.norm(p) for p in patterns.values()]))
+
+    finales_sin_clasificar = []
+    for _ in range(n_samples):
+        x0 = rng.normal(0, scale / np.sqrt(n_genes), size=n_genes)
+        sol = solve_ivp(lambda t, x: vector_field(x, W, beta), (0, integration_time), x0,
+                         method="RK45", rtol=1e-8, atol=1e-10)
+        x_final = sol.y[:, -1]
+        if np.linalg.norm(x_final) < 1e-6:
+            continue  # convergio al origen, no es "sin clasificar" -- ya se cuenta aparte
+        mejor_corr = max(
+            (float(np.corrcoef(x_final, p)[0, 1]) for p in patterns.values()
+             if np.std(x_final) > 1e-12 and np.std(p) > 1e-12), default=-2.0)
+        if mejor_corr < corr_threshold:
+            finales_sin_clasificar.append(x_final)
+
+    if not finales_sin_clasificar:
+        return {"n_sin_clasificar": 0, "n_clusters": 0, "clusters": []}
+
+    # clustering greedy simple: dos estados en el mismo grupo si su
+    # correlacion supera cluster_corr_threshold
+    asignado = [False] * len(finales_sin_clasificar)
+    grupos = []
+    for i, x in enumerate(finales_sin_clasificar):
+        if asignado[i]:
+            continue
+        grupo = [x]
+        asignado[i] = True
+        for j in range(i + 1, len(finales_sin_clasificar)):
+            if asignado[j]:
+                continue
+            y = finales_sin_clasificar[j]
+            if np.std(x) < 1e-12 or np.std(y) < 1e-12:
+                continue
+            c = float(np.corrcoef(x, y)[0, 1])
+            if c >= cluster_corr_threshold:
+                grupo.append(y)
+                asignado[j] = True
+        grupos.append(grupo)
+
+    resultados_clusters = []
+    for grupo in grupos:
+        representante = np.mean(grupo, axis=0)
+        x_eq, converged, _ = find_true_equilibrium(representante, W, beta)
+        _, stable, max_real = stability_at_equilibrium(x_eq, W, beta)
+        max_corr_patron = max(
+            (float(np.corrcoef(x_eq, p)[0, 1]) for p in patterns.values()
+             if np.std(x_eq) > 1e-12 and np.std(p) > 1e-12), default=-2.0)
+        es_espurio = (converged and stable and np.linalg.norm(x_eq) > 0.5
+                      and max_corr_patron < corr_threshold)
+        resultados_clusters.append({
+            "n_miembros": len(grupo),
+            "proporcion_del_total": len(grupo) / n_samples,
+            "es_equilibrio_genuino": bool(converged and stable),
+            "norma_equilibrio": float(np.linalg.norm(x_eq)),
+            "max_correlacion_con_patron_cms": max_corr_patron,
+            "es_atractor_espurio": bool(es_espurio),
+        })
+    resultados_clusters.sort(key=lambda r: -r["n_miembros"])
+
+    return {
+        "n_sin_clasificar": len(finales_sin_clasificar),
+        "n_clusters": len(grupos),
+        "clusters": resultados_clusters,
+    }
+
+
+def basin_membership_near_patterns(
+    patterns: dict, W: np.ndarray, beta: float = 2.0,
+    noise_scale: float = 0.3, n_per_pattern: int = 50,
+    integration_time: float = 60.0, corr_threshold: float = 0.8, seed: int = 0,
+) -> pd.DataFrame:
+    """
+    Complementa empirical_basin_membership (que muestrea GLOBALMENTE
+    desde una gaussiana centrada en el origen, motivada por revision
+    externa: esa estrategia sobre-muestrea la region cerca del origen y
+    puede subestimar sistematicamente el tamano real de la cuenca
+    alrededor de cada patron). Aqui se perturba CADA patron con ruido
+    de escala noise_scale y se mide que fraccion de las trayectorias
+    perturbadas regresa al MISMO patron -- una prueba mas practica y
+    directamente relevante de "que tan robusto es este atractor a
+    perturbaciones pequenas cerca de su posicion pretendida".
+    """
+    rng = np.random.default_rng(seed)
+    filas = []
+    for label, p in patterns.items():
+        regresa = 0
+        for _ in range(n_per_pattern):
+            ruido = rng.normal(0, noise_scale, size=len(p))
+            x0 = p + ruido
+            sol = solve_ivp(lambda t, x: vector_field(x, W, beta), (0, integration_time), x0,
+                             method="RK45", rtol=1e-8, atol=1e-10)
+            x_final = sol.y[:, -1]
+            if np.linalg.norm(x_final) < 1e-6 or np.std(x_final) < 1e-12:
+                continue
+            corr = float(np.corrcoef(x_final, p)[0, 1])
+            if corr >= corr_threshold:
+                regresa += 1
+        filas.append({"patron": label, "proporcion_regresa_al_mismo": regresa / n_per_pattern})
+    return pd.DataFrame(filas)
+
+
+def sensitivity_analysis_basin_membership(
+    patterns: dict, W: np.ndarray, beta: float = 2.0,
+    noise_scales=(0.1, 0.3, 0.5, 1.0), corr_thresholds=(0.7, 0.8, 0.9),
+    n_per_pattern: int = 30, seed: int = 0,
+) -> pd.DataFrame:
+    """
+    Sensibilidad de basin_membership_near_patterns a la escala de ruido
+    inicial y al umbral de correlacion -- ambos son elecciones
+    arbitrarias (motivado por revision externa) que deberian
+    justificarse o, como minimo, mostrarse que la conclusion cualitativa
+    no depende fuertemente de la eleccion exacta.
+    """
+    filas = []
+    for noise_scale in noise_scales:
+        for corr_threshold in corr_thresholds:
+            resultado = basin_membership_near_patterns(
+                patterns, W, beta, noise_scale=noise_scale, n_per_pattern=n_per_pattern,
+                corr_threshold=corr_threshold, seed=seed)
+            for _, row in resultado.iterrows():
+                filas.append({
+                    "noise_scale": noise_scale, "corr_threshold": corr_threshold,
+                    "patron": row["patron"], "proporcion_regresa": row["proporcion_regresa_al_mismo"],
+                })
+    return pd.DataFrame(filas)
+
+
+def compare_clinical_trajectories(
+    patterns: dict, W: np.ndarray, gene_order: list,
+    betas=(2.0, 10.0), recurrence_onset_month: int = 15, n_timepoints: int = 10,
+) -> pd.DataFrame:
+    """
+    Compara las trayectorias clinicas PRACTICAS (con forzamiento
+    continuo, exactamente como las usa prognosis_demo.py -- no
+    dinamica libre) entre distintos valores de beta. Motivado por
+    revision externa: antes de considerar cambiar el beta operativo,
+    hay que saber si el comportamiento CLINICO practico (el que de
+    verdad usa la app) cambia de forma importante o no.
+
+    NOTA DE DISENIO: W NO depende de beta (se construye solo a partir
+    de los patrones via projection_weight_matrix) -- beta entra
+    unicamente en la no linealidad tanh(beta*x) dentro de dynamics().
+    Se pasa un solo W, y beta se le pasa explicitamente a
+    simulate_longitudinal_patient() para cada corrida (bug real de una
+    version anterior de esta funcion: pasaba dos W's distintos como si
+    fueran "W para beta=2" y "W para beta=10", sin pasar beta a la
+    simulacion -- ambas corrian con el beta por defecto de la funcion,
+    dando resultados identicos sin que fuera obvio por que).
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from prognosis_demo import simulate_longitudinal_patient
+    from prognosis import hazard_from_trajectory
+
+    n_genes = len(gene_order)
+    filas = []
+    for label, p in patterns.items():
+        for beta_val in betas:
+            t, x = simulate_longitudinal_patient(
+                W, gene_order, p, n_genes, beta=beta_val,
+                n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+            hazard = hazard_from_trajectory(x)
+            x_final = x[:, -1]
+            corr_final = float(np.corrcoef(x_final, p)[0, 1]) if np.std(x_final) > 1e-12 else float("nan")
+            filas.append({
+                "patron": label, "beta": beta_val,
+                "hazard_final": float(hazard[-1]),
+                "correlacion_final_con_patron": corr_final,
+            })
+    return pd.DataFrame(filas)
+
+
 def es_atractor_cms(
     converged: bool, stable: bool, x_eq: np.ndarray, p_original: np.ndarray,
     origin_threshold: float = 0.5, correlation_threshold: float = 0.8,
@@ -273,21 +471,25 @@ def sweep_beta_stability(patterns: dict, W: np.ndarray, beta_values=None) -> pd.
 
 def find_valid_beta_interval(
     patterns: dict, W: np.ndarray, beta_min: float = 0.1, beta_max: float = 15.0,
-    n_steps: int = 150, min_separation: float = 0.5,
+    n_steps: int = 150, min_separation: float = 0.5, output_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """
-    Busca automaticamente el/los intervalos de beta donde los 4
-    patrones califican SIMULTANEAMENTE como atractores CMS genuinos
-    (es_atractor_cms para los 4, mas separados entre si). Usa fsolve
+    Busca automaticamente el/los rangos de beta donde los 4 patrones
+    califican SIMULTANEAMENTE como atractores CMS genuinos. Usa fsolve
     independiente sembrado en el patron original en cada paso (no
     continuacion/warm-start) -- necesario porque warm-start desde un
     punto ya colapsado nunca puede recuperar ramas distintas.
 
-    Hallazgo verificado con la calibracion real del proyecto: con
-    beta=2.0 (el valor actual por defecto), CERO patrones califican.
-    Existe un intervalo robusto (no un punto aislado) mas arriba,
-    aproximadamente beta in [9.4, 11.9], donde los 4 SI califican,
-    bien separados entre si (todas las distancias par a par > 3.8).
+    CORREGIDO tras revision externa: "todos_4_califican" ahora exige
+    TAMBIEN que los 4 equilibrios esten separados entre si -- antes
+    solo contaba cuantos pasaban es_atractor_cms() individualmente, sin
+    verificar que no hubieran colapsado unos con otros (4 podrian
+    "calificar" cada uno por separado y aun asi ser el mismo punto).
+
+    Devuelve la tabla completa del barrido (una fila por beta). Usar
+    find_contiguous_valid_segments() sobre el resultado para agrupar en
+    tramos contiguos reales -- el min/max de los puntos validos NO
+    garantiza un intervalo continuo por si solo.
     """
     betas = np.linspace(beta_min, beta_max, n_steps)
     rows = []
@@ -300,15 +502,67 @@ def find_valid_beta_interval(
             equilibria[label] = x_eq
             atractores[label] = es_atractor_cms(converged, stable, x_eq, p)
         separacion = check_equilibria_separation(equilibria, min_separation)
+        colapsados_entre_si = len(separacion.attrs["colapsados"]) > 0
+        min_sep = float(
+            separacion.values[np.triu_indices(len(patterns), k=1)].min()
+        ) if len(patterns) > 1 else float("nan")
+
         rows.append({
             "beta": beta,
             "n_atractores_genuinos": sum(atractores.values()),
-            "todos_4_califican": sum(atractores.values()) == len(patterns),
-            "min_separacion": float(
-                separacion.values[np.triu_indices(len(patterns), k=1)].min()
-            ) if len(patterns) > 1 else float("nan"),
+            # CORREGIDO: exige ademas que no haya colapso mutuo, no solo
+            # que los 4 pasen es_atractor_cms cada uno por separado.
+            "todos_4_califican": (sum(atractores.values()) == len(patterns)) and not colapsados_entre_si,
+            "min_separacion": min_sep,
         })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+
+    if output_path:
+        df.to_csv(output_path, sep="\t", index=False)
+
+    return df
+
+
+def find_contiguous_valid_segments(df: pd.DataFrame, beta_max_explored: float) -> list[dict]:
+    """
+    Agrupa los beta validos (todos_4_califican=True) en TRAMOS
+    CONTIGUOS -- corrige un bug real: reportar solo min()/max() de los
+    puntos validos asume que forman un unico intervalo continuo, sin
+    verificarlo. Tambien marca honestamente cuando un tramo toca el
+    limite superior explorado (el limite real es DESCONOCIDO en ese
+    caso, no "14.9" como si fuera el verdadero borde).
+    """
+    validos = df[df["todos_4_califican"]].sort_values("beta")
+    if len(validos) == 0:
+        return []
+
+    betas_ordenados = df["beta"].sort_values().to_numpy()
+    paso = float(np.median(np.diff(betas_ordenados))) if len(betas_ordenados) > 1 else 0.0
+    tolerancia = paso * 1.5
+
+    segmentos = []
+    actual = [float(validos.iloc[0]["beta"])]
+    for i in range(1, len(validos)):
+        prev_beta = float(validos.iloc[i - 1]["beta"])
+        curr_beta = float(validos.iloc[i]["beta"])
+        if curr_beta - prev_beta <= tolerancia:
+            actual.append(curr_beta)
+        else:
+            segmentos.append(actual)
+            actual = [curr_beta]
+    segmentos.append(actual)
+
+    resultado = []
+    for seg in segmentos:
+        beta_max_seg = max(seg)
+        limite_no_determinado = abs(beta_max_seg - beta_max_explored) <= tolerancia
+        resultado.append({
+            "beta_min": min(seg),
+            "beta_max": beta_max_seg,
+            "n_puntos": len(seg),
+            "limite_superior_no_determinado": limite_no_determinado,
+        })
+    return resultado
 
 
 def continuation_search(
@@ -406,15 +660,32 @@ def main():
         if args.find_interval:
             print("\nBuscando un intervalo de beta donde los 4 SI califiquen "
                   "(puede tardar unos segundos)...")
-            busqueda = find_valid_beta_interval(patterns, W)
-            validos = busqueda[busqueda["todos_4_califican"]]
-            if len(validos) > 0:
-                print(f"Encontrado: beta en [{validos['beta'].min():.2f}, "
-                      f"{validos['beta'].max():.2f}] -- los 4 califican en ese rango.")
+            beta_min_busqueda, beta_max_busqueda = 0.1, 15.0
+            ruta_tsv = None
+            if args.output:
+                Path(args.output).mkdir(parents=True, exist_ok=True)
+                ruta_tsv = str(Path(args.output) / "dynamics_beta_interval_search.tsv")
+            busqueda = find_valid_beta_interval(
+                patterns, W, beta_min=beta_min_busqueda, beta_max=beta_max_busqueda,
+                output_path=ruta_tsv)
+            tramos = find_contiguous_valid_segments(busqueda, beta_max_explored=beta_max_busqueda)
+            if tramos:
+                for t in tramos:
+                    if t["limite_superior_no_determinado"]:
+                        print(f"Se encontraron puntos validos desde beta~{t['beta_min']:.2f} "
+                              f"hasta el limite explorado ({beta_max_busqueda}) -- el extremo "
+                              "superior real NO esta determinado, puede seguir mas alla. "
+                              "Ampliar --beta-max-busqueda si se necesita el limite real.")
+                    else:
+                        print(f"Tramo continuo: beta en [{t['beta_min']:.2f}, {t['beta_max']:.2f}] "
+                              f"({t['n_puntos']} puntos consecutivos del barrido).")
+                if ruta_tsv:
+                    print(f"Barrido completo guardado en: {ruta_tsv}")
             else:
-                print("No se encontro ningun beta en [0.1, 15.0] donde los 4 califiquen "
-                      "simultaneamente. Considerar un rango mas amplio, o rediseñar la "
-                      "dinamica (ver docstring del modulo).")
+                print(f"No se encontro ningun beta en [{beta_min_busqueda}, {beta_max_busqueda}] "
+                      "donde los 4 califiquen simultaneamente Y esten separados entre si. "
+                      "Considerar un rango mas amplio, o rediseñar la dinamica (ver docstring "
+                      "del modulo).")
     else:
         print(f"\nLos 4 patrones califican como atractores CMS genuinos con beta={args.beta} "
               "-- estables, distintos del origen, y correlacionados con su patron calibrado. "
