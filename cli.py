@@ -141,6 +141,8 @@ def cmd_modern_hopfield(args):
         argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
     if args.find_forcing_threshold:
         argv += ["--find-forcing-threshold", args.find_forcing_threshold]
+    if args.find_bias_threshold:
+        argv += ["--find-bias-threshold", args.find_bias_threshold]
     if args.output:
         argv += ["--output", args.output]
     _run_module("modern_hopfield.py", argv)
@@ -267,6 +269,9 @@ def build_parser():
     s.add_argument("--find-forcing-threshold",
                     help="Buscar la fuerza minima necesaria para converger al patron dado "
                          "(nombre exacto, ej. CMS2_canonical_WNT)")
+    s.add_argument("--find-bias-threshold",
+                    help="Igual pero con el mecanismo alternativo (sesgo en softmax) -- "
+                         "NO verificado como solucion, probar sin asumir que funciona")
     s.add_argument("--output")
     s.set_defaults(func=cmd_modern_hopfield)
 
