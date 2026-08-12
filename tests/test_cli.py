@@ -139,7 +139,10 @@ def test_modern_hopfield_dispatches_stabilized_sweep(mock_run):
     cli.cmd_modern_hopfield(args)
     called_cmd = mock_run.call_args[0][0]
     assert "--compare-stabilized-sweep" in called_cmd
-    assert called_cmd[called_cmd.index("--forcing-candidates") + 1:] == ["0.7", "1.5", "3.0"]
+    start = called_cmd.index("--forcing-candidates") + 1
+    end = called_cmd.index("--withdrawal-time")
+    assert called_cmd[start:end] == ["0.7", "1.5", "3.0"]
+    assert called_cmd[end + 1] == "30.0"
 
 
 @patch("cli.subprocess.run")
