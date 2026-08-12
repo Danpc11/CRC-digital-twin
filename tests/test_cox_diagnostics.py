@@ -83,3 +83,31 @@ def test_influential_observations_returns_top_n_sorted_by_magnitude():
     result = check_influential_observations(cph, df, top_n=5)
     assert len(result) == 5
     assert result["magnitud_total"].is_monotonic_decreasing
+
+
+def test_run_full_diagnostics_uses_stratified_model_by_default():
+    """
+    Regresion de un hallazgo real de revision externa: run_full_diagnostics
+    descartaba la columna 'cohort' y ajustaba un Cox pooled SIN
+    estratificar, distinto del modelo real (pooled_cox_validation.py
+    SI estratifica). Verificar que el modelo interno de cph SI tiene
+    'cohort' entre sus estratos cuando stratify=True (default).
+    """
+    df = _make_two_cohorts(hr_a=2.0, hr_b=2.0, seed=99)
+    df = df.rename(columns={"x": "cms_X"})
+    from cox_diagnostics import run_full_diagnostics
+    resultado = run_full_diagnostics(
+        df, "relapse_free_months", "relapse_event", ["cms_X"], cohort_col="cohort")
+    assert resultado["cph"].strata == "cohort"
+
+
+def test_run_full_diagnostics_no_stratify_flag_fits_pooled_model():
+    """Con stratify=False (solo para comparacion/debug explicito), el
+    modelo NO debe tener estratos."""
+    df = _make_two_cohorts(hr_a=2.0, hr_b=2.0, seed=98)
+    df = df.rename(columns={"x": "cms_X"})
+    from cox_diagnostics import run_full_diagnostics
+    resultado = run_full_diagnostics(
+        df, "relapse_free_months", "relapse_event", ["cms_X"],
+        cohort_col="cohort", stratify=False)
+    assert resultado["cph"].strata is None
