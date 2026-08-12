@@ -389,6 +389,7 @@ def test_forcing_sweep_compares_identical_candidates_for_all_targets(real_patter
         real_patterns, beta=3.0, strength_candidates=[0.7, 1.5], n_timepoints=8)
     assert len(sweep) == 4 * 2
     assert set(sweep["fuerza_maxima"]) == {0.7, 1.5}
+    assert np.allclose(sweep["fuerza_aplicada_final"], sweep["fuerza_maxima"])
     assert sweep.groupby("patron_objetivo").size().eq(2).all()
     assert {"v1_corr_objetivo", "v2_corr_objetivo", "v2_norma_basal"}.issubset(sweep.columns)
     assert (sweep["v2_residuo_campo_en_origen"] < 1e-8).all()
