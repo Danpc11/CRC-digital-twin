@@ -406,11 +406,34 @@ def sweep_beta_hopfield(
 
 
 
+def _scheduled_forcing_strength(
+    months_since_onset: float, max_strength: float,
+    ramp_duration_months: float | None = None,
+) -> tuple[float, float]:
+    """Devuelve fuerza y progreso [0,1] de una rampa reproducible.
+
+    Sin ramp_duration conserva el calendario historico (0.15/mes). Con
+    ramp_duration, el candidato se alcanza exactamente al final de esa
+    ventana, necesario para comparar caps distintos en el mismo horizonte.
+    """
+    if months_since_onset <= 0:
+        return 0.0, 0.0
+    if ramp_duration_months is None:
+        strength = min(0.15 * months_since_onset, max_strength)
+        progress = min(strength / max_strength, 1.0) if max_strength > 0 else 0.0
+        return float(strength), float(progress)
+    if ramp_duration_months <= 0:
+        raise ValueError("ramp_duration_months debe ser > 0")
+    progress = min(months_since_onset / ramp_duration_months, 1.0)
+    return float(max_strength * progress), float(progress)
+
+
 def simulate_longitudinal_patient_hopfield(
     X: np.ndarray, recurrence_pattern: np.ndarray, n_genes: int,
     n_timepoints: int = 8, months_between_checks: int = 3,
     recurrence_onset_month: int = 15, beta: float = 2.0,
     max_forcing_strength: float = 1.5,
+    forcing_ramp_duration_months: float | None = None,
 ) -> tuple:
     """
     Version de simulate_longitudinal_patient (prognosis_demo.py) con
@@ -440,7 +463,9 @@ def simulate_longitudinal_patient_hopfield(
     for i, t in enumerate(t_checks):
         if t >= recurrence_onset_month:
             months_since_onset = t - recurrence_onset_month
-            strength = min(0.15 * months_since_onset, max_forcing_strength)
+            strength, _ = _scheduled_forcing_strength(
+                months_since_onset, max_forcing_strength,
+                forcing_ramp_duration_months)
             I_driver = strength * recurrence_pattern
         else:
             I_driver = np.zeros(n_genes)
@@ -580,6 +605,7 @@ def simulate_longitudinal_patient_hopfield_v2(
     recurrence_onset_month: int = 15, beta: float = 2.0,
     max_forcing_strength: float = 1.5, stabilizing_k: float | None = None,
     mechanism: str = "additive", smooth_transition: bool = True,
+    forcing_ramp_duration_months: float | None = None,
 ) -> tuple:
     """
     Version CORREGIDA de simulate_longitudinal_patient_hopfield -- usa
@@ -613,14 +639,14 @@ def simulate_longitudinal_patient_hopfield_v2(
     for i, t in enumerate(t_checks):
         if t >= recurrence_onset_month:
             months_since_onset = t - recurrence_onset_month
-            strength = min(0.15 * months_since_onset, max_forcing_strength)
+            strength, forcing_progress = _scheduled_forcing_strength(
+                months_since_onset, max_forcing_strength,
+                forcing_ramp_duration_months)
             # Evita retirar el reposo en el mismo instante en que la fuerza
             # todavia vale cero. Al crecer la senal, se apagan suavemente
             # tanto k como la correccion basal.
-            if smooth_transition and max_forcing_strength > 0:
-                quiescent_weight = max(0.0, 1.0 - strength / max_forcing_strength)
-            elif smooth_transition:
-                quiescent_weight = 1.0
+            if smooth_transition:
+                quiescent_weight = max(0.0, 1.0 - forcing_progress)
             else:
                 quiescent_weight = 0.0
             if mechanism == "bias" and target_idx is not None:
@@ -700,6 +726,10 @@ def compare_forcing_sweep_v1_v2(
 
     X, labels = patterns_to_matrix(patterns)
     k = compute_stabilizing_k(X, beta)
+    last_check_month = (n_timepoints - 1) * months_between_checks
+    ramp_duration = last_check_month - recurrence_onset_month
+    if ramp_duration <= 0:
+        raise ValueError("La simulacion debe incluir al menos un control posterior a la recaida")
     baseline_diag = diagnose_pre_recurrence_residual(
         patterns, beta=beta, duration_months=recurrence_onset_month,
         months_between_checks=months_between_checks, stabilizing_k=k)
@@ -711,19 +741,23 @@ def compare_forcing_sweep_v1_v2(
                 X, p, X.shape[0], n_timepoints=n_timepoints,
                 months_between_checks=months_between_checks,
                 recurrence_onset_month=recurrence_onset_month, beta=beta,
-                max_forcing_strength=strength)
+                max_forcing_strength=strength,
+                forcing_ramp_duration_months=ramp_duration)
             _, x_v2 = simulate_longitudinal_patient_hopfield_v2(
                 X, p, X.shape[0], n_timepoints=n_timepoints,
                 months_between_checks=months_between_checks,
                 recurrence_onset_month=recurrence_onset_month, beta=beta,
                 max_forcing_strength=strength, stabilizing_k=k,
-                smooth_transition=smooth_transition)
+                smooth_transition=smooth_transition,
+                forcing_ramp_duration_months=ramp_duration)
             profile_v1 = _correlation_profile(x_v1[:, -1], X, labels)
             profile_v2 = _correlation_profile(x_v2[:, -1], X, labels)
             corr_v1 = profile_v1["correlations"][target]
             corr_v2 = profile_v2["correlations"][target]
             rows.append({
                 "patron_objetivo": target, "fuerza_maxima": strength, "beta": beta,
+                "fuerza_aplicada_final": strength,
+                "duracion_rampa_meses": ramp_duration,
                 "v1_corr_objetivo": corr_v1, "v1_cms_final": profile_v1["best_label"],
                 "v1_corr_maxima": profile_v1["best_correlation"],
                 "v1_exito": bool(np.isfinite(corr_v1) and corr_v1 >= corr_threshold and
