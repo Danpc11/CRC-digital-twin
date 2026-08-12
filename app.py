@@ -261,12 +261,16 @@ def build_patient_pdf(sample_id, predicted_cms, confidence, evidence, t_checks, 
     story.append(Image(img_buf, width=15 * cm, height=7 * cm))
     story.append(Spacer(1, 14))
 
-    story.append(Paragraph("<b>Tratamientos evaluados</b>", styles["Heading3"]))
-    table_data = [["Mecanismo", "Riesgo sin tx", "Riesgo con tx", "Diferencia", "Efecto"]]
+    story.append(Paragraph("<b>Mecanismos de tratamiento evaluados</b>", styles["Heading3"]))
+    story.append(Paragraph(
+        "Los valores de intensidad NO son una estimación de eficacia clínica ni un "
+        "porcentaje de beneficio -- ver aviso al final.", caution_style))
+    table_data = [["Mecanismo", "Riesgo ordinal sin tx", "Riesgo ordinal con tx",
+                    "Intensidad simulada (arbitraria)", "Dirección"]]
     for r in treatment_results:
         table_data.append([
             r["treatment"], f"{r['h_base']:.2f}", f"{r['h_tx']:.2f}",
-            f"{r['delta']:+.2f}", "Aplica" if r["aplica"] else "Sin efecto",
+            f"{r['delta']:+.2f}", "Reduce riesgo" if r["aplica"] else "Sin dirección de efecto",
         ])
     tbl = Table(table_data, hAlign="LEFT")
     tbl.setStyle(TableStyle([
@@ -545,8 +549,13 @@ with tab_paciente:
 
         st.divider()
 
-        st.markdown('<div class="eyebrow">¿Qué tratamientos tienen efecto simulado para este paciente?</div>',
+        st.markdown('<div class="eyebrow">¿Qué mecanismos de tratamiento tienen dirección de efecto simulada para este paciente?</div>',
                     unsafe_allow_html=True)
+        st.caption(
+            "Los números de abajo son una **intensidad simulada arbitraria**, no una "
+            "estimación de eficacia clínica ni un porcentaje de beneficio real -- ver "
+            "el aviso completo más abajo."
+        )
         with st.spinner("Evaluando mecanismos de tratamiento..."):
             resultados_tx = evaluate_all_treatments(W, n_genes, cohort_genes_p, driver_p, patterns)
 
@@ -555,23 +564,28 @@ with tab_paciente:
             for r in aplican:
                 st.markdown(
                     f'<div class="readout" style="border-left-color:#1B7F5A">'
-                    f'<div class="eyebrow">{r["treatment"]}</div>'
-                    f'<div class="value" style="color:#1B7F5A">Δ {r["delta"]:+.2f} '
-                    f'<span class="unit">riesgo {r["h_base"]:.2f} → {r["h_tx"]:.2f}</span></div>'
+                    f'<div class="eyebrow">{r["treatment"]} · dirección de efecto: reduce el riesgo simulado</div>'
+                    f'<span class="mono" style="font-size:0.85rem;color:#4A5058">'
+                    f'intensidad simulada arbitraria: {r["delta"]:+.2f} '
+                    f'(riesgo ordinal {r["h_base"]:.2f} → {r["h_tx"]:.2f})</span>'
                     f'</div>', unsafe_allow_html=True)
                 st.caption(describe_treatment(r["treatment"]))
         else:
-            st.info("Ninguno de los mecanismos modelados muestra efecto no trivial para "
-                    "este paciente, según su clasificación actual.")
+            st.info("Ninguno de los mecanismos modelados muestra dirección de efecto no "
+                    "trivial para este paciente, según su clasificación actual.")
 
         sin_efecto = [r["treatment"] for r in resultados_tx if not r["aplica"]]
         if sin_efecto:
-            st.caption(f"Sin efecto simulado: {', '.join(sin_efecto)}.")
+            st.caption(f"Sin dirección de efecto simulada: {', '.join(sin_efecto)}.")
 
         st.markdown(
-            '<div class="scope">Dirección de efecto fundamentada en literatura clínica; '
-            'magnitud NO calibrada contra datos reales de tratamiento. Exploración in '
-            'silico, no una recomendación clínica.</div>', unsafe_allow_html=True)
+            '<div class="scope">Estos valores son una <strong>intensidad simulada '
+            'arbitraria</strong>, no una eficacia clínica ni una probabilidad de '
+            'beneficio -- la dirección del efecto está fundamentada en literatura '
+            'clínica, pero la magnitud NO está calibrada contra datos reales de '
+            'tratamiento y no debe leerse como un porcentaje de mejora esperado. '
+            'Exploración in silico, nunca una recomendación clínica.</div>',
+            unsafe_allow_html=True)
 
         st.divider()
 
@@ -795,31 +809,39 @@ with tab_tx:
         st.pyplot(fig)
 
     with right:
-        st.markdown(readout("Riesgo final · sin tratamiento", f"{h_base[-1]:.2f}",
+        st.markdown(readout("Riesgo ordinal final · sin tratamiento", f"{h_base[-1]:.2f}",
                              accent="#8A8F98"), unsafe_allow_html=True)
-        st.markdown(readout("Riesgo final · con tratamiento", f"{h_tx[-1]:.2f}",
+        st.markdown(readout("Riesgo ordinal final · con tratamiento", f"{h_tx[-1]:.2f}",
                              accent=CMS_COLOR.get(tx_color_key, "#0072B2")), unsafe_allow_html=True)
-        st.markdown(readout("Diferencia", f"{delta:+.2f}",
-                             accent="#1B7F5A" if delta > 0.01 else "#8A8F98"),
-                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="eyebrow" style="margin-top:.6rem">Intensidad simulada arbitraria '
+            f'(no eficacia clínica)</div>'
+            f'<span class="mono" style="font-size:1rem;font-weight:600;'
+            f'color:{"#1B7F5A" if delta > 0.01 else "#8A8F98"}">{delta:+.2f}</span>',
+            unsafe_allow_html=True)
 
         if abs(delta) < 0.01:
-            st.info(f"**{treatment}** no muestra efecto no trivial para esta trayectoria "
+            st.info(f"**{treatment}** no muestra dirección de efecto no trivial para esta "
+                    f"trayectoria "
                     f"{'de este paciente' if modo_tx == 'Paciente de mi cohorte' else f'hacia {CMS_SHORT.get(tx_color_key)}'}. "
-                    "Es el comportamiento esperado: los criterios de eficacia reflejan qué "
-                    "pacientes se benefician según la evidencia clínica publicada — un "
-                    "mecanismo que no aplica no debería mostrar beneficio simulado.")
+                    "Es el comportamiento esperado: los criterios de aplicabilidad reflejan qué "
+                    "pacientes tendrían dirección de efecto según la evidencia clínica "
+                    "publicada — un mecanismo que no aplica no debería mostrar intensidad "
+                    "simulada.")
         elif modo_tx == "Paciente de mi cohorte":
             direccion = "reduce" if delta > 0 else "no reduce"
-            st.success(f"Con este mecanismo, el modelo {direccion} el riesgo simulado para "
-                       f"este paciente (Δ={delta:+.2f}). Recordatorio: esto es dirección de "
-                       "efecto, no una recomendación clínica — ver el aviso de alcance abajo.")
+            st.success(f"Con este mecanismo, el modelo {direccion} el riesgo ordinal simulado "
+                       f"para este paciente (intensidad simulada arbitraria: {delta:+.2f}). "
+                       "Recordatorio: esto es dirección de efecto, no una recomendación "
+                       "clínica ni una magnitud de beneficio real — ver el aviso de alcance abajo.")
         st.caption(describe_treatment(treatment))
 
     st.markdown(
         '<div class="scope">La <strong>dirección</strong> del efecto está fundamentada en '
-        'literatura clínica; la <strong>magnitud</strong> no está calibrada contra datos '
-        'reales de tratamiento. Exploración in silico.</div>', unsafe_allow_html=True)
+        'literatura clínica; la <strong>magnitud</strong> (mostrada como "intensidad '
+        'simulada arbitraria") no está calibrada contra datos reales de tratamiento y no '
+        'debe leerse como un porcentaje de eficacia ni como una probabilidad de beneficio. '
+        'Exploración in silico, nunca una recomendación clínica.</div>', unsafe_allow_html=True)
 
 # ======================================================================
 # 5. METODO
