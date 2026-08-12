@@ -140,3 +140,13 @@ def test_cmd_dynamics_diagnostics_dispatches_correct_args(mock_run):
     assert "dynamics_diagnostics.py" in called_cmd[1]
     assert "--patterns" in called_cmd and "p.tsv" in called_cmd
     assert "--beta" in called_cmd and "1.5" in called_cmd
+
+
+@patch("cli.subprocess.run")
+def test_cmd_dynamics_diagnostics_dispatches_full_flag(mock_run):
+    mock_run.return_value = MagicMock(returncode=0)
+    args = cli.build_parser().parse_args([
+        "dynamics-diagnostics", "--patterns", "p.tsv", "--full",
+    ])
+    cli.cmd_dynamics_diagnostics(args)
+    assert "--full" in mock_run.call_args[0][0]
