@@ -172,18 +172,18 @@ def empirical_basin_membership(
 def investigate_unclassified_basins(
     patterns: dict, W: np.ndarray, beta: float = 2.0,
     n_samples: int = 300, corr_threshold: float = 0.8,
-    cluster_corr_threshold: float = 0.9, integration_time: float = 60.0, seed: int = 0,
+    equilibrium_distance_threshold: float = 0.25,
+    residual_threshold: float = 1e-6,
+    integration_time: float = 60.0, seed: int = 0,
 ) -> dict:
     """
     Investiga a que convergen realmente las trayectorias que
     empirical_basin_membership marca como "ninguno_claro" -- las
-    agrupa por similitud (clustering greedy simple por correlacion) y
-    verifica si el representante de cada grupo es un EQUILIBRIO
-    adicional genuino (fsolve converge, jacobiano estable). Si lo es y
-    no se parece a ninguno de los 4 patrones CMS, es evidencia de un
-    atractor espurio -- fenomeno conocido en redes asociativas
-    saturadas (demasiados "recuerdos" relativo a la dimension,
-    aparecen minimos falsos ademas de los patrones almacenados).
+    refina CADA estado final individualmente con fsolve, exige residuo
+    ||f(x_eq)|| pequeno y estabilidad local, y despues deduplica los
+    equilibrios por distancia euclidiana. Esto evita que un clustering
+    greedy por correlacion mezcle estados de magnitud distinta o dependa
+    del orden de las muestras.
 
     Motivado por revision externa: con beta alto (ej. 10), la mayoria
     de las trayectorias desde una gaussiana centrada en el origen no
@@ -213,42 +213,46 @@ def investigate_unclassified_basins(
     if not finales_sin_clasificar:
         return {"n_sin_clasificar": 0, "n_clusters": 0, "clusters": []}
 
-    # clustering greedy simple: dos estados en el mismo grupo si su
-    # correlacion supera cluster_corr_threshold
-    asignado = [False] * len(finales_sin_clasificar)
+    # Refinamiento individual y filtro de equilibrio genuino.
+    refinados = []
+    for x_final in finales_sin_clasificar:
+        x_eq, converged, _ = find_true_equilibrium(x_final, W, beta)
+        residuo = float(np.linalg.norm(vector_field(x_eq, W, beta)))
+        _, stable, max_real = stability_at_equilibrium(x_eq, W, beta)
+        if converged and stable and residuo <= residual_threshold:
+            refinados.append((x_eq, residuo, max_real))
+
+    # Deduplicacion determinista por distancia euclidiana al centroide
+    # corriente de cada equilibrio unico.
     grupos = []
-    for i, x in enumerate(finales_sin_clasificar):
-        if asignado[i]:
-            continue
-        grupo = [x]
-        asignado[i] = True
-        for j in range(i + 1, len(finales_sin_clasificar)):
-            if asignado[j]:
-                continue
-            y = finales_sin_clasificar[j]
-            if np.std(x) < 1e-12 or np.std(y) < 1e-12:
-                continue
-            c = float(np.corrcoef(x, y)[0, 1])
-            if c >= cluster_corr_threshold:
-                grupo.append(y)
-                asignado[j] = True
-        grupos.append(grupo)
+    for x_eq, residuo, max_real in refinados:
+        asignado = False
+        for grupo in grupos:
+            centro = np.mean(grupo["vectores"], axis=0)
+            if np.linalg.norm(x_eq - centro) <= equilibrium_distance_threshold:
+                grupo["vectores"].append(x_eq)
+                grupo["residuos"].append(residuo)
+                grupo["max_reales"].append(max_real)
+                asignado = True
+                break
+        if not asignado:
+            grupos.append({"vectores": [x_eq], "residuos": [residuo], "max_reales": [max_real]})
 
     resultados_clusters = []
-    for grupo in grupos:
-        representante = np.mean(grupo, axis=0)
-        x_eq, converged, _ = find_true_equilibrium(representante, W, beta)
-        _, stable, max_real = stability_at_equilibrium(x_eq, W, beta)
+    for indice, grupo in enumerate(grupos, start=1):
+        x_eq = np.mean(grupo["vectores"], axis=0)
         max_corr_patron = max(
             (float(np.corrcoef(x_eq, p)[0, 1]) for p in patterns.values()
              if np.std(x_eq) > 1e-12 and np.std(p) > 1e-12), default=-2.0)
-        es_espurio = (converged and stable and np.linalg.norm(x_eq) > 0.5
-                      and max_corr_patron < corr_threshold)
+        es_espurio = np.linalg.norm(x_eq) > 0.5 and max_corr_patron < corr_threshold
         resultados_clusters.append({
-            "n_miembros": len(grupo),
-            "proporcion_del_total": len(grupo) / n_samples,
-            "es_equilibrio_genuino": bool(converged and stable),
+            "equilibrio_id": f"EQ{indice:03d}",
+            "n_miembros": len(grupo["vectores"]),
+            "proporcion_del_total": len(grupo["vectores"]) / n_samples,
+            "es_equilibrio_genuino": True,
             "norma_equilibrio": float(np.linalg.norm(x_eq)),
+            "residuo_maximo": float(max(grupo["residuos"])),
+            "max_parte_real_eigenvalor": float(max(grupo["max_reales"])),
             "max_correlacion_con_patron_cms": max_corr_patron,
             "es_atractor_espurio": bool(es_espurio),
         })
@@ -256,6 +260,7 @@ def investigate_unclassified_basins(
 
     return {
         "n_sin_clasificar": len(finales_sin_clasificar),
+        "n_refinados_validos": len(refinados),
         "n_clusters": len(grupos),
         "clusters": resultados_clusters,
     }
@@ -264,7 +269,9 @@ def investigate_unclassified_basins(
 def basin_membership_near_patterns(
     patterns: dict, W: np.ndarray, beta: float = 2.0,
     noise_scale: float = 0.3, n_per_pattern: int = 50,
-    integration_time: float = 60.0, corr_threshold: float = 0.8, seed: int = 0,
+    integration_time: float = 60.0, corr_threshold: float = 0.8,
+    distance_threshold: float = 0.5, residual_threshold: float = 1e-5,
+    seed: int = 0,
 ) -> pd.DataFrame:
     """
     Complementa empirical_basin_membership (que muestrea GLOBALMENTE
@@ -280,6 +287,8 @@ def basin_membership_near_patterns(
     rng = np.random.default_rng(seed)
     filas = []
     for label, p in patterns.items():
+        x_eq, converged, _ = find_true_equilibrium(p, W, beta)
+        _, stable, _ = stability_at_equilibrium(x_eq, W, beta)
         regresa = 0
         for _ in range(n_per_pattern):
             ruido = rng.normal(0, noise_scale, size=len(p))
@@ -289,10 +298,17 @@ def basin_membership_near_patterns(
             x_final = sol.y[:, -1]
             if np.linalg.norm(x_final) < 1e-6 or np.std(x_final) < 1e-12:
                 continue
-            corr = float(np.corrcoef(x_final, p)[0, 1])
-            if corr >= corr_threshold:
+            corr = float(np.corrcoef(x_final, x_eq)[0, 1])
+            distancia = float(np.linalg.norm(x_final - x_eq))
+            residuo = float(np.linalg.norm(vector_field(x_final, W, beta)))
+            if (converged and stable and corr >= corr_threshold
+                    and distancia <= distance_threshold and residuo <= residual_threshold):
                 regresa += 1
-        filas.append({"patron": label, "proporcion_regresa_al_mismo": regresa / n_per_pattern})
+        filas.append({
+            "patron": label,
+            "equilibrio_valido": bool(converged and stable),
+            "proporcion_regresa_al_mismo": regresa / n_per_pattern,
+        })
     return pd.DataFrame(filas)
 
 
@@ -620,6 +636,9 @@ def main():
                          help="Buscar automaticamente un intervalo de beta donde los 4 "
                               "patrones califiquen como atractores CMS genuinos (busqueda "
                               "mas lenta, no corre por default)")
+    parser.add_argument("--full", action="store_true",
+                         help="Correr analisis avanzados: equilibrios espurios, cuencas "
+                              "locales, sensibilidad y comparacion beta=2 vs beta=10")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -702,11 +721,48 @@ def main():
               "trayectorias no convergieron claramente a ninguno de los 4 patrones -- "
               "podria haber equilibrios adicionales no capturados por la calibracion.")
 
+    resultados_full = {}
+    if args.full:
+        print("\n" + "=" * 78)
+        print("4. ANALISIS AVANZADO REPRODUCIBLE")
+        print("=" * 78)
+
+        espurios = investigate_unclassified_basins(
+            patterns, W, args.beta, n_samples=args.n_samples)
+        espurios_df = pd.DataFrame(espurios["clusters"])
+        resultados_full["espurios"] = espurios_df
+        print(f"Estados sin clasificar: {espurios['n_sin_clasificar']} | "
+              f"equilibrios unicos refinados: {espurios['n_clusters']}")
+
+        locales = basin_membership_near_patterns(
+            patterns, W, args.beta, n_per_pattern=max(20, args.n_samples // len(patterns)))
+        resultados_full["locales"] = locales
+        print("\nCuencas locales alrededor de cada patron:")
+        print(locales.to_string(index=False))
+
+        sensibilidad = sensitivity_analysis_basin_membership(
+            patterns, W, args.beta, n_per_pattern=max(10, args.n_samples // (2 * len(patterns))))
+        resultados_full["sensibilidad"] = sensibilidad
+
+        comparacion = compare_clinical_trajectories(patterns, W, gene_order, betas=(2.0, 10.0))
+        resultados_full["comparacion"] = comparacion
+        print("\nComparacion de trayectorias clinicas forzadas:")
+        print(comparacion.to_string(index=False))
+
     if args.output:
         out = Path(args.output)
         out.mkdir(parents=True, exist_ok=True)
         tabla.to_csv(out / "dynamics_equilibria_stability.tsv", sep="\t", index=False)
         cuencas.to_csv(out / "dynamics_basin_membership.tsv", sep="\t")
+        if args.full:
+            resultados_full["espurios"].to_csv(
+                out / "dynamics_spurious_attractors.tsv", sep="\t", index=False)
+            resultados_full["locales"].to_csv(
+                out / "dynamics_local_basins.tsv", sep="\t", index=False)
+            resultados_full["sensibilidad"].to_csv(
+                out / "dynamics_sensitivity.tsv", sep="\t", index=False)
+            resultados_full["comparacion"].to_csv(
+                out / "dynamics_beta_comparison.tsv", sep="\t", index=False)
         print(f"\nTablas guardadas en: {out}")
 
 
