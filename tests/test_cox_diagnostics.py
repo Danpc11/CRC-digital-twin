@@ -18,6 +18,7 @@ from cox_diagnostics import (
     check_heterogeneity_across_cohorts,
     check_influential_observations,
     check_proportional_hazards,
+    fit_piecewise_cms4_effect,
 )
 from lifelines import CoxPHFitter
 
@@ -133,3 +134,26 @@ def test_heterogeneity_interaction_handles_constant_covariate_cohort_gracefully(
     fila = resultado["test_interaccion"].loc["stage_harmonized"]
     assert "No estimable" in str(fila["error"])
     assert "constante" in str(fila["error"])
+
+
+def test_piecewise_cms4_model_returns_early_and_late_effects():
+    rng = np.random.default_rng(44)
+    rows = []
+    for cohort in ["A", "B"]:
+        for patient in range(180):
+            cms4 = int(rng.random() < 0.35)
+            duration = rng.exponential(24 / (1.8 if cms4 else 1.0)) + 0.1
+            rows.append({
+                "cohort": cohort,
+                "relapse_free_months": duration,
+                "relapse_event": int(rng.random() < 0.7),
+                "cms_CMS4_mesenchymal": cms4,
+                "stage_harmonized": int(rng.integers(1, 4)),
+            })
+    result = fit_piecewise_cms4_effect(
+        pd.DataFrame(rows), "relapse_free_months", "relapse_event",
+        ["cms_CMS4_mesenchymal", "stage_harmonized"], cutoff=18.0)
+    assert result["hr_early"] > 0
+    assert result["hr_late"] > 0
+    assert 0 <= result["p_early_vs_late"] <= 1
+    assert {"cms4_early", "cms4_late"}.issubset(result["summary"].index)

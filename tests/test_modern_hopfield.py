@@ -23,6 +23,7 @@ from modern_hopfield import (
     modern_hopfield_field,
     modern_hopfield_jacobian,
     patterns_to_matrix,
+    score_cohort_modern_hopfield,
     normalized_driver_direction,
     stability_at_equilibrium_hopfield,
     sweep_beta_hopfield,
@@ -418,6 +419,22 @@ def test_modern_classifier_accepts_clear_pattern_and_rejects_origin(real_pattern
     origin = classify_expression_modern_hopfield(
         np.zeros_like(real_patterns[label]), real_patterns, beta=3.0)
     assert origin["label"] == "indeterminado"
+
+
+def test_modern_cohort_scoring_exports_audit_columns(real_patterns):
+    import pandas as pd
+
+    genes = [f"g{i}" for i in range(len(next(iter(real_patterns.values()))))]
+    frame = pd.DataFrame([real_patterns["CMS3_metabolic"]], columns=genes)
+    scored = score_cohort_modern_hopfield(
+        frame, genes, real_patterns, beta=3.0, integration_time=10.0)
+    expected = {
+        "modern_hopfield_cms", "modern_hopfield_correlation",
+        "modern_hopfield_margin", "modern_hopfield_residual",
+        "modern_hopfield_converged", "modern_hopfield_stable",
+        "modern_hopfield_displacement", "modern_hopfield_energy_drop",
+    }
+    assert expected.issubset(scored.columns)
 
 
 def test_beta_sweep_rejects_duplicate_equilibria_even_if_each_matches():

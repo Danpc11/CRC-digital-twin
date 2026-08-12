@@ -113,8 +113,10 @@ def test_projection_legacy_remains_explicitly_available(real_calibrated_patterns
     assert x.shape == (len(gene_order), len(t))
 
 
-def test_cms4_has_strong_evidence_others_do_not():
-    assert EVIDENCE_STRENGTH["CMS4_mesenchymal"]["level"] == "fuerte"
+def test_cms4_evidence_is_temporally_qualified():
+    evidence = EVIDENCE_STRENGTH["CMS4_mesenchymal"]
+    assert evidence["level"] == "moderada/provisional"
+    assert "riesgos proporcionales" in evidence["detail"]
     assert EVIDENCE_STRENGTH["CMS1_MSI_immune"]["level"] != "fuerte"
     assert EVIDENCE_STRENGTH["CMS3_metabolic"]["level"] != "fuerte"
 

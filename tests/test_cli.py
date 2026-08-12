@@ -51,6 +51,7 @@ def test_pooled_cox_accepts_multiple_cohort_flags():
         "pooled-cox", "--cohort", "A", "a.tsv", "--cohort", "B", "b.tsv",
     ])
     assert args.cohort == [["A", "a.tsv"], ["B", "b.tsv"]]
+    assert args.bootstrap_iterations == 200
 
 
 @patch("cli.subprocess.run")
@@ -92,6 +93,32 @@ def test_cmd_pooled_cox_expands_multiple_cohort_flags_correctly(mock_run):
     assert called_cmd.count("--cohort") == 2
     assert "A" in called_cmd and "a.tsv" in called_cmd
     assert "B" in called_cmd and "b.tsv" in called_cmd
+
+
+def test_external_validation_parses_modern_hopfield_options():
+    args = cli.build_parser().parse_args([
+        "validate-external", "--patterns", "p.tsv", "--input", "x.tsv",
+        "--output", "out", "--classifier", "both", "--beta", "3.5",
+        "--modern-corr-threshold", "0.85", "--require-valid-beta",
+    ])
+    assert args.classifier == "both"
+    assert args.beta == 3.5
+    assert args.modern_corr_threshold == 0.85
+    assert args.require_valid_beta is True
+
+
+@patch("cli.subprocess.run")
+def test_pooled_cox_forwards_incremental_model_options(mock_run):
+    mock_run.return_value = MagicMock(returncode=0)
+    args = cli.build_parser().parse_args([
+        "pooled-cox", "--cohort", "A", "a.tsv", "--adjust-stage",
+        "--reference", "CMS2_canonical_WNT", "--bootstrap-iterations", "25",
+    ])
+    cli.cmd_pooled_cox(args)
+    called_cmd = mock_run.call_args[0][0]
+    assert "--adjust-stage" in called_cmd
+    assert "CMS2_canonical_WNT" in called_cmd
+    assert called_cmd[called_cmd.index("--bootstrap-iterations") + 1] == "25"
 
 
 def test_app_subcommand_default_port_and_address():
