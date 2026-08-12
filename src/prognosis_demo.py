@@ -191,7 +191,7 @@ def main():
         treatments = applicable_treatments(x_at_alert, gene_order, patterns)
         if treatments:
             for name, efficacy in treatments:
-                print(f"  [{name}] eficacia relativa={efficacy:.3f}")
+                print(f"  [{name}] intensidad simulada arbitraria={efficacy:.3f}")
                 print(f"    {describe_treatment(name)}")
                 if name == "anti_egfr":
                     print(
@@ -200,10 +200,11 @@ def main():
                         "la prueba de mutacion real (qPCR alelo-especifico/HRM)."
                     )
         else:
-            print("  Ninguno de los mecanismos modelados tiene eficacia no-trivial en este estado.")
+            print("  Ninguno de los mecanismos modelados tiene intensidad simulada no-trivial en este estado.")
         print(
-            "\n  RECORDATORIO: direccion de efecto fundamentada en literatura clinica, "
-            "magnitud NO calibrada -- ver treatment_perturbation.py. No usar para decisiones reales."
+            "\n  RECORDATORIO: direccion de efecto fundamentada en literatura clinica; los numeros "
+            "de arriba son INTENSIDAD SIMULADA ARBITRARIA, no eficacia clinica ni magnitud "
+            "calibrada -- ver treatment_perturbation.py. No usar para decisiones reales."
         )
     else:
         print("\nNo se detecto alerta -- revisar threshold_sigma o la fuerza del sesgo simulado.")
