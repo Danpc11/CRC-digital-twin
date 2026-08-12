@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
+from modern_hopfield import patterns_to_matrix, simulate_longitudinal_patient_hopfield_v2
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
 from scipy.integrate import solve_ivp
@@ -104,16 +105,40 @@ def applicable_treatments(x_current: np.ndarray, gene_order: list, patterns: dic
 
 
 def simulate_longitudinal_patient(
-    W, gene_order, recurrence_pattern, n_genes,
+    model_matrix, gene_order, recurrence_pattern, n_genes,
     n_timepoints=8, months_between_checks=3,
-    recurrence_onset_month=15, beta=2.0,
+    recurrence_onset_month=15, beta=None,
+    dynamics_model="modern_hopfield", max_forcing_strength=1.5,
 ):
     """
     Simula mediciones periodicas post-quirurgicas (ej. cada 3 meses).
+
+    dynamics_model="modern_hopfield" (predeterminado) usa la version V2:
+    beta=3, reposo estabilizado, transicion suave y driver normalizado.
+    dynamics_model="projection_legacy" conserva la ecuacion historica
+    exclusivamente para comparacion reproducible (beta=2 por defecto).
     Antes de recurrence_onset_month, sin forzamiento (MRD negativo).
     Despues, un termino de sesgo hacia recurrence_pattern representa
     la reaparicion de enfermedad.
     """
+    if dynamics_model == "modern_hopfield":
+        resolved_beta = 3.0 if beta is None else float(beta)
+        return simulate_longitudinal_patient_hopfield_v2(
+            model_matrix, recurrence_pattern, n_genes,
+            n_timepoints=n_timepoints,
+            months_between_checks=months_between_checks,
+            recurrence_onset_month=recurrence_onset_month,
+            beta=resolved_beta,
+            max_forcing_strength=max_forcing_strength,
+            smooth_transition=True,
+            forcing_ramp_duration_months=12.0,
+            normalize_driver=True,
+        )
+    if dynamics_model != "projection_legacy":
+        raise ValueError("dynamics_model debe ser 'modern_hopfield' o 'projection_legacy'")
+
+    resolved_beta = 2.0 if beta is None else float(beta)
+    W = model_matrix
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
     x_series = np.zeros((n_genes, n_timepoints))
     x_current = np.zeros(n_genes)
@@ -133,7 +158,7 @@ def simulate_longitudinal_patient(
         # muestreos periodicos de una trayectoria subyacente continua)
         sol = solve_ivp(
             dynamics, (0, months_between_checks), x_current,
-            args=(W, I_driver, beta, 0.0, None), method="RK45",
+            args=(W, I_driver, resolved_beta, 0.0, None), method="RK45",
             rtol=1e-8, atol=1e-10,
         )
         x_current = sol.y[:, -1]
@@ -147,6 +172,12 @@ def main():
     parser.add_argument("--patterns", required=True, help="calibrated_patterns.tsv (patrones REALES, no placeholders)")
     parser.add_argument("--recurrence-target", default="CMS4_mesenchymal",
                          help="Atractor hacia el que se dirige la recaida simulada")
+    parser.add_argument("--dynamics-model",
+                        choices=["modern_hopfield", "projection_legacy"],
+                        default="modern_hopfield",
+                        help="Motor dinamico; Modern Hopfield V2 es el predeterminado")
+    parser.add_argument("--beta", type=float, default=None,
+                        help="Default dependiente del motor: 3.0 moderno, 2.0 legacy")
     parser.add_argument("--output", default="figures/prognosis_demo.png")
     args = parser.parse_args()
 
@@ -158,12 +189,17 @@ def main():
     if args.recurrence_target not in patterns:
         raise ValueError(f"'{args.recurrence_target}' no esta en los patrones. Opciones: {list(patterns.keys())}")
 
-    W, labels, _ = build_model_from_patterns(patterns)
+    if args.dynamics_model == "modern_hopfield":
+        model_matrix, _ = patterns_to_matrix(patterns)
+    else:
+        model_matrix, _, _ = build_model_from_patterns(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns[args.recurrence_target]
 
     print(f"\nSimulando trayectoria post-quirurgica (recaida simulada hacia {args.recurrence_target})...")
-    t_checks, x_series = simulate_longitudinal_patient(W, gene_order, recurrence_pattern, n_genes)
+    t_checks, x_series = simulate_longitudinal_patient(
+        model_matrix, gene_order, recurrence_pattern, n_genes,
+        dynamics_model=args.dynamics_model, beta=args.beta)
 
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)

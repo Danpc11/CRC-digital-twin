@@ -30,6 +30,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
+from modern_hopfield import (
+    _scheduled_forcing_strength,
+    compute_stabilizing_k,
+    modern_hopfield_baseline,
+    modern_hopfield_field,
+    modern_hopfield_field_stabilized,
+    normalized_driver_direction,
+    patterns_to_matrix,
+)
 from prognosis import hazard_from_trajectory
 from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
 
@@ -37,11 +46,22 @@ WONG = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E
 
 
 def simulate_with_optional_treatment(
-    W, n_genes, gene_order, recurrence_pattern, patterns,
+    model_matrix, n_genes, gene_order, recurrence_pattern, patterns,
     treatment=None, treatment_onset_month=None, ras_braf_wildtype=None,
     n_timepoints=10, months_between_checks=3, recurrence_onset_month=15,
-    beta=2.0, base_treatment_strength=0.5,
+    beta=None, base_treatment_strength=0.5,
+    dynamics_model="modern_hopfield", max_forcing_strength=1.5,
 ):
+    if dynamics_model not in {"modern_hopfield", "projection_legacy"}:
+        raise ValueError("dynamics_model debe ser 'modern_hopfield' o 'projection_legacy'")
+    resolved_beta = (3.0 if dynamics_model == "modern_hopfield" else 2.0) if beta is None else float(beta)
+    if dynamics_model == "modern_hopfield":
+        X = model_matrix
+        stabilizing_k = compute_stabilizing_k(X, resolved_beta)
+        baseline = modern_hopfield_baseline(X)
+        driver_direction = normalized_driver_direction(recurrence_pattern)
+    else:
+        W = model_matrix
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
     x_series = np.zeros((n_genes, n_timepoints))
     x_current = np.zeros(n_genes)
@@ -50,8 +70,14 @@ def simulate_with_optional_treatment(
         I_relapse = np.zeros(n_genes)
         if t >= recurrence_onset_month:
             months_since_onset = t - recurrence_onset_month
-            strength = min(0.15 * months_since_onset, 0.7)
-            I_relapse = strength * recurrence_pattern
+            if dynamics_model == "modern_hopfield":
+                strength, forcing_progress = _scheduled_forcing_strength(
+                    months_since_onset, max_forcing_strength, 12.0)
+                I_relapse = strength * driver_direction
+            else:
+                strength = min(0.15 * months_since_onset, 0.7)
+                forcing_progress = 1.0
+                I_relapse = strength * recurrence_pattern
 
         I_total = I_relapse
         if treatment is not None and treatment_onset_month is not None and t >= treatment_onset_month:
@@ -61,11 +87,24 @@ def simulate_with_optional_treatment(
             )
             I_total = I_relapse + I_treatment
 
-        sol = solve_ivp(
-            dynamics, (0, months_between_checks), x_current,
-            args=(W, I_total, beta, 0.0, None), method="RK45",
-            rtol=1e-8, atol=1e-10,
-        )
+        if dynamics_model == "modern_hopfield":
+            if t < recurrence_onset_month:
+                field = lambda tt, xx: modern_hopfield_field_stabilized(
+                    xx, X, resolved_beta, stabilizing_k, baseline)
+            else:
+                quiescent_weight = max(0.0, 1.0 - forcing_progress)
+                field = lambda tt, xx: (
+                    modern_hopfield_field(xx, X, resolved_beta) + I_total
+                    - quiescent_weight * baseline
+                    - quiescent_weight * stabilizing_k * xx)
+            sol = solve_ivp(field, (0, months_between_checks), x_current,
+                            method="RK45", rtol=1e-8, atol=1e-10)
+        else:
+            sol = solve_ivp(
+                dynamics, (0, months_between_checks), x_current,
+                args=(W, I_total, resolved_beta, 0.0, None), method="RK45",
+                rtol=1e-8, atol=1e-10,
+            )
         x_current = sol.y[:, -1]
         x_series[:, i] = x_current
 
@@ -77,6 +116,11 @@ def main():
     parser.add_argument("--patterns", required=True)
     parser.add_argument("--treatment", required=True, choices=list(TREATMENT_MECHANISMS.keys()))
     parser.add_argument("--recurrence-target", default="CMS4_mesenchymal")
+    parser.add_argument("--dynamics-model",
+                        choices=["modern_hopfield", "projection_legacy"],
+                        default="modern_hopfield")
+    parser.add_argument("--beta", type=float, default=None,
+                        help="Default dependiente del motor: 3.0 moderno, 2.0 legacy")
     parser.add_argument("--treatment-onset-month", type=int, default=18,
                          help="Mes en que se inicia el tratamiento (ej. al detectarse la alerta)")
     parser.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"], default="unknown")
@@ -94,20 +138,25 @@ def main():
     if args.treatment == "anti_egfr":
         print(f"Estatus RAS/BRAF asumido: {args.ras_braf_wildtype}")
 
-    W, labels, _ = build_model_from_patterns(patterns)
+    if args.dynamics_model == "modern_hopfield":
+        model_matrix, _ = patterns_to_matrix(patterns)
+    else:
+        model_matrix, _, _ = build_model_from_patterns(patterns)
     n_genes = len(gene_order)
     recurrence_pattern = patterns[args.recurrence_target]
 
     print("\nSimulando SIN tratamiento (linea base)...")
     t_checks, x_baseline = simulate_with_optional_treatment(
-        W, n_genes, gene_order, recurrence_pattern, patterns, treatment=None,
+        model_matrix, n_genes, gene_order, recurrence_pattern, patterns, treatment=None,
+        dynamics_model=args.dynamics_model, beta=args.beta,
     )
     hazard_baseline = hazard_from_trajectory(x_baseline)
 
     print(f"Simulando CON tratamiento ({args.treatment}, inicio mes {args.treatment_onset_month})...")
     t_checks2, x_treated = simulate_with_optional_treatment(
-        W, n_genes, gene_order, recurrence_pattern, patterns, treatment=args.treatment,
+        model_matrix, n_genes, gene_order, recurrence_pattern, patterns, treatment=args.treatment,
         treatment_onset_month=args.treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
+        dynamics_model=args.dynamics_model, beta=args.beta,
     )
     hazard_treated = hazard_from_trajectory(x_treated)
 

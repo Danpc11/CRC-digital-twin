@@ -44,12 +44,10 @@ paso de la iteracion discreta. Aqui se usa la version de TIEMPO
 CONTINUO (compatible con el resto del proyecto, que integra ODEs), no
 la iteracion discreta de un solo paso del paper original.
 
-Este modulo NO reemplaza attractor_model.py todavia -- es una
-alternativa completa, verificada con el mismo rigor (jacobiano
-verificado contra diferencias finitas, decrecimiento de energia
-verificado numericamente, equilibrios/estabilidad/cuencas con la misma
-metodologia de dynamics_diagnostics.py) para permitir una comparacion
-justa antes de decidir si reemplaza al sistema actual.
+Este modulo es el motor dinamico predeterminado de las simulaciones
+clinicas exploratorias. attractor_model.py permanece disponible bajo
+la opcion explicita projection_legacy para reproducibilidad y
+comparacion, pero no es el valor predeterminado.
 HALLAZGO CRITICO -- EL ORIGEN ES UNA SILLA INESTABLE, NO UN REPOSO
 --------------------------------------------------------------------
 Verificado con datos reales de GSE39582: el origen SI es un punto fijo
