@@ -636,6 +636,15 @@ def main():
                          help="Buscar automaticamente un intervalo de beta donde los 4 "
                               "patrones califiquen como atractores CMS genuinos (busqueda "
                               "mas lenta, no corre por default)")
+    parser.add_argument("--beta-min-busqueda", type=float, default=0.1,
+                         help="Limite inferior del rango de beta a explorar con --find-interval")
+    parser.add_argument("--beta-max-busqueda", type=float, default=15.0,
+                         help="Limite superior del rango de beta a explorar con --find-interval "
+                              "-- si el resultado dice 'limite superior NO determinado', "
+                              "aumentar este valor y volver a correr")
+    parser.add_argument("--n-steps-busqueda", type=int, default=150,
+                         help="Resolucion del barrido de --find-interval (mas pasos = mas lento "
+                              "pero menos probable de saltarse un tramo angosto)")
     parser.add_argument("--full", action="store_true",
                          help="Correr analisis avanzados: equilibrios espurios, cuencas "
                               "locales, sensibilidad y comparacion beta=2 vs beta=10")
@@ -677,16 +686,17 @@ def main():
               "trivial (revisar 'desplazamiento_vs_patron_calibrado' en la tabla de arriba: "
               "~norma del patron completo = colapso al origen).")
         if args.find_interval:
-            print("\nBuscando un intervalo de beta donde los 4 SI califiquen "
+            print(f"\nBuscando un intervalo de beta en [{args.beta_min_busqueda}, "
+                  f"{args.beta_max_busqueda}] donde los 4 SI califiquen "
                   "(puede tardar unos segundos)...")
-            beta_min_busqueda, beta_max_busqueda = 0.1, 15.0
+            beta_min_busqueda, beta_max_busqueda = args.beta_min_busqueda, args.beta_max_busqueda
             ruta_tsv = None
             if args.output:
                 Path(args.output).mkdir(parents=True, exist_ok=True)
                 ruta_tsv = str(Path(args.output) / "dynamics_beta_interval_search.tsv")
             busqueda = find_valid_beta_interval(
                 patterns, W, beta_min=beta_min_busqueda, beta_max=beta_max_busqueda,
-                output_path=ruta_tsv)
+                n_steps=args.n_steps_busqueda, output_path=ruta_tsv)
             tramos = find_contiguous_valid_segments(busqueda, beta_max_explored=beta_max_busqueda)
             if tramos:
                 for t in tramos:
