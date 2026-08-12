@@ -145,6 +145,9 @@ def cmd_modern_hopfield(args):
         argv += ["--find-bias-threshold", args.find_bias_threshold]
     if args.verify_stabilizer:
         argv.append("--verify-stabilizer")
+    if args.compare_stabilized_sweep:
+        argv.append("--compare-stabilized-sweep")
+        argv += ["--forcing-candidates"] + [str(v) for v in args.forcing_candidates]
     if args.output:
         argv += ["--output", args.output]
     _run_module("modern_hopfield.py", argv)
@@ -278,6 +281,10 @@ def build_parser():
                     help="Verifica el termino estabilizador para la fase pre-recaida (origen "
                          "estable + simulacion completa contra los 4 patrones) -- pendiente de "
                          "confirmar en datos reales, ver docstring del modulo")
+    s.add_argument("--compare-stabilized-sweep", action="store_true",
+                    help="Comparar V1 y V2 con las mismas fuerzas para los cuatro CMS")
+    s.add_argument("--forcing-candidates", nargs="+", type=float,
+                    default=[0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0])
     s.add_argument("--output")
     s.set_defaults(func=cmd_modern_hopfield)
 
