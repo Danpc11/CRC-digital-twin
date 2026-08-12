@@ -99,6 +99,21 @@ def cmd_pooled_cox(args):
     _run_module("pooled_cox_validation.py", argv)
 
 
+def cmd_cox_diagnostics(args):
+    argv = []
+    for path in args.input:
+        argv += ["--input", path]
+    if args.reference:
+        argv += ["--reference", args.reference]
+    if args.adjust_stage:
+        argv.append("--adjust-stage")
+    if args.no_stratify:
+        argv.append("--no-stratify")
+    if args.output:
+        argv += ["--output", args.output]
+    _run_module("cox_diagnostics.py", argv)
+
+
 def cmd_prognosis(args):
     argv = ["--patterns", args.patterns]
     if args.recurrence_target:
@@ -170,6 +185,17 @@ def build_parser():
     s.add_argument("--cohort", action="append", nargs=2, metavar=("NOMBRE", "SCORED_TSV"), required=True)
     s.add_argument("--output", default="results_pooled_cox")
     s.set_defaults(func=cmd_pooled_cox)
+
+    s = sub.add_parser("cox-diagnostics",
+                        help="Diagnosticos formales del modelo de Cox (Schoenfeld, influyentes, heterogeneidad)")
+    s.add_argument("--input", action="append", required=True, metavar="SCORED_TSV")
+    s.add_argument("--reference")
+    s.add_argument("--adjust-stage", action="store_true",
+                    help="Incluir estadio armonizado como covariable")
+    s.add_argument("--no-stratify", action="store_true",
+                    help="NO estratificar por cohorte (solo comparacion/debug)")
+    s.add_argument("--output")
+    s.set_defaults(func=cmd_cox_diagnostics)
 
     s = sub.add_parser("prognosis", help="Demo de pronostico longitudinal post-quirurgico")
     s.add_argument("--patterns", required=True)
