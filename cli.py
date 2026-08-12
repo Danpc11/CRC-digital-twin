@@ -158,6 +158,9 @@ def cmd_modern_hopfield(args):
 
 def cmd_prognosis(args):
     argv = ["--patterns", args.patterns]
+    argv += ["--dynamics-model", args.dynamics_model]
+    if args.beta is not None:
+        argv += ["--beta", str(args.beta)]
     if args.recurrence_target:
         argv += ["--recurrence-target", args.recurrence_target]
     if args.output:
@@ -166,7 +169,10 @@ def cmd_prognosis(args):
 
 
 def cmd_simulate_treatment(args):
-    argv = ["--patterns", args.patterns, "--treatment", args.treatment]
+    argv = ["--patterns", args.patterns, "--treatment", args.treatment,
+            "--dynamics-model", args.dynamics_model]
+    if args.beta is not None:
+        argv += ["--beta", str(args.beta)]
     if args.recurrence_target:
         argv += ["--recurrence-target", args.recurrence_target]
     if args.ras_braf_wildtype:
@@ -297,6 +303,9 @@ def build_parser():
     s = sub.add_parser("prognosis", help="Demo de pronostico longitudinal post-quirurgico")
     s.add_argument("--patterns", required=True)
     s.add_argument("--recurrence-target")
+    s.add_argument("--dynamics-model", choices=["modern_hopfield", "projection_legacy"],
+                   default="modern_hopfield")
+    s.add_argument("--beta", type=float)
     s.add_argument("--output")
     s.set_defaults(func=cmd_prognosis)
 
@@ -304,6 +313,9 @@ def build_parser():
     s.add_argument("--patterns", required=True)
     s.add_argument("--treatment", required=True)
     s.add_argument("--recurrence-target")
+    s.add_argument("--dynamics-model", choices=["modern_hopfield", "projection_legacy"],
+                   default="modern_hopfield")
+    s.add_argument("--beta", type=float)
     s.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"])
     s.add_argument("--output")
     s.set_defaults(func=cmd_simulate_treatment)
