@@ -318,6 +318,72 @@ def simulate_longitudinal_patient_hopfield(
     return t_checks, x_series
 
 
+def find_minimum_forcing_strength(
+    patterns: dict, target_label: str, beta: float = 3.0,
+    strength_candidates=None, corr_threshold: float = 0.9,
+    recurrence_onset_month: int = 15, n_timepoints: int = 10,
+) -> dict:
+    """
+    Busca la fuerza de forzamiento MINIMA necesaria para que forzar
+    hacia target_label efectivamente converja ahi (corr >= corr_threshold),
+    en vez de terminar en el patron dominante u otro lugar.
+
+    NECESARIO tras un hallazgo real: el umbral de fuerza suficiente NO
+    es universal, depende de que tan dominante es el patron de mayor
+    norma en CADA calibracion especifica -- con datos sinteticos de
+    prueba (cuencas ~parejas, 22-27% cada patron), fuerza=1.5 bastaba
+    para los 4; con la calibracion real de GSE39582 (cuencas desiguales,
+    CMS1=45% vs CMS2=12%), fuerza=1.5 NO basta para CMS2 (termina con
+    correlacion NEGATIVA respecto al objetivo). Buscar el umbral real
+    en vez de asumir un numero fijo.
+
+    Devuelve, para cada candidato de fuerza probado: la correlacion
+    lograda con el objetivo, Y con que patron distinto termina
+    correlacionando mas si el forzamiento fallo (diagnostico completo,
+    no solo pasa/no-pasa).
+    """
+    if strength_candidates is None:
+        strength_candidates = [0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0]
+
+    X, labels = patterns_to_matrix(patterns)
+    n_genes = X.shape[0]
+    idx_target = labels.index(target_label)
+    p_target = X[:, idx_target]
+
+    resultados = []
+    umbral_minimo_encontrado = None
+    for fuerza in strength_candidates:
+        t, x = simulate_longitudinal_patient_hopfield(
+            X, p_target, n_genes, beta=beta, max_forcing_strength=fuerza,
+            n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+        x_final = x[:, -1]
+
+        if np.std(x_final) < 1e-12:
+            resultados.append({"fuerza": fuerza, "corr_con_objetivo": float("nan"),
+                                "corr_con_mas_parecido": float("nan"), "mas_parecido_a": "origen"})
+            continue
+
+        corr_target = float(np.corrcoef(x_final, p_target)[0, 1])
+        mejor_label, mejor_corr = None, -2.0
+        for i, label in enumerate(labels):
+            c = float(np.corrcoef(x_final, X[:, i])[0, 1])
+            if c > mejor_corr:
+                mejor_corr, mejor_label = c, label
+
+        resultados.append({
+            "fuerza": fuerza, "corr_con_objetivo": corr_target,
+            "corr_con_mas_parecido": mejor_corr, "mas_parecido_a": mejor_label,
+        })
+        if corr_target >= corr_threshold and umbral_minimo_encontrado is None:
+            umbral_minimo_encontrado = fuerza
+
+    return {
+        "patron_objetivo": target_label,
+        "umbral_minimo_encontrado": umbral_minimo_encontrado,
+        "detalle": resultados,
+    }
+
+
 def compare_forced_trajectories_old_vs_new(
     patterns: dict, W_old: np.ndarray, gene_order: list,
     beta_old: float = 2.0, beta_new: float = 3.0, max_forcing_strength_new: float = 1.5,
@@ -379,11 +445,17 @@ def main():
                          help="Comparar trayectorias clinicas FORZADAS (como las usa prognosis_demo.py) "
                               "entre la dinamica antigua y esta nueva")
     parser.add_argument("--max-forcing-strength", type=float, default=1.5,
-                         help="Fuerza maxima de forzamiento para --compare-forced -- hallazgo real: "
-                              "con el valor viejo (0.7, calibrado para attractor_model.py), forzar "
-                              "hacia un patron no dominante termina en el patron dominante en su lugar "
-                              "(la atraccion nativa de esta dinamica es mas fuerte). 1.5 es el minimo "
-                              "verificado que corrige esto de forma robusta.")
+                         help="Fuerza maxima de forzamiento para --compare-forced -- CUIDADO: el "
+                              "umbral suficiente es ESPECIFICO de cada calibracion, no un numero "
+                              "universal (con datos sinteticos de prueba, 1.5 basto; con la "
+                              "calibracion real de GSE39582, no basto para CMS2 -- terminaba "
+                              "correlacionando NEGATIVO con el objetivo). Usar "
+                              "--find-forcing-threshold para buscar el valor correcto en tus datos "
+                              "antes de confiar en un numero fijo.")
+    parser.add_argument("--find-forcing-threshold",
+                         help="Buscar la fuerza minima necesaria para converger correctamente hacia "
+                              "el patron dado (nombre exacto, ej. CMS2_canonical_WNT) -- no asumir "
+                              "que un valor fijo funciona para todos los patrones/calibraciones.")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -422,6 +494,22 @@ def main():
         print("=" * 78)
         barrido = sweep_beta_hopfield(patterns)
         print(barrido.to_string(index=False))
+
+    if args.find_forcing_threshold:
+        print("\n" + "=" * 78)
+        print(f"BUSQUEDA DE FUERZA MINIMA DE FORZAMIENTO -- objetivo: {args.find_forcing_threshold}")
+        print("=" * 78)
+        resultado_umbral = find_minimum_forcing_strength(
+            patterns, args.find_forcing_threshold, beta=args.beta)
+        for r in resultado_umbral["detalle"]:
+            print(f"  fuerza={r['fuerza']:6.1f}  corr_objetivo={r['corr_con_objetivo']:+.3f}  "
+                  f"mas_parecido_a={r['mas_parecido_a']} (corr={r['corr_con_mas_parecido']:.3f})")
+        if resultado_umbral["umbral_minimo_encontrado"] is not None:
+            print(f"\nUmbral minimo encontrado: {resultado_umbral['umbral_minimo_encontrado']}")
+        else:
+            print("\nAVISO: ningun candidato probado (hasta 20.0) logro correlacion >= 0.9 con "
+                  "el objetivo -- ampliar strength_candidates o revisar si este patron tiene un "
+                  "problema mas de fondo (ej. muy cerca de otro patron dominante).")
 
     comparacion_forzada = None
     if args.compare_forced:
