@@ -160,6 +160,7 @@ def cmd_prognosis(args):
     argv = ["--patterns", args.patterns]
     argv += ["--dynamics-model", args.dynamics_model]
     argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
+    argv += ["--n-timepoints", str(args.n_timepoints)]
     if args.beta is not None:
         argv += ["--beta", str(args.beta)]
     if args.recurrence_target:
@@ -173,6 +174,7 @@ def cmd_simulate_treatment(args):
     argv = ["--patterns", args.patterns, "--treatment", args.treatment,
             "--dynamics-model", args.dynamics_model]
     argv += ["--max-forcing-strength", str(args.max_forcing_strength)]
+    argv += ["--n-timepoints", str(args.n_timepoints)]
     if args.beta is not None:
         argv += ["--beta", str(args.beta)]
     if args.recurrence_target:
@@ -309,6 +311,7 @@ def build_parser():
                    default="modern_hopfield")
     s.add_argument("--beta", type=float)
     s.add_argument("--max-forcing-strength", type=float, default=5.0)
+    s.add_argument("--n-timepoints", type=int, default=10)
     s.add_argument("--output")
     s.set_defaults(func=cmd_prognosis)
 
@@ -320,6 +323,7 @@ def build_parser():
                    default="modern_hopfield")
     s.add_argument("--beta", type=float)
     s.add_argument("--max-forcing-strength", type=float, default=5.0)
+    s.add_argument("--n-timepoints", type=int, default=10)
     s.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"])
     s.add_argument("--output")
     s.set_defaults(func=cmd_simulate_treatment)
