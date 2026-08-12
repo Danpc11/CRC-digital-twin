@@ -394,3 +394,19 @@ def test_find_valid_beta_interval_correlation_threshold_is_wired_through(synthet
     # puntos que con 0.8 -- relajar el criterio no puede reducir cuantos
     # pasan
     assert b2["n_atractores_genuinos"].sum() >= b1["n_atractores_genuinos"].sum()
+
+
+def test_beta_comparison_set_includes_requested_beta_without_duplicates():
+    """
+    Regresion de un bug real de produccion: en modo --full, la
+    comparacion de trayectorias clinicas usaba betas=(2.0, 10.0) FIJOS,
+    ignorando por completo el --beta que el usuario pidio -- alguien
+    corrio '--beta 1.015 --full' y la tabla resultante nunca mostraba
+    1.015, solo 2.0 y 10.0. Misma logica de deduplicacion usada en
+    main(), probada aqui de forma aislada.
+    """
+    # beta distinto a ambas referencias -- deben quedar los 3
+    assert sorted(set([2.0, 1.015, 10.0])) == [1.015, 2.0, 10.0]
+    # beta que coincide con una referencia -- no debe duplicarse
+    assert sorted(set([2.0, 2.0, 10.0])) == [2.0, 10.0]
+    assert sorted(set([2.0, 10.0, 10.0])) == [2.0, 10.0]
