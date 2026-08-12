@@ -1,7 +1,7 @@
 # Modelo — fundamento teórico
 
 Este documento describe la dinámica de atractores del modelo, cómo se calibra contra los datos reales y cómo se extiende al pronóstico
-longitudinal y simulación de tratamiento. Para el estado empírico del proyecto (qué tan bien funciona, con qué evidencia), ver `PROJECT_STATUS.md`. 
+longitudinal y simulación de tratamiento. Para el estado empírico del proyecto (qué tan bien funciona, con qué evidencia), ver `PROJECT_STATUS.md`.
 
 ## 1. Formulación del espacio de fase
 
@@ -242,3 +242,49 @@ exploratorias** — las trayectorias de recaída en `prognosis_demo.py` funciona
 incluyen forzamiento externo continuo en la dirección del patrón (verificado: correlación
 0.99 sostenida durante la ventana práctica de ~27 meses), no porque el patrón sea un
 atractor autónomo del sistema sin ese forzamiento.
+
+## 10. Alternativa Modern Hopfield y clasificación dinámica experimental
+
+La alternativa en `modern_hopfield.py` usa la energía
+
+$$E(x)=-\frac{1}{\beta}\log\sum_\mu
+\exp\!\left(\beta (p^\mu)^T x\right)+\frac12\|x\|^2$$
+
+y el flujo de gradiente
+
+$$\dot x=-x+X\,\mathrm{softmax}(\beta X^Tx).$$
+
+Su Jacobiano es simétrico:
+
+$$J=-I+\beta X\left[\mathrm{diag}(s)-ss^T\right]X^T,$$
+
+lo que permite verificar estabilidad con autovalores reales. Para clasificar una muestra ya
+normalizada, la implementación integra el flujo, refina el equilibrio y solo acepta una
+etiqueta si: la integración y el refinamiento convergen, el residuo del campo es menor que
+$10^{-6}$, el equilibrio es estable y la correlación con el centroide más cercano supera el
+umbral configurado. Esta recuperación se reporta aparte del clasificador CMS principal.
+
+### Reposo longitudinal con centroides desbalanceados
+
+En el origen el softmax es uniforme y el campo sin corregir vale
+
+$$F(0)=X\,u, \qquad u=(1/M,\ldots,1/M)^T.$$
+
+El z-score global garantiza una suma de centroides ponderada por los tamaños de clase, pero
+no necesariamente $Xu=0$. Por eso hacer negativos los autovalores del Jacobiano no basta:
+primero debe cumplirse $F(0)=0$. Durante la fase quiescente se usa
+
+$$F_k(x)=-x+X\,\mathrm{softmax}(\beta X^Tx)-b-kx,
+\qquad b=Xu,$$
+
+que es descenso de la energía modificada
+
+$$E_k(x)=E(x)+b^Tx+\frac{k}{2}\|x\|^2.$$
+
+Así, el origen es un punto fijo exacto y $k$ se escoge para que el mayor autovalor de
+$J(0)-kI$ sea negativo con margen. Al aparecer la señal de recaída, $b$ y $k$ se apagan
+gradualmente mientras aumenta el forzamiento, evitando una discontinuidad con fuerza cero.
+
+El comando `modern-hopfield --compare-stabilized-sweep` compara V1 y V2 con los mismos
+parámetros para cada CMS. Las fuerzas y β siguen siendo parámetros experimentales específicos
+de la calibración; no representan intensidad tumoral, dosis ni eficacia clínica.
