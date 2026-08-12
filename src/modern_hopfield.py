@@ -116,6 +116,48 @@ def patterns_to_matrix(patterns: dict) -> tuple[np.ndarray, list]:
     return X, labels
 
 
+def validate_modern_pattern_matrix(
+    X: np.ndarray, n_genes: int, n_patterns: int = 4,
+) -> np.ndarray:
+    """Valida que se recibio X=[p1|...|pM], no la matriz legacy W.
+
+    W y X comparten el numero de filas y pueden multiplicarse sin lanzar
+    errores, por lo que confundirlas produce resultados numericos plausibles
+    pero semanticamente falsos. En este proyecto M=4 (CMS1--CMS4).
+    """
+    matrix = np.asarray(X, dtype=float)
+    expected = (int(n_genes), int(n_patterns))
+    if matrix.ndim != 2 or matrix.shape != expected:
+        raise ValueError(
+            f"Modern Hopfield requiere X con forma {expected} "
+            f"(genes x patrones CMS); se recibio {matrix.shape}. "
+            "No pases la matriz W de projection_legacy.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("La matriz X contiene valores no finitos")
+    return matrix
+
+
+def validate_modern_hopfield_beta(
+    patterns: dict, beta: float, correlation_threshold: float = 0.9,
+) -> dict:
+    """Comprueba que los cuatro centroides produzcan atractores estables."""
+    if beta <= 0:
+        raise ValueError("beta debe ser > 0")
+    table = verify_all_patterns_hopfield(patterns, beta)
+    valid_rows = (
+        table["convergio_a_equilibrio"].astype(bool)
+        & table["localmente_estable"].astype(bool)
+        & (table["correlacion_equilibrio_vs_patron"] >= correlation_threshold)
+    )
+    invalid = table.loc[~valid_rows, "patron"].tolist()
+    return {
+        "valid": len(invalid) == 0,
+        "invalid_patterns": invalid,
+        "correlation_threshold": float(correlation_threshold),
+        "table": table,
+    }
+
+
 def hopfield_energy(x: np.ndarray, X: np.ndarray, beta: float) -> float:
     """
     E(x) = -(1/beta) logsumexp(beta X^T x) + (1/2) ||x||^2
@@ -613,7 +655,7 @@ def simulate_longitudinal_patient_hopfield_v2(
     X: np.ndarray, recurrence_pattern: np.ndarray, n_genes: int,
     n_timepoints: int = 8, months_between_checks: int = 3,
     recurrence_onset_month: int = 15, beta: float = 2.0,
-    max_forcing_strength: float = 1.5, stabilizing_k: float | None = None,
+    max_forcing_strength: float = 5.0, stabilizing_k: float | None = None,
     mechanism: str = "additive", smooth_transition: bool = True,
     forcing_ramp_duration_months: float | None = None,
     normalize_driver: bool = False,
@@ -631,6 +673,9 @@ def simulate_longitudinal_patient_hopfield_v2(
     mechanism: "additive" (fuerza sumada al campo) o "bias" (sesgo en
     softmax, ver modern_hopfield_field_biased) para la fase de recaida.
     """
+    X = validate_modern_pattern_matrix(X, n_genes, n_patterns=4)
+    if max_forcing_strength <= 0:
+        raise ValueError("max_forcing_strength debe ser > 0")
     if mechanism not in {"additive", "bias"}:
         raise ValueError("mechanism debe ser 'additive' o 'bias'")
     if stabilizing_k is None:

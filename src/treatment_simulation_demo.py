@@ -38,6 +38,7 @@ from modern_hopfield import (
     modern_hopfield_field_stabilized,
     normalized_driver_direction,
     patterns_to_matrix,
+    validate_modern_pattern_matrix,
 )
 from prognosis import hazard_from_trajectory
 from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
@@ -50,13 +51,16 @@ def simulate_with_optional_treatment(
     treatment=None, treatment_onset_month=None, ras_braf_wildtype=None,
     n_timepoints=10, months_between_checks=3, recurrence_onset_month=15,
     beta=None, base_treatment_strength=0.5,
-    dynamics_model="modern_hopfield", max_forcing_strength=1.5,
+    dynamics_model="modern_hopfield", max_forcing_strength=5.0,
 ):
     if dynamics_model not in {"modern_hopfield", "projection_legacy"}:
         raise ValueError("dynamics_model debe ser 'modern_hopfield' o 'projection_legacy'")
     resolved_beta = (3.0 if dynamics_model == "modern_hopfield" else 2.0) if beta is None else float(beta)
     if dynamics_model == "modern_hopfield":
-        X = model_matrix
+        X = validate_modern_pattern_matrix(
+            model_matrix, n_genes, n_patterns=len(patterns))
+        if max_forcing_strength <= 0:
+            raise ValueError("max_forcing_strength debe ser > 0")
         stabilizing_k = compute_stabilizing_k(X, resolved_beta)
         baseline = modern_hopfield_baseline(X)
         driver_direction = normalized_driver_direction(recurrence_pattern)
@@ -121,6 +125,9 @@ def main():
                         default="modern_hopfield")
     parser.add_argument("--beta", type=float, default=None,
                         help="Default dependiente del motor: 3.0 moderno, 2.0 legacy")
+    parser.add_argument("--max-forcing-strength", type=float, default=5.0,
+                        help="Fuerza maxima del driver normalizado Modern Hopfield; "
+                             "es especifica de la calibracion, no una dosis clinica")
     parser.add_argument("--treatment-onset-month", type=int, default=18,
                          help="Mes en que se inicia el tratamiento (ej. al detectarse la alerta)")
     parser.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"], default="unknown")
@@ -149,6 +156,7 @@ def main():
     t_checks, x_baseline = simulate_with_optional_treatment(
         model_matrix, n_genes, gene_order, recurrence_pattern, patterns, treatment=None,
         dynamics_model=args.dynamics_model, beta=args.beta,
+        max_forcing_strength=args.max_forcing_strength,
     )
     hazard_baseline = hazard_from_trajectory(x_baseline)
 
@@ -157,6 +165,7 @@ def main():
         model_matrix, n_genes, gene_order, recurrence_pattern, patterns, treatment=args.treatment,
         treatment_onset_month=args.treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
         dynamics_model=args.dynamics_model, beta=args.beta,
+        max_forcing_strength=args.max_forcing_strength,
     )
     hazard_treated = hazard_from_trajectory(x_treated)
 

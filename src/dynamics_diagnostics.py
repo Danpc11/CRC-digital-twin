@@ -371,7 +371,8 @@ def compare_clinical_trajectories(
         for beta_val in betas:
             t, x = simulate_longitudinal_patient(
                 W, gene_order, p, n_genes, beta=beta_val,
-                n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+                n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
+                dynamics_model="projection_legacy")
             hazard = hazard_from_trajectory(x)
             x_final = x[:, -1]
             corr_final = float(np.corrcoef(x_final, p)[0, 1]) if np.std(x_final) > 1e-12 else float("nan")

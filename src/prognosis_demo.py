@@ -108,7 +108,7 @@ def simulate_longitudinal_patient(
     model_matrix, gene_order, recurrence_pattern, n_genes,
     n_timepoints=8, months_between_checks=3,
     recurrence_onset_month=15, beta=None,
-    dynamics_model="modern_hopfield", max_forcing_strength=1.5,
+    dynamics_model="modern_hopfield", max_forcing_strength=5.0,
 ):
     """
     Simula mediciones periodicas post-quirurgicas (ej. cada 3 meses).
@@ -178,6 +178,9 @@ def main():
                         help="Motor dinamico; Modern Hopfield V2 es el predeterminado")
     parser.add_argument("--beta", type=float, default=None,
                         help="Default dependiente del motor: 3.0 moderno, 2.0 legacy")
+    parser.add_argument("--max-forcing-strength", type=float, default=5.0,
+                        help="Fuerza maxima del driver normalizado Modern Hopfield; "
+                             "es especifica de la calibracion, no una dosis clinica")
     parser.add_argument("--output", default="figures/prognosis_demo.png")
     args = parser.parse_args()
 
@@ -199,7 +202,8 @@ def main():
     print(f"\nSimulando trayectoria post-quirurgica (recaida simulada hacia {args.recurrence_target})...")
     t_checks, x_series = simulate_longitudinal_patient(
         model_matrix, gene_order, recurrence_pattern, n_genes,
-        dynamics_model=args.dynamics_model, beta=args.beta)
+        dynamics_model=args.dynamics_model, beta=args.beta,
+        max_forcing_strength=args.max_forcing_strength)
 
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
