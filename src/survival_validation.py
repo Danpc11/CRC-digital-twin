@@ -20,6 +20,8 @@ import pandas as pd
 from lifelines import KaplanMeierFitter
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 
+from clinical_selection import cms_continuous_profile
+
 
 def risk_score_from_expression(
     row: np.ndarray, patterns: dict[str, np.ndarray]
@@ -45,13 +47,23 @@ def score_cohort(
 ) -> pd.DataFrame:
     """Asigna subtipo predicho y score de correlacion a cada fila del dataframe."""
     out = df.copy()
-    predicted, scores = [], []
+    predicted, scores, profiles = [], [], []
     for _, row in df[gene_cols].iterrows():
-        label, corr = risk_score_from_expression(row.to_numpy(), patterns)
+        values = row.to_numpy()
+        label, corr = risk_score_from_expression(values, patterns)
         predicted.append(label)
         scores.append(corr)
+        profiles.append(cms_continuous_profile(values, patterns))
     out["predicted_cms"] = predicted
     out["classification_confidence"] = scores
+    out["cms_interpretation"] = [p["interpretation"] for p in profiles]
+    out["cms_primary_tendency"] = [p["primary"] for p in profiles]
+    out["cms_secondary_tendency"] = [p["secondary"] for p in profiles]
+    out["cms_margin"] = [p["margin"] for p in profiles]
+    out["cms_entropy"] = [p["entropy"] for p in profiles]
+    for label in patterns:
+        short = label.split("_")[0].lower()
+        out[f"{short}_tendency"] = [p["scores"].get(label, 0.0) for p in profiles]
     return out
 
 
