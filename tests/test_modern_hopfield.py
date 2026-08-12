@@ -14,6 +14,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from modern_hopfield import (
+    classify_expression_modern_hopfield,
+    compare_forcing_sweep_v1_v2,
+    diagnose_pre_recurrence_residual,
     empirical_basin_membership_hopfield,
     find_true_equilibrium_hopfield,
     hopfield_energy,
@@ -365,3 +368,53 @@ def test_v2_simulation_reaches_all_targets_with_synthetic_data(real_patterns):
         x_final = x[:, -1]
         corr = np.corrcoef(x_final, p)[0, 1] if np.std(x_final) > 1e-12 else np.nan
         assert corr > 0.9, f"{label} no convergio correctamente (corr={corr:.3f})"
+
+
+def test_stabilized_origin_is_fixed_even_when_centroids_are_unbalanced():
+    patterns = {
+        "A": np.array([2.0, 0.0, -1.0]),
+        "B": np.array([0.0, 1.0, -0.5]),
+        "C": np.array([-0.2, 0.0, 1.0]),
+        "D": np.array([0.0, -0.3, 0.5]),
+    }
+    result = diagnose_pre_recurrence_residual(patterns, beta=3.0)
+    assert result["baseline_correction_norm"] > 0.0
+    assert result["origin_is_fixed"] is True
+    assert result["origin_field_residual"] < 1e-10
+    assert result["final_norm"] < 1e-8
+
+
+def test_forcing_sweep_compares_identical_candidates_for_all_targets(real_patterns):
+    sweep = compare_forcing_sweep_v1_v2(
+        real_patterns, beta=3.0, strength_candidates=[0.7, 1.5], n_timepoints=8)
+    assert len(sweep) == 4 * 2
+    assert set(sweep["fuerza_maxima"]) == {0.7, 1.5}
+    assert sweep.groupby("patron_objetivo").size().eq(2).all()
+    assert {"v1_corr_objetivo", "v2_corr_objetivo", "v2_norma_basal"}.issubset(sweep.columns)
+    assert (sweep["v2_residuo_campo_en_origen"] < 1e-8).all()
+
+
+def test_modern_classifier_accepts_clear_pattern_and_rejects_origin(real_patterns):
+    label = "CMS3_metabolic"
+    clear = classify_expression_modern_hopfield(
+        real_patterns[label], real_patterns, beta=3.0)
+    assert clear["label"] == label
+    assert clear["stable"] is True
+    assert clear["residual"] < 1e-6
+
+    origin = classify_expression_modern_hopfield(
+        np.zeros_like(real_patterns[label]), real_patterns, beta=3.0)
+    assert origin["label"] == "indeterminado"
+
+
+def test_beta_sweep_rejects_duplicate_equilibria_even_if_each_matches():
+    duplicated = {
+        "A": np.array([3.0, 0.0, 0.0]),
+        "B": np.array([3.0, 0.0, 0.0]),
+        "C": np.array([0.0, 3.0, 0.0]),
+        "D": np.array([0.0, 0.0, 3.0]),
+    }
+    sweep = sweep_beta_hopfield(duplicated, beta_values=[5.0])
+    assert sweep.iloc[0]["n_patrones_ok"] == 4
+    assert sweep.iloc[0]["min_separacion"] == 0.0
+    assert sweep.iloc[0]["todos_4_ok"] == False
