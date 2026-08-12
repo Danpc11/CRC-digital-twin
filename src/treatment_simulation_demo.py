@@ -41,6 +41,7 @@ from modern_hopfield import (
     validate_modern_pattern_matrix,
 )
 from prognosis import hazard_from_trajectory
+from prognosis_demo import classify_current_state
 from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
 
 WONG = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
@@ -128,11 +129,14 @@ def main():
     parser.add_argument("--max-forcing-strength", type=float, default=5.0,
                         help="Fuerza maxima del driver normalizado Modern Hopfield; "
                              "es especifica de la calibracion, no una dosis clinica")
+    parser.add_argument("--n-timepoints", type=int, default=10)
     parser.add_argument("--treatment-onset-month", type=int, default=18,
                          help="Mes en que se inicia el tratamiento (ej. al detectarse la alerta)")
     parser.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"], default="unknown")
     parser.add_argument("--output", default="figures/treatment_simulation.png")
     args = parser.parse_args()
+    if args.n_timepoints < 2:
+        raise ValueError("n_timepoints debe ser >= 2")
 
     print(f"Cargando patrones reales calibrados: {args.patterns}")
     patterns, gene_order = load_calibrated_patterns(args.patterns)
@@ -157,6 +161,7 @@ def main():
         model_matrix, n_genes, gene_order, recurrence_pattern, patterns, treatment=None,
         dynamics_model=args.dynamics_model, beta=args.beta,
         max_forcing_strength=args.max_forcing_strength,
+        n_timepoints=args.n_timepoints,
     )
     hazard_baseline = hazard_from_trajectory(x_baseline)
 
@@ -166,6 +171,7 @@ def main():
         treatment_onset_month=args.treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
         dynamics_model=args.dynamics_model, beta=args.beta,
         max_forcing_strength=args.max_forcing_strength,
+        n_timepoints=args.n_timepoints,
     )
     hazard_treated = hazard_from_trajectory(x_treated)
 
@@ -173,6 +179,20 @@ def main():
     for t, h_b, h_t in zip(t_checks, hazard_baseline, hazard_treated):
         marker = " <- inicio tratamiento" if t == args.treatment_onset_month else ""
         print(f"  mes {t:3d}: sin_tx={h_b:.3f}  con_tx={h_t:.3f}{marker}")
+
+    label_base, corr_base = classify_current_state(x_baseline[:, -1], patterns)
+    label_treated, corr_treated = classify_current_state(x_treated[:, -1], patterns)
+    delta_final = float(hazard_baseline[-1] - hazard_treated[-1])
+    auc_base = float(np.trapezoid(hazard_baseline, t_checks))
+    auc_treated = float(np.trapezoid(hazard_treated, t_checks2))
+    print("\nResumen al final de la ventana:")
+    print(f"  Sin tratamiento: {label_base} (corr={corr_base:.3f})")
+    print(f"  Con tratamiento: {label_treated} (corr={corr_treated:.3f})")
+    print(f"  Diferencia final de riesgo ordinal (sin_tx - con_tx): {delta_final:+.3f}")
+    print(f"  Diferencia de area ordinal acumulada: {auc_base - auc_treated:+.3f}")
+    if np.any(hazard_treated > hazard_baseline):
+        print("  AVISO: el efecto simulado no es monotono; hay puntos intermedios donde "
+              "con_tx > sin_tx. Interpretar la trayectoria completa, no un punto aislado.")
 
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.plot(t_checks, hazard_baseline, color="#D55E00", marker="o", linewidth=1.8, label="Sin tratamiento")

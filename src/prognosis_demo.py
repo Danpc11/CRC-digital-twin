@@ -38,7 +38,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
-from modern_hopfield import patterns_to_matrix, simulate_longitudinal_patient_hopfield_v2
+from modern_hopfield import (
+    patterns_to_matrix,
+    relax_after_forcing_withdrawal,
+    simulate_longitudinal_patient_hopfield_v2,
+)
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturbation, describe_treatment
 from scipy.integrate import solve_ivp
@@ -106,7 +110,7 @@ def applicable_treatments(x_current: np.ndarray, gene_order: list, patterns: dic
 
 def simulate_longitudinal_patient(
     model_matrix, gene_order, recurrence_pattern, n_genes,
-    n_timepoints=8, months_between_checks=3,
+    n_timepoints=10, months_between_checks=3,
     recurrence_onset_month=15, beta=None,
     dynamics_model="modern_hopfield", max_forcing_strength=5.0,
 ):
@@ -181,6 +185,8 @@ def main():
     parser.add_argument("--max-forcing-strength", type=float, default=5.0,
                         help="Fuerza maxima del driver normalizado Modern Hopfield; "
                              "es especifica de la calibracion, no una dosis clinica")
+    parser.add_argument("--n-timepoints", type=int, default=10,
+                        help="Numero de chequeos; con rampa de 12 meses se recomiendan >=10")
     parser.add_argument("--output", default="figures/prognosis_demo.png")
     args = parser.parse_args()
 
@@ -191,6 +197,12 @@ def main():
 
     if args.recurrence_target not in patterns:
         raise ValueError(f"'{args.recurrence_target}' no esta en los patrones. Opciones: {list(patterns.keys())}")
+    if args.n_timepoints < 2:
+        raise ValueError("n_timepoints debe ser >= 2")
+    final_month = (args.n_timepoints - 1) * 3
+    if args.dynamics_model == "modern_hopfield" and final_month < 27:
+        print("AVISO: la ventana termina antes de completar la rampa Modern Hopfield "
+              "de 12 meses posterior al inicio de recaida; la direccion final puede ser transitoria.")
 
     if args.dynamics_model == "modern_hopfield":
         model_matrix, _ = patterns_to_matrix(patterns)
@@ -203,7 +215,8 @@ def main():
     t_checks, x_series = simulate_longitudinal_patient(
         model_matrix, gene_order, recurrence_pattern, n_genes,
         dynamics_model=args.dynamics_model, beta=args.beta,
-        max_forcing_strength=args.max_forcing_strength)
+        max_forcing_strength=args.max_forcing_strength,
+        n_timepoints=args.n_timepoints)
 
     hazard = hazard_from_trajectory(x_series)
     alert, alert_idx = detect_recurrence_signal(hazard, baseline_window=2, threshold_sigma=3.0)
@@ -215,20 +228,44 @@ def main():
 
     if alert:
         x_at_alert = x_series[:, alert_idx]
-        attractor, corr = classify_current_state(x_at_alert, patterns)
+        early_attractor, early_corr = classify_current_state(x_at_alert, patterns)
+        x_final = x_series[:, -1]
+        final_attractor, final_corr = classify_current_state(x_final, patterns)
+        confirmed_attractor, confirmed_corr = final_attractor, final_corr
+        confirmation = None
+        if args.dynamics_model == "modern_hopfield":
+            resolved_beta = 3.0 if args.beta is None else args.beta
+            confirmation = relax_after_forcing_withdrawal(
+                x_final, model_matrix, list(patterns.keys()),
+                beta=resolved_beta, withdrawal_time=30.0)
+            if confirmation["converged"] and confirmation["stable"]:
+                confirmed_attractor = confirmation["label"]
+                confirmed_corr = confirmation["correlation"]
 
         print(f"\nAlerta de recurrencia detectada en el mes {t_checks[alert_idx]} "
               f"(recaida simulada empezo en mes 15).")
-        print(f"\n--- Direccion de la alerta ---")
-        print(f"Estado se dirige hacia: {attractor} (correlacion={corr:.3f})")
+        print(f"\n--- Direccion molecular temporal ---")
+        print(f"En la alerta (PROVISIONAL): {early_attractor} "
+              f"(correlacion={early_corr:.3f})")
+        print(f"Al final de la rampa activa: {final_attractor} "
+              f"(correlacion={final_corr:.3f})")
+        if confirmation is not None:
+            status = "CONFIRMADO" if confirmation["converged"] and confirmation["stable"] else "NO CONFIRMADO"
+            print(f"Tras retirar el driver: {confirmed_attractor} "
+                  f"(correlacion={confirmed_corr:.3f}, {status}, "
+                  f"residuo={confirmation['residual']:.2e})")
+
+        attractor = confirmed_attractor
 
         if attractor in EVIDENCE_STRENGTH:
             ev = EVIDENCE_STRENGTH[attractor]
             print(f"Fuerza de evidencia externa de este atractor: {ev['level'].upper()}")
             print(f"  {ev['detail']}")
 
-        print(f"\n--- Tratamientos con mecanismo aplicable a este estado ---")
-        treatments = applicable_treatments(x_at_alert, gene_order, patterns)
+        print(f"\n--- Tratamientos con mecanismo aplicable al estado final confirmado ---")
+        treatments = applicable_treatments(
+            confirmation["state"] if confirmation is not None else x_final,
+            gene_order, patterns)
         if treatments:
             for name, efficacy in treatments:
                 print(f"  [{name}] intensidad simulada arbitraria={efficacy:.3f}")
