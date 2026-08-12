@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-100%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-102%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -19,7 +19,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (100 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (102 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -87,6 +87,20 @@ python3 cli.py test                  # suite de regresión
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
 `cox-diagnostics`, `dynamics-diagnostics`, `prognosis`, `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
+
+Para ejecutar el diagnóstico dinámico completo y guardar todas las tablas reproducibles:
+
+```bash
+python3 cli.py dynamics-diagnostics \
+  --patterns results_gse39582/calibrated_patterns.tsv \
+  --beta 10 --n-samples 300 --find-interval --full \
+  --output results_dynamics/
+```
+
+`--full` refina individualmente los estados no clasificados, deduplica equilibrios
+estables por distancia, mide cuencas locales con criterios de correlación, distancia y
+residuo, ejecuta sensibilidad a ruido/umbral y compara las trayectorias forzadas para
+β=2 y β=10. Es diagnóstico de investigación, no selección clínica de β.
 
 ### Interfaz web
 
