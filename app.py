@@ -47,6 +47,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from attractor_model import build_model_from_patterns
 from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
 from clinical_selection import assess_molecular_eligibility, hybrid_mechanism_hypotheses
+from modern_hopfield import score_cohort_modern_hopfield
 from prognosis import detect_recurrence_signal, hazard_from_trajectory
 from prognosis_demo import (
     EVIDENCE_STRENGTH,
@@ -469,6 +470,27 @@ with tab_muestras:
 
             scored = score_cohort(z, gene_order, patterns)
 
+            with st.expander("Recuperación dinámica Modern Hopfield (experimental)"):
+                st.caption(
+                    "No reemplaza la clasificación CMS validada por correlación. "
+                    "Solo acepta una recuperación si converge a un equilibrio estable, "
+                    "con residuo pequeño y correlación suficiente.")
+                run_modern = st.checkbox(
+                    "Calcular recuperación dinámica para esta cohorte",
+                    key="run_modern_hopfield")
+                mh_c1, mh_c2 = st.columns(2)
+                mh_beta = mh_c1.number_input(
+                    "β Modern Hopfield", min_value=0.1, max_value=20.0,
+                    value=3.0, step=0.1, key="modern_beta")
+                mh_corr = mh_c2.number_input(
+                    "Correlación mínima", min_value=0.0, max_value=1.0,
+                    value=0.8, step=0.05, key="modern_corr")
+            if run_modern:
+                with st.spinner("Recuperando equilibrios Modern Hopfield..."):
+                    scored = score_cohort_modern_hopfield(
+                        scored, gene_order, patterns, beta=float(mh_beta),
+                        corr_threshold=float(mh_corr))
+
             # sample_id ya viene incluida en 'scored' si el archivo la
             # traia (zscore_genes/score_cohort hacen df.copy(), preservan
             # todas las columnas originales) -- solo agregar un
@@ -515,8 +537,13 @@ with tab_muestras:
                     "de clasificación — conviene revisarlas caso por caso."
                 )
 
+            display_cols = ["sample_id", "predicted_cms", "classification_confidence"]
+            display_cols += [c for c in (
+                "modern_hopfield_cms", "modern_hopfield_correlation",
+                "modern_hopfield_margin", "modern_hopfield_residual",
+                "modern_hopfield_stable", "modern_hopfield_concordant") if c in scored.columns]
             st.dataframe(
-                scored[["sample_id", "predicted_cms", "classification_confidence"] + gene_order],
+                scored[display_cols + gene_order],
                 use_container_width=True, height=280,
             )
             st.download_button("Descargar tabla clasificada",
@@ -555,6 +582,21 @@ with tab_paciente:
         h2.markdown(readout("Subtipo predicho", CMS_SHORT.get(pred_p, pred_p),
                              accent=CMS_COLOR.get(pred_p, "#4A5058")), unsafe_allow_html=True)
         h3.markdown(readout("Confianza", f"{conf_p:.2f}"), unsafe_allow_html=True)
+
+        if "modern_hopfield_cms" in fila.index:
+            mh_label = fila["modern_hopfield_cms"]
+            mh_corr_value = float(fila["modern_hopfield_correlation"])
+            concordant = bool(fila.get("modern_hopfield_concordant", False))
+            if mh_label == "indeterminado":
+                st.warning("Modern Hopfield experimental: recuperación indeterminada; "
+                           "se conserva la clasificación principal por correlación.")
+            elif concordant:
+                st.success(f"Modern Hopfield experimental concuerda: "
+                           f"{CMS_SHORT.get(mh_label, mh_label)} (r={mh_corr_value:.3f}).")
+            else:
+                st.warning(f"Discordancia experimental: correlación={CMS_SHORT.get(pred_p, pred_p)}, "
+                           f"Modern Hopfield={CMS_SHORT.get(mh_label, mh_label)} "
+                           f"(r={mh_corr_value:.3f}). Requiere revisión; no se fuerza una decisión.")
 
         ev_p = EVIDENCE_STRENGTH.get(pred_p, {})
         st.markdown(evidence_meter(ev_p.get("level", "sin evidencia")), unsafe_allow_html=True)
