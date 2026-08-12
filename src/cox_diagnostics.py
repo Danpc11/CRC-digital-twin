@@ -34,6 +34,7 @@ USO
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -140,14 +141,34 @@ def check_heterogeneity_across_cohorts(
 
 def run_full_diagnostics(
     df: pd.DataFrame, duration_col: str, event_col: str, covariate_cols: list,
-    cohort_col: str = "cohort", output_dir: str | Path | None = None,
+    cohort_col: str = "cohort", stratify: bool = True,
+    output_dir: str | Path | None = None,
 ) -> dict:
-    """Corre los tres diagnosticos y opcionalmente guarda las tablas."""
+    """
+    Corre los tres diagnosticos sobre EL MISMO MODELO que produce los HR
+    principales -- estratificado por cohorte (strata=[cohort_col]) por
+    default, para que Schoenfeld/delta-beta diagnostiquen el modelo
+    real (pooled_cox_validation.py), no uno distinto. stratify=False
+    solo para debug/comparacion explicita.
+    """
     cph = CoxPHFitter()
-    fit_df = df[[duration_col, event_col] + covariate_cols].dropna()
-    cph.fit(fit_df, duration_col=duration_col, event_col=event_col)
+    cols_needed = [duration_col, event_col] + covariate_cols
+    if stratify:
+        cols_needed = cols_needed + [cohort_col]
+    fit_df = df[cols_needed].dropna()
+
+    if stratify:
+        cph.fit(fit_df, duration_col=duration_col, event_col=event_col, strata=[cohort_col])
+    else:
+        cph.fit(fit_df, duration_col=duration_col, event_col=event_col)
 
     print("=" * 78)
+    modo = "ESTRATIFICADO por cohorte (mismo modelo que produce los HR principales)" \
+           if stratify else "SIN estratificar (NO es el modelo principal -- solo comparacion)"
+    print(f"MODELO: {modo}")
+    print("=" * 78)
+
+    print("\n" + "=" * 78)
     print("1. SUPUESTO DE RIESGOS PROPORCIONALES (test de Schoenfeld)")
     print("=" * 78)
     ph_result = check_proportional_hazards(cph, fit_df)
@@ -156,8 +177,7 @@ def run_full_diagnostics(
         violadas = ph_result[ph_result["viola_supuesto"]].index.tolist()
         print(f"\nAVISO: el supuesto de riesgos proporcionales se viola para: {violadas}. "
               "El HR reportado para esas covariables es un promedio temporal -- "
-              "puede esconder un efecto que cambia con el tiempo. Considerar "
-              "estratificar por esa covariable o usar un termino dependiente del tiempo.")
+              "puede esconder un efecto que cambia con el tiempo.")
     else:
         print("\nSupuesto de riesgos proporcionales no rechazado para ninguna covariable.")
 
@@ -172,10 +192,13 @@ def run_full_diagnostics(
     print("\n" + "=" * 78)
     print("3. HETEROGENEIDAD DEL EFECTO ENTRE COHORTES")
     print("=" * 78)
+    print("(Este diagnostico SI ajusta por cohorte por separado a proposito --")
+    print(" es justo lo que compara: si el efecto es consistente entre cohortes")
+    print(" o si el modelo estratificado esconde diferencias reales.)")
     het = None
     if cohort_col in df.columns:
         het = check_heterogeneity_across_cohorts(df, duration_col, event_col, covariate_cols, cohort_col)
-        print("\nHR por cohorte, ajustado por separado (sin estratificar):")
+        print("\nHR por cohorte, ajustado por separado:")
         print(het["tabla_por_cohorte"].to_string())
         print("\nTest de interaccion cohorte x covariable (heterogeneidad formal):")
         print(het["test_interaccion"].to_string())
@@ -203,6 +226,12 @@ def main():
     parser.add_argument("--event-col", default="relapse_event")
     parser.add_argument("--group-col", default="predicted_cms")
     parser.add_argument("--reference", default=None)
+    parser.add_argument("--adjust-stage", action="store_true",
+                         help="Incluir estadio armonizado como covariable (requiere columna "
+                              "'stage' en los TSV de entrada -- ver clinical_covariates.py)")
+    parser.add_argument("--no-stratify", action="store_true",
+                         help="NO estratificar por cohorte (solo para comparacion/debug -- "
+                              "el modelo principal SI estratifica, ver pooled_cox_validation.py)")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -223,9 +252,23 @@ def main():
     df = pd.concat([df, dummies], axis=1)
     covariate_cols = list(dummies.columns)
 
+    if args.adjust_stage:
+        if "stage" not in df.columns:
+            print("AVISO: se pidio --adjust-stage pero no hay columna 'stage' en los datos "
+                  "de entrada -- se omite. Reconstruye las cohortes con --stage-col "
+                  "(ver build_external_cohort_generic.py).")
+        else:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from clinical_covariates import prepare_covariates
+            df = prepare_covariates(df, stage_col="stage", cohort_col="cohort")
+            df = df.dropna(subset=["stage_harmonized"])
+            covariate_cols = covariate_cols + ["stage_harmonized"]
+            print(f"Estadio armonizado incluido -- n tras excluir sin estadio: {len(df)}")
+
     print(f"Referencia: {reference} | covariables: {covariate_cols} | n={len(df)}\n")
     run_full_diagnostics(df, args.duration_col, args.event_col, covariate_cols,
-                          cohort_col="cohort", output_dir=args.output)
+                          cohort_col="cohort", stratify=not args.no_stratify,
+                          output_dir=args.output)
 
 
 if __name__ == "__main__":
