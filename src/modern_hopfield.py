@@ -428,12 +428,22 @@ def _scheduled_forcing_strength(
     return float(max_strength * progress), float(progress)
 
 
+def normalized_driver_direction(pattern: np.ndarray) -> np.ndarray:
+    """Direccion unitaria: la fuerza pasa a ser una magnitud comparable."""
+    p = np.asarray(pattern, dtype=float)
+    norm = float(np.linalg.norm(p))
+    if not np.isfinite(norm) or norm < 1e-12:
+        raise ValueError("El patron del driver debe tener norma positiva y finita")
+    return p / norm
+
+
 def simulate_longitudinal_patient_hopfield(
     X: np.ndarray, recurrence_pattern: np.ndarray, n_genes: int,
     n_timepoints: int = 8, months_between_checks: int = 3,
     recurrence_onset_month: int = 15, beta: float = 2.0,
     max_forcing_strength: float = 1.5,
     forcing_ramp_duration_months: float | None = None,
+    normalize_driver: bool = False,
 ) -> tuple:
     """
     Version de simulate_longitudinal_patient (prognosis_demo.py) con
@@ -459,6 +469,8 @@ def simulate_longitudinal_patient_hopfield(
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
     x_series = np.zeros((n_genes, n_timepoints))
     x_current = np.zeros(n_genes)
+    driver_direction = (normalized_driver_direction(recurrence_pattern)
+                        if normalize_driver else recurrence_pattern)
 
     for i, t in enumerate(t_checks):
         if t >= recurrence_onset_month:
@@ -466,7 +478,7 @@ def simulate_longitudinal_patient_hopfield(
             strength, _ = _scheduled_forcing_strength(
                 months_since_onset, max_forcing_strength,
                 forcing_ramp_duration_months)
-            I_driver = strength * recurrence_pattern
+            I_driver = strength * driver_direction
         else:
             I_driver = np.zeros(n_genes)
 
@@ -606,6 +618,7 @@ def simulate_longitudinal_patient_hopfield_v2(
     max_forcing_strength: float = 1.5, stabilizing_k: float | None = None,
     mechanism: str = "additive", smooth_transition: bool = True,
     forcing_ramp_duration_months: float | None = None,
+    normalize_driver: bool = False,
 ) -> tuple:
     """
     Version CORREGIDA de simulate_longitudinal_patient_hopfield -- usa
@@ -630,6 +643,8 @@ def simulate_longitudinal_patient_hopfield_v2(
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
     x_series = np.zeros((n_genes, n_timepoints))
     x_current = np.zeros(n_genes)
+    driver_direction = (normalized_driver_direction(recurrence_pattern)
+                        if normalize_driver else recurrence_pattern)
 
     target_idx = None
     if mechanism == "bias":
@@ -657,7 +672,7 @@ def simulate_longitudinal_patient_hopfield_v2(
                     - quiescent_weight * baseline
                     - quiescent_weight * stabilizing_k * xx)
             else:
-                I_driver = strength * recurrence_pattern
+                I_driver = strength * driver_direction
                 field = lambda tt, xx: (
                     modern_hopfield_field(xx, X, beta) + I_driver
                     - quiescent_weight * baseline
@@ -705,17 +720,48 @@ def diagnose_pre_recurrence_residual(
     }
 
 
+def relax_after_forcing_withdrawal(
+    state_at_withdrawal: np.ndarray, X: np.ndarray, labels: list,
+    beta: float = 3.0, withdrawal_time: float = 30.0,
+    residual_threshold: float = 1e-6,
+) -> dict:
+    """Retira por completo el driver y determina el atractor libre final."""
+    if withdrawal_time <= 0:
+        raise ValueError("withdrawal_time debe ser > 0")
+    x0 = np.asarray(state_at_withdrawal, dtype=float)
+    sol = solve_ivp(
+        lambda t, x: modern_hopfield_field(x, X, beta),
+        (0, withdrawal_time), x0, method="RK45", rtol=1e-8, atol=1e-10)
+    x_terminal = sol.y[:, -1]
+    x_eq, refined, _ = find_true_equilibrium_hopfield(x_terminal, X, beta)
+    residual = float(np.linalg.norm(modern_hopfield_field(x_eq, X, beta)))
+    _, stable, max_eig = stability_at_equilibrium_hopfield(x_eq, X, beta)
+    profile = _correlation_profile(x_eq, X, labels)
+    converged = bool(sol.success and refined and residual <= residual_threshold)
+    return {
+        "state": x_eq, "converged": converged, "stable": stable,
+        "residual": residual, "max_eigenvalue": max_eig,
+        "label": profile["best_label"],
+        "correlation": profile["best_correlation"],
+        "correlations": profile["correlations"],
+        "displacement_during_withdrawal": float(np.linalg.norm(x_eq - x0)),
+    }
+
+
 def compare_forcing_sweep_v1_v2(
     patterns: dict, beta: float = 3.0, strength_candidates=None,
     corr_threshold: float = 0.9, recurrence_onset_month: int = 15,
     n_timepoints: int = 10, months_between_checks: int = 3,
-    smooth_transition: bool = True,
+    smooth_transition: bool = True, withdrawal_time: float = 30.0,
+    normalize_driver: bool = True, residual_threshold: float = 1e-6,
 ) -> "pd.DataFrame":
     """Barrido apples-to-apples de fuerza sin y con estabilizacion.
 
     V1 es la dinamica Modern Hopfield sin reposo estabilizado. V2 usa
     correccion basal, k calibrado y transicion opcionalmente suave.
-    Ambas corridas comparten beta, tiempos, objetivo y fuerza maxima.
+    Ambas comparten beta, tiempos, objetivo y fuerza. Por defecto el
+    driver es unitario; despues se retira y el exito se decide sobre el
+    equilibrio libre alcanzado, no sobre la alineacion bajo fuerza activa.
     """
     import pandas as pd
     if strength_candidates is None:
@@ -734,39 +780,80 @@ def compare_forcing_sweep_v1_v2(
         patterns, beta=beta, duration_months=recurrence_onset_month,
         months_between_checks=months_between_checks, stabilizing_k=k)
     rows = []
+    target_equilibria = {}
+    for i, target in enumerate(labels):
+        target_equilibria[target], _, _ = find_true_equilibrium_hopfield(
+            X[:, i], X, beta)
     for i, target in enumerate(labels):
         p = X[:, i]
+        driver_direction = normalized_driver_direction(p) if normalize_driver else p
+        driver_direction_norm = float(np.linalg.norm(driver_direction))
+        target_eq = target_equilibria[target]
+        target_eq_norm = float(np.linalg.norm(target_eq))
         for strength in strengths:
             _, x_v1 = simulate_longitudinal_patient_hopfield(
                 X, p, X.shape[0], n_timepoints=n_timepoints,
                 months_between_checks=months_between_checks,
                 recurrence_onset_month=recurrence_onset_month, beta=beta,
                 max_forcing_strength=strength,
-                forcing_ramp_duration_months=ramp_duration)
+                forcing_ramp_duration_months=ramp_duration,
+                normalize_driver=normalize_driver)
             _, x_v2 = simulate_longitudinal_patient_hopfield_v2(
                 X, p, X.shape[0], n_timepoints=n_timepoints,
                 months_between_checks=months_between_checks,
                 recurrence_onset_month=recurrence_onset_month, beta=beta,
                 max_forcing_strength=strength, stabilizing_k=k,
                 smooth_transition=smooth_transition,
-                forcing_ramp_duration_months=ramp_duration)
+                forcing_ramp_duration_months=ramp_duration,
+                normalize_driver=normalize_driver)
             profile_v1 = _correlation_profile(x_v1[:, -1], X, labels)
             profile_v2 = _correlation_profile(x_v2[:, -1], X, labels)
-            corr_v1 = profile_v1["correlations"][target]
-            corr_v2 = profile_v2["correlations"][target]
+            active_corr_v1 = profile_v1["correlations"][target]
+            active_corr_v2 = profile_v2["correlations"][target]
+            withdrawn_v1 = relax_after_forcing_withdrawal(
+                x_v1[:, -1], X, labels, beta=beta, withdrawal_time=withdrawal_time,
+                residual_threshold=residual_threshold)
+            withdrawn_v2 = relax_after_forcing_withdrawal(
+                x_v2[:, -1], X, labels, beta=beta, withdrawal_time=withdrawal_time,
+                residual_threshold=residual_threshold)
+            corr_v1 = withdrawn_v1["correlations"][target]
+            corr_v2 = withdrawn_v2["correlations"][target]
+            distance_v1 = float(np.linalg.norm(withdrawn_v1["state"] - target_eq))
+            distance_v2 = float(np.linalg.norm(withdrawn_v2["state"] - target_eq))
+            relative_distance_v1 = distance_v1 / target_eq_norm if target_eq_norm > 0 else float("nan")
+            relative_distance_v2 = distance_v2 / target_eq_norm if target_eq_norm > 0 else float("nan")
+            success_v1 = bool(
+                withdrawn_v1["converged"] and withdrawn_v1["stable"] and
+                withdrawn_v1["label"] == target and np.isfinite(corr_v1) and
+                corr_v1 >= corr_threshold)
+            success_v2 = bool(
+                withdrawn_v2["converged"] and withdrawn_v2["stable"] and
+                withdrawn_v2["label"] == target and np.isfinite(corr_v2) and
+                corr_v2 >= corr_threshold)
             rows.append({
                 "patron_objetivo": target, "fuerza_maxima": strength, "beta": beta,
                 "fuerza_aplicada_final": strength,
+                "norma_driver_aplicado": strength * driver_direction_norm,
+                "driver_normalizado": normalize_driver,
                 "duracion_rampa_meses": ramp_duration,
-                "v1_corr_objetivo": corr_v1, "v1_cms_final": profile_v1["best_label"],
-                "v1_corr_maxima": profile_v1["best_correlation"],
-                "v1_exito": bool(np.isfinite(corr_v1) and corr_v1 >= corr_threshold and
-                                  profile_v1["best_label"] == target),
-                "v2_corr_objetivo": corr_v2, "v2_cms_final": profile_v2["best_label"],
-                "v2_corr_maxima": profile_v2["best_correlation"],
-                "v2_exito": bool(np.isfinite(corr_v2) and corr_v2 >= corr_threshold and
-                                  profile_v2["best_label"] == target),
-                "v2_norma_final": float(np.linalg.norm(x_v2[:, -1])),
+                "tiempo_retirada": withdrawal_time,
+                "v1_corr_objetivo_activo": active_corr_v1,
+                "v1_cms_activo": profile_v1["best_label"],
+                "v1_corr_objetivo": corr_v1, "v1_cms_final": withdrawn_v1["label"],
+                "v1_residuo_post_retirada": withdrawn_v1["residual"],
+                "v1_estable_post_retirada": withdrawn_v1["stable"],
+                "v1_distancia_relativa_objetivo": relative_distance_v1,
+                "v1_exito": success_v1,
+                "v2_corr_objetivo_activo": active_corr_v2,
+                "v2_cms_activo": profile_v2["best_label"],
+                "v2_corr_objetivo": corr_v2, "v2_cms_final": withdrawn_v2["label"],
+                "v2_residuo_post_retirada": withdrawn_v2["residual"],
+                "v2_estable_post_retirada": withdrawn_v2["stable"],
+                "v2_distancia_relativa_objetivo": relative_distance_v2,
+                "v2_exito": success_v2,
+                "v2_norma_al_retirar": float(np.linalg.norm(x_v2[:, -1])),
+                "v2_norma_post_retirada": float(np.linalg.norm(withdrawn_v2["state"])),
+                "norma_equilibrio_objetivo": target_eq_norm,
                 "v2_norma_basal": baseline_diag["final_norm"],
                 "v2_residuo_campo_en_origen": baseline_diag["origin_field_residual"],
                 "stabilizing_k": k, "transicion_suave": smooth_transition,
@@ -983,6 +1070,10 @@ def main():
     parser.add_argument("--forcing-candidates", nargs="+", type=float,
                          default=[0.7, 1.5, 3.0, 5.0, 8.0, 12.0, 20.0],
                          help="Fuerzas maximas para --compare-stabilized-sweep")
+    parser.add_argument("--withdrawal-time", type=float, default=30.0,
+                         help="Tiempo de relajacion libre despues de retirar el driver")
+    parser.add_argument("--unnormalized-driver", action="store_true",
+                         help="Diagnostico legado: usar fuerza*patron en vez de direccion unitaria")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -1082,7 +1173,8 @@ def main():
             p = X[:, i]
             _, x_sim = simulate_longitudinal_patient_hopfield_v2(
                 X, p, X.shape[0], beta=args.beta, max_forcing_strength=args.max_forcing_strength,
-                stabilizing_k=k, n_timepoints=10, recurrence_onset_month=15)
+                stabilizing_k=k, n_timepoints=10, recurrence_onset_month=15,
+                normalize_driver=True)
             x_final = x_sim[:, -1]
             corr = float(np.corrcoef(x_final, p)[0, 1]) if np.std(x_final) > 1e-12 else float("nan")
             print(f"  {label:20s} corr_con_objetivo={corr:+.3f}")
@@ -1099,7 +1191,9 @@ def main():
         print(f"Direccion residual: {diagnostico_basal['closest_cms']} "
               f"(corr={diagnostico_basal['closest_correlation']:+.3f})")
         barrido_estabilizado = compare_forcing_sweep_v1_v2(
-            patterns, beta=args.beta, strength_candidates=args.forcing_candidates)
+            patterns, beta=args.beta, strength_candidates=args.forcing_candidates,
+            withdrawal_time=args.withdrawal_time,
+            normalize_driver=not args.unnormalized_driver)
         resumen_estabilizado = summarize_forcing_thresholds(barrido_estabilizado)
         print("\nDetalle:")
         print(barrido_estabilizado.to_string(index=False))
