@@ -188,8 +188,9 @@ def describe_treatment(treatment: str) -> str:
         raise ValueError(f"Tratamiento desconocido: {treatment}")
     spec = TREATMENT_MECHANISMS[treatment]
     return (
-        f"{treatment}: eficacia condicionada por biologia asociada a "
+        f"{treatment}: intensidad simulada (arbitraria, no eficacia clinica) "
+        f"condicionada por biologia asociada a "
         f"{', '.join(spec['target_genes'])} (criterio='{spec['criterio']}'). "
-        f"Si aplica, jala el estado de vuelta hacia el origen (reduce carga tumoral). "
-        f"Evidencia: {spec['evidence']}"
+        f"Si aplica, jala el estado de vuelta hacia el origen (reduce carga tumoral "
+        f"simulada). Evidencia: {spec['evidence']}"
     )
