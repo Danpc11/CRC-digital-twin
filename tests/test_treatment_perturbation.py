@@ -33,7 +33,7 @@ def real_calibrated_patterns():
 def test_all_mechanisms_have_required_fields():
     for name, spec in TREATMENT_MECHANISMS.items():
         assert "target_genes" in spec
-        assert "gate" in spec
+        assert "criterio" in spec
         assert "evidence" in spec
         assert len(spec["target_genes"]) > 0
 
