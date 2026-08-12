@@ -30,7 +30,7 @@ especificos, porque empujar los genes que definen el atractor propio
 del paciente (ej. reforzar GNLY/USP18 en un paciente ya CMS1) lo
 hundiria mas en ese atractor, el opuesto biologico de lo que hace un
 tratamiento que funciona. Los "target_genes" de cada mecanismo abajo
-son la base biologica del gate de eficacia, no la direccion de la fuerza:
+son la base biologica del criterio de eficacia, no la direccion de la fuerza:
 
   1. Inmunoterapia (anti-PD-1, ej. pembrolizumab)
      Eficaz especificamente en tumores MSI-H/dMMR (eje CMS1).
@@ -70,7 +70,7 @@ import numpy as np
 TREATMENT_MECHANISMS = {
     "immunotherapy_antiPD1": {
         "target_genes": ["GNLY", "USP18"],
-        "gate": "cms1_like",
+        "criterio": "cms1_like",
         "evidence": (
             "KEYNOTE-177 (Andre et al. 2020 NEJM; actualizacion 2024 Ann Oncol): "
             "HR=0.60-0.73 vs quimioterapia en MSI-H/dMMR mCRC. Sin beneficio "
@@ -79,7 +79,7 @@ TREATMENT_MECHANISMS = {
     },
     "anti_egfr": {
         "target_genes": ["MYC", "AXIN2"],
-        "gate": "ras_braf_wildtype",
+        "criterio": "ras_braf_wildtype",
         "evidence": (
             "Karapetis et al. 2008 NEJM; Douillard et al. 2013 NEJM; "
             "Di Nicolantonio et al. 2008 JCO: RAS/BRAF mutante = sin beneficio."
@@ -87,7 +87,7 @@ TREATMENT_MECHANISMS = {
     },
     "cytotoxic_chemo": {
         "target_genes": ["VIM", "TGFB1"],
-        "gate": "reduced_efficacy_cms4",
+        "criterio": "reduced_efficacy_cms4",
         "evidence": (
             "CMS4 = peor pronostico consistente en las 4 cohortes externas de "
             "este proyecto (HR=2.06 ajustado por estadio, p=0.018) + literatura "
@@ -121,9 +121,9 @@ def apply_treatment_perturbation(
     lo hundiria mas en ese atractor en vez de limpiarlo, que es
     biologicamente lo opuesto a lo que hace un tratamiento efectivo.
 
-    La eficacia (cuanto jala hacia el origen) esta gateada por la
+    La eficacia (cuanto jala hacia el origen) esta condicionada por la
     biologia del mecanismo -- ver TREATMENT_MECHANISMS y el docstring
-    del modulo para la evidencia de cada gate.
+    del modulo para la evidencia de cada criterio.
 
     ras_braf_wildtype: SOLO relevante para 'anti_egfr'.
         None  -> estatus desconocido, se usa CMS3 como proxy DEBIL (con
@@ -140,11 +140,11 @@ def apply_treatment_perturbation(
         raise ValueError(
             f"El panel no incluye los genes del mecanismo de '{treatment}' ({missing}) -- "
             "la evidencia clinica de este tratamiento se basa en esos genes, sin ellos "
-            "el gate de eficacia no tiene fundamento en este panel."
+            "el criterio de eficacia no tiene fundamento en este panel."
         )
     norm = np.linalg.norm(x_current)
 
-    if spec["gate"] == "cms1_like":
+    if spec["criterio"] == "cms1_like":
         # Eficacia proporcional a la cercania al atractor CMS1 -- SIN piso
         # basal para pacientes lejos de CMS1, porque asumir beneficio en
         # MSS seria una sobreclamacion (ver docstring del modulo).
@@ -154,7 +154,7 @@ def apply_treatment_perturbation(
         else:
             efficacy = 0.0
 
-    elif spec["gate"] == "ras_braf_wildtype":
+    elif spec["criterio"] == "ras_braf_wildtype":
         if ras_braf_wildtype is False:
             efficacy = 0.0
         elif ras_braf_wildtype is True:
@@ -167,7 +167,7 @@ def apply_treatment_perturbation(
             else:
                 efficacy = base_strength * 0.25  # sin ninguna informacion -- muy conservador
 
-    elif spec["gate"] == "reduced_efficacy_cms4":
+    elif spec["criterio"] == "reduced_efficacy_cms4":
         if norm > 1e-8 and "CMS4_mesenchymal" in patterns:
             corr_cms4 = np.corrcoef(x_current, patterns["CMS4_mesenchymal"])[0, 1]
             efficacy = base_strength * (1.0 - 0.5 * max(corr_cms4, 0.0))  # hasta 50% menos eficaz, nunca cero
@@ -175,7 +175,7 @@ def apply_treatment_perturbation(
             efficacy = base_strength
 
     else:
-        raise ValueError(f"Gate desconocido: {spec['gate']}")
+        raise ValueError(f"Criterio desconocido: {spec['criterio']}")
 
     # Fuerza de amortiguamiento hacia el origen, proporcional al estado
     # actual -- no un empuje sobre genes especificos.
@@ -188,8 +188,8 @@ def describe_treatment(treatment: str) -> str:
         raise ValueError(f"Tratamiento desconocido: {treatment}")
     spec = TREATMENT_MECHANISMS[treatment]
     return (
-        f"{treatment}: eficacia gateada por biologia asociada a "
-        f"{', '.join(spec['target_genes'])} (gate='{spec['gate']}'). "
+        f"{treatment}: eficacia condicionada por biologia asociada a "
+        f"{', '.join(spec['target_genes'])} (criterio='{spec['criterio']}'). "
         f"Si aplica, jala el estado de vuelta hacia el origen (reduce carga tumoral). "
         f"Evidencia: {spec['evidence']}"
     )
