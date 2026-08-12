@@ -1,0 +1,232 @@
+"""
+cox_diagnostics.py
+
+Diagnosticos formales del modelo de Cox, ausentes en pooled_cox_validation.py
+hasta ahora -- el modelo ajustaba riesgos proporcionales y reportaba HR/p,
+pero nunca verificaba si el supuesto central (riesgos proporcionales)
+realmente se sostiene, si hay observaciones que dominan el resultado, o
+si el efecto es consistente entre cohortes en vez de ser un artefacto
+de una sola de ellas dominando el pool.
+
+Tres diagnosticos, cada uno con evidencia de que la mecanica funciona
+(ver tests):
+
+  1. Supuesto de riesgos proporcionales (test de Schoenfeld) --
+     lifelines.statistics.proportional_hazard_test. Un p-valor
+     significativo indica que el efecto de esa covariable SI cambia en
+     el tiempo, violando el supuesto que todo el modelo de Cox asume.
+  2. Observaciones influyentes -- residuos delta-beta
+     (CoxPHFitter.compute_residuals(kind="delta_beta")). Pacientes
+     cuyo delta-beta es grande estan "cargando" el resultado
+     desproporcionadamente -- vale la pena revisarlos a mano.
+  3. Heterogeneidad del efecto entre cohortes -- ajusta el modelo por
+     separado en cada cohorte y compara los HR (estilo forest plot),
+     mas un termino de interaccion cohorte×covariable como prueba
+     formal de heterogeneidad.
+
+USO
+    python3 src/cox_diagnostics.py \\
+        --input results_external_gse17536/scored_external_cohort.tsv \\
+        --input results_external_gse17537/scored_external_cohort.tsv \\
+        --input results_external_gse14333/scored_external_cohort.tsv \\
+        --input results_external_gse33113/scored_external_cohort.tsv \\
+        --reference CMS2_canonical_WNT --output results_cox_diagnostics/
+"""
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from lifelines import CoxPHFitter
+from lifelines.statistics import proportional_hazard_test
+
+
+def check_proportional_hazards(cph: CoxPHFitter, df: pd.DataFrame, p_threshold: float = 0.05) -> pd.DataFrame:
+    """
+    Test de Schoenfeld por covariable -- p < p_threshold indica que el
+    efecto de esa covariable cambia en el tiempo, violando el supuesto
+    de riesgos proporcionales que todo el modelo de Cox asume. No es
+    un detalle tecnico menor: si se viola, el HR reportado es un
+    promedio temporal que puede esconder un efecto que en realidad
+    crece, decae, o se invierte con el tiempo.
+    """
+    result = proportional_hazard_test(cph, df, time_transform="rank")
+    out = result.summary.copy()
+    out["viola_supuesto"] = out["p"] < p_threshold
+    return out
+
+
+def check_influential_observations(
+    cph: CoxPHFitter, df: pd.DataFrame, top_n: int = 10
+) -> pd.DataFrame:
+    """
+    Residuos delta-beta: cuanto cambiaria cada coeficiente si se
+    quitara esa observacion. Valores grandes senalan pacientes que
+    dominan desproporcionadamente el resultado -- vale la pena
+    revisarlos a mano (¿son datos correctos? ¿un caso atipico real?).
+    """
+    residuals = cph.compute_residuals(df, kind="delta_beta")
+    magnitud = residuals.abs().sum(axis=1)
+    idx_top = magnitud.sort_values(ascending=False).head(top_n).index
+    out = residuals.loc[idx_top].copy()
+    out["magnitud_total"] = magnitud.loc[idx_top]
+    return out.sort_values("magnitud_total", ascending=False)
+
+
+def check_heterogeneity_across_cohorts(
+    df: pd.DataFrame, duration_col: str, event_col: str,
+    covariate_cols: list, cohort_col: str = "cohort",
+) -> dict:
+    """
+    Ajusta el modelo POR SEPARADO en cada cohorte (sin estratificar) y
+    compara los HR -- si una sola cohorte tiene un HR muy distinto a
+    las demas, el efecto pooled puede estar dominado por esa cohorte
+    en vez de ser un patron consistente. Complementa (no reemplaza) el
+    modelo estratificado de pooled_cox_validation.py.
+
+    Tambien corre un termino de interaccion cohorte×covariable como
+    prueba formal: si la interaccion es significativa, hay evidencia
+    estadistica de heterogeneidad real, no solo diferencias visuales
+    en la tabla.
+    """
+    per_cohort = {}
+    for cohort, sub in df.groupby(cohort_col):
+        sub = sub[[duration_col, event_col] + covariate_cols].dropna()
+        n_events = int(sub[event_col].sum())
+        if n_events < 5 or sub[covariate_cols].nunique().min() < 2:
+            per_cohort[cohort] = {"n": len(sub), "eventos": n_events, "HR": None, "p": None,
+                                    "nota": "insuficiente para ajustar por separado"}
+            continue
+        cph_c = CoxPHFitter()
+        try:
+            cph_c.fit(sub, duration_col=duration_col, event_col=event_col)
+            for cov in covariate_cols:
+                per_cohort.setdefault(cohort, {})[f"HR_{cov}"] = float(cph_c.summary.loc[cov, "exp(coef)"])
+                per_cohort[cohort][f"p_{cov}"] = float(cph_c.summary.loc[cov, "p"])
+            per_cohort[cohort]["n"] = len(sub)
+            per_cohort[cohort]["eventos"] = n_events
+        except Exception as e:
+            per_cohort[cohort] = {"n": len(sub), "eventos": n_events, "error": str(e)}
+
+    tabla = pd.DataFrame(per_cohort).T
+
+    # prueba formal de interaccion cohorte x covariable (una covariable
+    # a la vez, para no saturar el modelo con pocas cohortes)
+    interaction_tests = {}
+    cohort_dummies = pd.get_dummies(df[cohort_col], prefix="cohort", drop_first=True, dtype=float)
+    for cov in covariate_cols:
+        inter_df = df[[duration_col, event_col, cov]].copy()
+        inter_df = pd.concat([inter_df, cohort_dummies], axis=1)
+        for cdum in cohort_dummies.columns:
+            inter_df[f"{cov}_x_{cdum}"] = df[cov] * cohort_dummies[cdum]
+        inter_df = inter_df.dropna()
+        try:
+            cph_int = CoxPHFitter()
+            cph_int.fit(inter_df, duration_col=duration_col, event_col=event_col)
+            inter_cols = [c for c in inter_df.columns if c.startswith(f"{cov}_x_")]
+            # prueba de razon de verosimilitud: con vs. sin terminos de interaccion
+            cph_no_int = CoxPHFitter()
+            cph_no_int.fit(inter_df.drop(columns=inter_cols), duration_col=duration_col, event_col=event_col)
+            lr_stat = 2 * (cph_int.log_likelihood_ - cph_no_int.log_likelihood_)
+            from scipy.stats import chi2
+            p_het = 1 - chi2.cdf(lr_stat, df=len(inter_cols))
+            interaction_tests[cov] = {"chi2": lr_stat, "df": len(inter_cols), "p_heterogeneidad": p_het}
+        except Exception as e:
+            interaction_tests[cov] = {"error": str(e)}
+
+    return {"tabla_por_cohorte": tabla, "test_interaccion": pd.DataFrame(interaction_tests).T}
+
+
+def run_full_diagnostics(
+    df: pd.DataFrame, duration_col: str, event_col: str, covariate_cols: list,
+    cohort_col: str = "cohort", output_dir: str | Path | None = None,
+) -> dict:
+    """Corre los tres diagnosticos y opcionalmente guarda las tablas."""
+    cph = CoxPHFitter()
+    fit_df = df[[duration_col, event_col] + covariate_cols].dropna()
+    cph.fit(fit_df, duration_col=duration_col, event_col=event_col)
+
+    print("=" * 78)
+    print("1. SUPUESTO DE RIESGOS PROPORCIONALES (test de Schoenfeld)")
+    print("=" * 78)
+    ph_result = check_proportional_hazards(cph, fit_df)
+    print(ph_result.to_string())
+    if ph_result["viola_supuesto"].any():
+        violadas = ph_result[ph_result["viola_supuesto"]].index.tolist()
+        print(f"\nAVISO: el supuesto de riesgos proporcionales se viola para: {violadas}. "
+              "El HR reportado para esas covariables es un promedio temporal -- "
+              "puede esconder un efecto que cambia con el tiempo. Considerar "
+              "estratificar por esa covariable o usar un termino dependiente del tiempo.")
+    else:
+        print("\nSupuesto de riesgos proporcionales no rechazado para ninguna covariable.")
+
+    print("\n" + "=" * 78)
+    print("2. OBSERVACIONES INFLUYENTES (residuos delta-beta)")
+    print("=" * 78)
+    influential = check_influential_observations(cph, fit_df)
+    print(influential.to_string())
+    print("\nEstas son las observaciones que mas cambiarian el resultado si se "
+          "quitaran -- no implica que esten mal, pero vale la pena revisarlas.")
+
+    print("\n" + "=" * 78)
+    print("3. HETEROGENEIDAD DEL EFECTO ENTRE COHORTES")
+    print("=" * 78)
+    het = None
+    if cohort_col in df.columns:
+        het = check_heterogeneity_across_cohorts(df, duration_col, event_col, covariate_cols, cohort_col)
+        print("\nHR por cohorte, ajustado por separado (sin estratificar):")
+        print(het["tabla_por_cohorte"].to_string())
+        print("\nTest de interaccion cohorte x covariable (heterogeneidad formal):")
+        print(het["test_interaccion"].to_string())
+    else:
+        print(f"Sin columna '{cohort_col}' -- diagnostico de heterogeneidad omitido.")
+
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        ph_result.to_csv(out / "cox_diag_proportional_hazards.tsv", sep="\t")
+        influential.to_csv(out / "cox_diag_influential_observations.tsv", sep="\t")
+        if het is not None:
+            het["tabla_por_cohorte"].to_csv(out / "cox_diag_heterogeneity_by_cohort.tsv", sep="\t")
+            het["test_interaccion"].to_csv(out / "cox_diag_heterogeneity_test.tsv", sep="\t")
+        print(f"\nTablas guardadas en: {out}")
+
+    return {"cph": cph, "proportional_hazards": ph_result, "influential": influential, "heterogeneity": het}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", action="append", required=True,
+                         help="scored_*.tsv (repetir para combinar cohortes)")
+    parser.add_argument("--duration-col", default="relapse_free_months")
+    parser.add_argument("--event-col", default="relapse_event")
+    parser.add_argument("--group-col", default="predicted_cms")
+    parser.add_argument("--reference", default=None)
+    parser.add_argument("--output", default=None)
+    args = parser.parse_args()
+
+    frames = []
+    for p in args.input:
+        d = pd.read_csv(p, sep="\t")
+        if "cohort" not in d.columns:
+            d["cohort"] = Path(p).parent.name
+        frames.append(d)
+    df = pd.concat(frames, ignore_index=True)
+    df = df.dropna(subset=[args.duration_col, args.event_col, args.group_col])
+
+    reference = args.reference or df[args.group_col].value_counts().idxmax()
+    dummies = pd.get_dummies(df[args.group_col], prefix="cms", dtype=float)
+    ref_col = f"cms_{reference}"
+    if ref_col in dummies.columns:
+        dummies = dummies.drop(columns=[ref_col])
+    df = pd.concat([df, dummies], axis=1)
+    covariate_cols = list(dummies.columns)
+
+    print(f"Referencia: {reference} | covariables: {covariate_cols} | n={len(df)}\n")
+    run_full_diagnostics(df, args.duration_col, args.event_col, covariate_cols,
+                          cohort_col="cohort", output_dir=args.output)
+
+
+if __name__ == "__main__":
+    main()
