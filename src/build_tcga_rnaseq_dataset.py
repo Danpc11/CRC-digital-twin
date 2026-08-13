@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from build_external_cohort_generic import CMS_RENAME
+
 GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
 
 RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw_synapse" / "tcga_rnaseq"
@@ -83,6 +85,12 @@ def main():
 
     merged = expr_panel.merge(labels_tcga, on="sample_id", how="left")
     merged = merged.merge(clinical, on="sample_id", how="left")
+
+    # el archivo central da forma corta (CMS1, CMS4, NOLBL, ...) --
+    # el resto del pipeline (load_labeled_dataset) exige la forma larga
+    # (CMS1_MSI_immune, ...) -- mismo mapeo canonico que usa
+    # build_external_cohort_generic.py, no uno propio inventado.
+    merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
     n_sin_etiqueta = merged["cms_label"].isna().sum()
     if n_sin_etiqueta:
