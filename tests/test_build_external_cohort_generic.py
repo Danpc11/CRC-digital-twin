@@ -195,3 +195,52 @@ def test_diagnose_mode_does_not_write_output_file(tmp_path, monkeypatch, capsys)
     salida = capsys.readouterr().out
     assert "Columnas de fenotipo disponibles" in salida
     assert not (tmp_path / "testset_cms_labeled.tsv").exists()
+
+
+def test_derive_survival_from_dates_handles_literal_na_string():
+    """
+    Regresion de un bug real de produccion (GSE37892): el token "NA"
+    llega como texto LITERAL en la columna de fecha de evento, no como
+    valor faltante -- pd.notna() no lo detecta por defecto, lo que
+    hacia que TODAS las muestras parecieran tener el evento (100% en
+    vez de la tasa real). Reproducido aqui con filas reales del archivo.
+    """
+    from build_external_cohort_generic import derive_survival_from_dates
+    pheno = pd.DataFrame({
+        "inicio": ["2000-05-02", "1999-02-05"],
+        "evento_fecha": ["NA", "1999-07-20"],
+        "censura_fecha": ["2005-01-01", "2002-03-30"],
+    }, index=["GSM1", "GSM2"])
+
+    resultado = derive_survival_from_dates(pheno, "inicio", "evento_fecha", "censura_fecha")
+
+    assert resultado.loc["GSM1", "_derived_event"] == 0, "NA literal debe tratarse como censurado, no como evento"
+    assert resultado.loc["GSM2", "_derived_event"] == 1
+    assert abs(resultado.loc["GSM1", "_derived_duration_months"] - 56.0) < 1.0
+    assert abs(resultado.loc["GSM2", "_derived_duration_months"] - 5.4) < 1.0
+
+
+def test_derive_survival_from_dates_excludes_negative_durations():
+    """Si la fecha de fin queda ANTES que la de inicio (error de captura),
+    debe excluirse (NaN), no producir una duracion negativa silenciosa."""
+    from build_external_cohort_generic import derive_survival_from_dates
+    pheno = pd.DataFrame({
+        "inicio": ["2005-01-01"],
+        "evento_fecha": ["NA"],
+        "censura_fecha": ["2000-01-01"],  # ANTES del inicio -- error de datos
+    }, index=["GSM1"])
+
+    resultado = derive_survival_from_dates(pheno, "inicio", "evento_fecha", "censura_fecha")
+    assert pd.isna(resultado.loc["GSM1", "_derived_duration_months"])
+
+
+def test_derive_survival_from_dates_excludes_missing_start_date():
+    from build_external_cohort_generic import derive_survival_from_dates
+    pheno = pd.DataFrame({
+        "inicio": ["NA"],
+        "evento_fecha": ["2010-01-01"],
+        "censura_fecha": ["2010-01-01"],
+    }, index=["GSM1"])
+
+    resultado = derive_survival_from_dates(pheno, "inicio", "evento_fecha", "censura_fecha")
+    assert pd.isna(resultado.loc["GSM1", "_derived_duration_months"])
