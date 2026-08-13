@@ -21,6 +21,13 @@ Molecular Subtypes*).
 | GSE17537 | Externa (nunca usada para ajustar el panel) | 55 | 0.71 |
 | GSE14333 | Externa | 126 | 0.59 |
 | GSE33113 | Externa (estadio II homogéneo) | 89 | **0.031** |
+| GSE37892 | Externa (endpoint: metástasis a distancia, no recaída general) | 130 | 0.1447 (modelo) / 0.1893 (etiqueta oficial) — no significativa sola |
+
+**Modelo de Cox estratificado que combina las cinco cohortes externas
+(GSE17536+GSE17537+GSE14333+GSE33113+GSE37892, n=545, 137 eventos): Concordance=0.587,
+log-likelihood ratio test p=0.0015. CMS1 HR=2.01 (p<0.005), CMS4 HR=2.19 (p<0.005) —
+robustos con la quinta cohorte sumada. Ninguna cohorte individual necesita ser
+significativa por separado para que esto se sostenga; es justamente el punto de agrupar.**
 
 **Modelo de Cox estratificado que combina las cuatro cohortes externas
 (GSE17536+GSE17537+GSE14333+GSE33113, n=415, 100 eventos):**
@@ -165,13 +172,29 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 
 ## Próximos pasos
 
-1. Sumar una quinta cohorte externa para cerrar la brecha de poder real (verificado con
-   `power_analysis.py` sobre las 4 cohortes actuales, n=415, 100 eventos): **CMS1 al 74.7%**
-   (faltan ~7 eventos para 80%) y **CMS3 al 63.6%** (faltan ~18-19 eventos para 80%). CMS4
-   ya no tiene brecha — está al 98.4% de poder (58 eventos disponibles, solo necesitaba 27),
-   la cifra anterior de "76%" quedó desactualizada. Candidata identificada: GSE37892 (130
-   pacientes estadio II/III, Marisa et al. 2013, misma plataforma Affymetrix U133 Plus 2.0
-   — mismo grupo/artículo que GSE39582, pacientes distintos de 6 hospitales franceses no
-   incluidos en el CIT original), en proceso de integración.
+1. **Quinta cohorte externa integrada (GSE37892, 130 pacientes estadio II/III, Marisa et al.
+   2013) — resultado verificado con `power_analysis.py` sobre las 5 cohortes combinadas
+   (n=545, 137 eventos):**
+
+   | Grupo | Antes (4 cohortes) | Con GSE37892 (5 cohortes) | ¿Cierra 80%? |
+   |---|---|---|---|
+   | CMS1_MSI_immune | 74.7% | **85.4%** | ✅ Sí |
+   | CMS3_metabolic | 63.6% | **77.5%** | Casi — faltan solo ~3 eventos (necesita 58, tiene 55) |
+   | CMS4_mesenchymal | 98.4% | 99.8% | Ya estaba sobrado |
+
+   **Salvedad honesta**: GSE37892 por sí sola NO separa el endpoint significativamente
+   (log-rank p=0.145 con el modelo, p=0.189 con la etiqueta oficial del consorcio) — esto
+   no contradice su aporte positivo al modelo combinado (para eso se agrupan cohortes,
+   ninguna necesita ser significativa por separado), pero debe quedar registrado tal cual,
+   no oculto detrás del resultado agregado. Además, el endpoint en esta cohorte es
+   específicamente *metástasis a distancia* (derivado de fechas de cirugía/metástasis/
+   último contacto), no "recaída" en sentido amplio como en las otras 4 — tratado como
+   equivalente en el pool por ahora, sin verificación adicional de que sean intercambiables.
+
+   Concordance del modelo crudo con las 5 cohortes: 0.587 (antes 0.577 con 4 — estable).
+
+   **Pendiente real, más pequeño de lo que parecía**: CMS3 necesita ~3 eventos más para
+   cruzar 80% — una sexta cohorte, aunque sea chica, probablemente bastaría. No es la
+   brecha grande (~18-19 eventos) que se estimaba antes de sumar GSE37892.
 2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
    por ARN en el criterio de activación de `anti_egfr`
