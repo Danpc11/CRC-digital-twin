@@ -325,7 +325,7 @@ El comando `modern-hopfield --compare-stabilized-sweep` compara V1 y V2 con los 
 parámetros para cada CMS. Las fuerzas y β siguen siendo parámetros experimentales específicos
 de la calibración; no representan intensidad tumoral, dosis ni eficacia clínica.
 
-### Resultado verificado con datos reales (GSE39582, β=3.0)
+### Resultado verificado con datos reales (GSE39582, β=3.0, y confirmado en 3 cohortes externas)
 
 Confirmado con el criterio más estricto disponible (`relax_after_forcing_withdrawal`: éxito
 se mide *después* de retirar el forzamiento, no mientras sigue activo — así se distingue un
@@ -355,3 +355,29 @@ mejora pero no resuelve del todo.
 — cubre los 4 patrones con margen sobre el umbral mínimo encontrado. k y la corrección basal
 se calculan automáticamente por calibración vía `compute_stabilizing_k` /
 `modern_hopfield_baseline`, no son valores fijos entre calibraciones distintas.
+
+**Generalización cruzada**: el mismo patrón se reprodujo calibrando centroides de forma
+*independiente* (no puntuando contra GSE39582) en 3 de las 4 cohortes externas — GSE17536,
+GSE14333, GSE33113:
+
+| Cohorte | CMS1 | CMS2 | CMS3 | CMS4 |
+|---|---|---|---|---|
+| GSE39582 | 0.7→0.7 | 3.0→**1.5** | 3.0→**0.7** | 8.0→**5.0** |
+| GSE17536 | 0.7→0.7 | 3.0→**0.7** | 5.0→**1.5** | 8.0→**5.0** |
+| GSE14333 | 0.7→0.7 | 3.0→**0.7** | 5.0→**1.5** | 5.0→5.0 (sin ventaja) |
+| GSE33113 | 0.7→0.7 | 3.0→**0.7** | 3.0→**0.7** | 3.0→**1.5** |
+
+En las 4 calibraciones, CMS2 arranca con correlación negativa bajo V1 en fuerza baja y V2
+lo resuelve consistentemente — no es una peculiaridad de la geometría de GSE39582. Única
+excepción: CMS4 en GSE14333 no muestra ventaja de V2 sobre V1. Varias clases se calibraron
+por debajo del mínimo recomendado de 30 muestras (GSE33113 CMS3=10, GSE17536 CMS3=20,
+GSE14333 CMS1=22/CMS3=23) — la consistencia del patrón es alentadora, pero esos centroides
+individuales son más ruidosos que el de GSE39582.
+
+GSE17537 no se pudo verificar de forma independiente: sus 55 muestras tienen
+`cms_label="none"` — no un error de formato, sino que esta cohorte nunca formó parte del
+conjunto etiquetado por el consorcio CMS (es la cohorte "externa nunca usada para ajustar
+el panel", validada contra supervivencia con las predicciones del modelo, nunca contra una
+etiqueta oficial). Sin verdad de referencia no hay con qué calibrar centroides
+independientes ahí — la verificación queda completa en 3/4, la cuarta no es alcanzable con
+estos datos.
