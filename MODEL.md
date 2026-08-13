@@ -104,16 +104,28 @@ equivalente para trayectorias simuladas, `prognosis_demo.py::classify_current_st
 
 ## 6. Pronóstico longitudinal: trayectoria y alerta
 
-El seguimiento post-quirúrgico se modela como una serie de mediciones periódicas. Antes de
-la recaída, sin forzamiento ($I=0$), el sistema decae al origen. Si el paciente recae, se
-introduce un término de sesgo hacia el patrón del subtipo de la recaída, con magnitud
-creciente en el tiempo desde el inicio:
+**Motor por defecto: Modern Hopfield V2** (ver sección 10 para la energía, el Jacobiano y la
+verificación completa) — reemplaza por completo la dinámica de proyección anterior en
+`app.py`; esta última sigue existiendo en el código (`dynamics_model="projection_legacy"`)
+solo para reproducibilidad científica vía script/CLI, ya no como opción en la interfaz.
 
-$$I_{\text{recaída}}(t) = s(t) \cdot p^{\mu_{\text{recaída}}}, \qquad
-s(t) = \min\!\big(0.15 \cdot (t - t_0),\ 0.7\big) \ \text{para } t \geq t_0$$
+El seguimiento post-quirúrgico se modela como una serie de mediciones periódicas. Antes de
+la recaída (fase quiescente), se usa el campo estabilizado de la sección 10
+($F_k(x) = -x + X\,\mathrm{softmax}(\beta X^Tx) - b - kx$), que mantiene el origen como
+reposo exacto. Si el paciente recae, se introduce un término de sesgo hacia la **dirección
+normalizada** del patrón del subtipo de la recaída ($\hat p^\mu = p^\mu / \|p^\mu\|$, no el
+patrón crudo — normalizar evita que el patrón de mayor norma reciba una ventaja de fuerza no
+intencional sobre los demás), con magnitud creciente y una rampa de 12 meses, mientras la
+corrección basal y el estabilizador se apagan gradualmente (transición suave, sin
+discontinuidad en fuerza cero):
+
+$$I_{\text{recaída}}(t) = s(t) \cdot \hat p^{\mu_{\text{recaída}}}, \qquad
+s(t) = \min\!\big(0.15 \cdot (t - t_0),\ F_{\max}\big) \ \text{para } t \geq t_0$$
 
 donde $t_0$ es el mes de inicio de la recaída (simulado; en un caso real sería desconocido —
-el objetivo del módulo es justamente inferirlo a partir de las mediciones).
+el objetivo del módulo es justamente inferirlo a partir de las mediciones) y $F_{\max}=5.0$
+es el valor por defecto verificado (sección 10) que alcanza los 4 subtipos CMS con el
+criterio más estricto disponible.
 
 **Riesgo (hazard) ordinal**: la distancia al origen en cada punto de medición,
 
@@ -130,7 +142,8 @@ desviaciones estándar sobre la media basal — un criterio de control estadíst
 estándar, no calibrado específicamente para este contexto clínico.
 
 Implementado en `prognosis.py::hazard_from_trajectory()` / `detect_recurrence_signal()`,
-orquestado en `prognosis_demo.py::simulate_longitudinal_patient()`.
+orquestado en `prognosis_demo.py::simulate_longitudinal_patient()` (que despacha a
+`modern_hopfield.py::simulate_longitudinal_patient_hopfield_v2()` por defecto).
 
 ## 7. Simulación de tratamiento: perturbación condicionada
 
@@ -144,7 +157,10 @@ amortiguamiento proporcional al estado actual, que jala de vuelta hacia el orige
 
 $$I_{\text{tx}}(t) = -\varepsilon(x, \text{mecanismo}) \cdot x(t)$$
 
-donde $\varepsilon \in [0, \varepsilon_{\max}]$ es una **eficacia condicionada** por la
+Este término se suma sobre el campo de recaída activo — por defecto el de Modern Hopfield V2
+(sección 6/10), preservado sin cambios respecto a la formulación anterior: la lógica de
+amortiguamiento no depende de qué dinámica de recaída esté activa, solo del estado actual
+$x(t)$, donde $\varepsilon \in [0, \varepsilon_{\max}]$ es una **eficacia condicionada** por la
 biología del paciente — no un valor fijo ($\varepsilon_{\max}$ corresponde al parámetro
 `base_strength` en el código). Tres mecanismos implementados, cada uno con su
 propio criterio de activación y evidencia clínica citada (ver docstring de
@@ -168,11 +184,26 @@ no un predictor validado de respuesta a tratamiento.
 |---|---|---|
 | $x$ | Vector de estado (expresión z-score) | — |
 | $p^\mu$ | Patrón/atractor del subtipo $\mu$ | `calibrate_patterns_from_data()` |
-| $W$ | Matriz de acoplamiento (regla de proyección) | `build_model_from_patterns()` |
-| $\frac{dx}{dt} = -x + W\tanh(\beta x) + I$ | Dinámica | `dynamics()` |
 | $\hat\mu = \arg\max_\mu \mathrm{corr}(x, p^\mu)$ | Clasificación | `classify_current_state()` / `risk_score_from_expression()` |
 | $h(t) = \|x(t)\|$ | Riesgo ordinal | `hazard_from_trajectory()` |
-| $I_{\text{tx}} = -\varepsilon(x)\, x$ | Perturbación de tratamiento | `apply_treatment_perturbation()` |
+| $I_{\text{tx}} = -\varepsilon(x)\, x$ | Perturbación de tratamiento (igual en ambos motores) | `apply_treatment_perturbation()` |
+
+**Motor por defecto en `app.py` (Modern Hopfield V2, sección 10):**
+
+| Símbolo | Significado | Función |
+|---|---|---|
+| $X$ | Matriz de patrones (columnas $p^\mu$) | `patterns_to_matrix()` |
+| $\dot x=-x+X\,\mathrm{softmax}(\beta X^Tx)$ | Dinámica (fase de recaída) | `modern_hopfield_field()` |
+| $F_k(x)=-x+X\,\mathrm{softmax}(\beta X^Tx)-b-kx$ | Dinámica (fase quiescente, reposo estabilizado) | `modern_hopfield_field_stabilized()` |
+| $b, k$ | Corrección basal / constante estabilizadora, calculadas por calibración | `modern_hopfield_baseline()` / `compute_stabilizing_k()` |
+| — | Orquestación completa (ambas fases + transición suave) | `simulate_longitudinal_patient_hopfield_v2()` |
+
+**Motor histórico (`dynamics_model="projection_legacy"`, solo script/CLI, ya no en la interfaz):**
+
+| Símbolo | Significado | Función |
+|---|---|---|
+| $W$ | Matriz de acoplamiento (regla de proyección) | `build_model_from_patterns()` |
+| $\frac{dx}{dt} = -x + W\tanh(\beta x) + I$ | Dinámica | `dynamics()` |
 
 ## 9. Verificación real
 
@@ -243,9 +274,14 @@ incluyen forzamiento externo continuo en la dirección del patrón (verificado: 
 0.99 sostenida durante la ventana práctica de ~27 meses), no porque el patrón sea un
 atractor autónomo del sistema sin ese forzamiento.
 
-## 10. Alternativa Modern Hopfield y clasificación dinámica experimental
+## 10. Modern Hopfield: motor de pronóstico/intervención y clasificación dinámica experimental
 
-La alternativa en `modern_hopfield.py` usa la energía
+`modern_hopfield.py` cumple dos roles distintos que conviene no confundir: **(a)** es el
+motor por defecto para las trayectorias de Pronóstico e Intervención (sección 6/7,
+ya no una alternativa — reemplazó por completo la dinámica de proyección en `app.py`), y
+**(b)** ofrece, aparte, una recuperación dinámica **experimental** para clasificar una
+muestra (activable en la pestaña Muestras) que sigue siendo opcional y no sustituye al
+clasificador estático de correlación con centroides. La energía usada en ambos casos es
 
 $$E(x)=-\frac{1}{\beta}\log\sum_\mu
 \exp\!\left(\beta (p^\mu)^T x\right)+\frac12\|x\|^2$$
@@ -288,3 +324,34 @@ gradualmente mientras aumenta el forzamiento, evitando una discontinuidad con fu
 El comando `modern-hopfield --compare-stabilized-sweep` compara V1 y V2 con los mismos
 parámetros para cada CMS. Las fuerzas y β siguen siendo parámetros experimentales específicos
 de la calibración; no representan intensidad tumoral, dosis ni eficacia clínica.
+
+### Resultado verificado con datos reales (GSE39582, β=3.0)
+
+Confirmado con el criterio más estricto disponible (`relax_after_forcing_withdrawal`: éxito
+se mide *después* de retirar el forzamiento, no mientras sigue activo — así se distingue un
+atractor genuino de un efecto sostenido artificialmente por la fuerza externa):
+
+| Patrón | Umbral V1 (sin corrección) | Umbral V2 (con corrección) |
+|---|---|---|
+| CMS1_MSI_immune | 0.7 | 0.7 |
+| CMS2_canonical_WNT | 3.0 | **1.5** |
+| CMS3_metabolic | 3.0 | **0.7** |
+| CMS4_mesenchymal | 8.0 | **5.0** |
+
+V2 iguala o mejora a V1 en los 4 patrones. El caso más importante es CMS2: con V1 la
+correlación con el objetivo llegaba a ser **negativa** (terminaba pareciéndose a CMS1, el
+patrón dominante, en vez del objetivo) incluso con fuerza=20; con V2, converge limpiamente
+desde fuerza=1.5, con residuo post-retirada de $10^{-16}$ (equilibrio exacto, no una
+alineación transitoria). El residuo del campo en el origen también pasó a ser exactamente
+cero (antes, sin la corrección basal $b=Xu$, quedaba un remanente ~0.29 durante la fase
+pre-recaída).
+
+CMS4 sigue siendo el más costoso de alcanzar de los 4 (mejora de 8.0 a 5.0, pero no baja al
+nivel de los demás) — es el único patrón con correlación *positiva* con CMS1 (+0.14, contra
+-0.83/-0.31 de CMS2/CMS3), un tipo de solapamiento geométrico distinto que la corrección
+mejora pero no resuelve del todo.
+
+**Parámetros operativos en `app.py`** (verificados, no arbitrarios): β=3.0, fuerza máxima=5.0
+— cubre los 4 patrones con margen sobre el umbral mínimo encontrado. k y la corrección basal
+se calculan automáticamente por calibración vía `compute_stabilizing_k` /
+`modern_hopfield_baseline`, no son valores fijos entre calibraciones distintas.
