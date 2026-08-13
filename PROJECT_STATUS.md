@@ -60,6 +60,28 @@ de este análisis, coincide con lo ya descrito fuera de este proyecto.
 Concordancia de clasificación (GSE39582 vs. etiqueta oficial del consorcio): kappa=0.679
 ("buena"), 77.5% accuracy.
 
+## Validación entre plataformas (RNA-seq, TCGA-COAD/READ)
+
+Todas las cohortes anteriores son microarreglos Affymetrix (mayoría U133 Plus 2.0, una
+U133A). TCGA-COAD/READ usa RNA-seq — una tecnología de medición fundamentalmente distinta,
+nunca vista durante la calibración. RFS/DFS no existe de forma curada en TCGA (`dfsStat`
+100% vacío, verificado en las 603 muestras clínicas) y OS ya se había descartado antes
+(p=0.33) — la prueba aquí no es supervivencia, es concordancia de clasificación contra la
+etiqueta oficial del consorcio (que para TCGA sí se calculó a partir de RNA-seq):
+
+**n=512 pacientes con etiqueta oficial (excluyendo 'none'). Kappa=0.663 ("buena"),
+accuracy=76.2%** — prácticamente igual al kappa=0.679 obtenido en microarreglos (diferencia
+de solo 0.016). Por subtipo: CMS1 86.8%, CMS2 79.1%, CMS4 70.8%, CMS3 66.7%. La confusión
+más grande es CMS2↔CMS3 (33 pacientes CMS2 llamados CMS3, 15 al revés) — un par con
+separación conocida como difícil en la literatura general de CMS, no necesariamente un
+artefacto de cambiar de plataforma; no se tiene el desglose por subtipo del kappa de
+microarreglos para comparar el patrón exacto, solo la cifra agregada.
+
+**Lectura**: el modelo, calibrado exclusivamente en microarreglos, generaliza
+razonablemente bien a RNA-seq sin recalibrar. Script: `src/build_tcga_rnaseq_dataset.py`
+(reconstruye desde `data/raw_synapse/tcga_rnaseq/`, el archivo `tcga_cms_labeled.tsv`
+anterior solo tenía 5 de los 10 genes del panel actual).
+
 ## Lectura
 
 **Actualizado tras sumar GSE33113 (agosto 2026).** El modelo completo de 4 subtipos separa
