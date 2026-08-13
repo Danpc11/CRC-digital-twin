@@ -86,6 +86,67 @@ def parse_platform_annotation(path):
     return pd.read_csv(StringIO("\n".join(table_lines)), sep="\t", names=header)
 
 
+def derive_survival_from_dates(
+    pheno: "pd.DataFrame", start_col: str, event_date_col: str, censor_date_col: str,
+    na_tokens: tuple = ("NA", "N/A", "na", "", "none", "None"),
+) -> "pd.DataFrame":
+    """
+    Deriva duracion_meses/evento a partir de tres columnas de fecha --
+    patron comun en GEO (fecha de cirugia, fecha del evento de interes,
+    fecha de ultimo contacto) en vez de una duracion ya calculada.
+
+    CUIDADO real encontrado en produccion (GSE37892): el token "NA"
+    llega como TEXTO LITERAL, no como valor faltante -- pd.isna()/notna()
+    no lo detectan por defecto, lo que hace que TODAS las muestras
+    parezcan tener el evento (100% en vez de la proporcion real). Hay
+    que reemplazar los tokens de texto por NaN real ANTES de cualquier
+    chequeo de nulidad o parseo de fecha.
+
+    evento=1 si event_date_col tiene una fecha real (no nulo tras la
+    limpieza de tokens) -- duracion = event_date - start_date.
+    evento=0 si event_date_col es nulo -- duracion = censor_date - start_date
+    (censura por ultimo contacto sin el evento).
+    """
+    import pandas as pd
+
+    df = pheno.copy()
+    for col in (start_col, event_date_col, censor_date_col):
+        df[col] = df[col].replace(list(na_tokens), pd.NA)
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    n_total = len(df)
+    n_sin_fecha_inicio = df[start_col].isna().sum()
+    if n_sin_fecha_inicio:
+        print(f"AVISO: {n_sin_fecha_inicio}/{n_total} muestras sin fecha de inicio valida -- "
+              "se excluiran (no se puede calcular duracion sin punto de partida).")
+
+    evento = df[event_date_col].notna().astype(int)
+    fecha_fin = df[event_date_col].where(evento == 1, df[censor_date_col])
+
+    n_sin_fecha_fin = (evento == 0) & fecha_fin.isna()
+    if n_sin_fecha_fin.sum():
+        print(f"AVISO: {n_sin_fecha_fin.sum()}/{n_total} muestras censuradas sin fecha de "
+              "ultimo contacto valida -- se excluiran.")
+
+    duracion_meses = (fecha_fin - df[start_col]).dt.days / 30.4375  # promedio dias/mes
+
+    n_negativa = (duracion_meses < 0).sum()
+    if n_negativa:
+        print(f"AVISO: {n_negativa} muestras con duracion NEGATIVA (fecha de fin antes que "
+              "inicio) -- probable error de captura de datos, se excluiran.")
+        duracion_meses = duracion_meses.where(duracion_meses >= 0)
+
+    df["_derived_duration_months"] = duracion_meses
+    df["_derived_event"] = evento
+
+    n_evento = int((evento == 1).sum())
+    n_valido = duracion_meses.notna().sum()
+    print(f"Supervivencia derivada de fechas: {n_valido}/{n_total} muestras validas, "
+          f"{n_evento} eventos ({100*n_evento/n_total:.1f}% tasa cruda, antes de excluir invalidas).")
+
+    return df
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gse", required=True, help="Ej. GSE13294")
@@ -100,6 +161,11 @@ def main():
                               "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
     parser.add_argument("--event-map", default=None,
                          help="Mapeo texto->numero si event-col no es ya 0/1, formato 'valorA=1,valorB=0'")
+    parser.add_argument("--derive-survival-from-dates", default=None,
+                         help="Para cohortes que reportan fechas en vez de duracion ya calculada -- "
+                              "formato 'columna_inicio,columna_fecha_evento,columna_fecha_censura'. "
+                              "Si se usa, --duration-col/--event-col se ignoran (se generan "
+                              "automaticamente como _derived_duration_months/_derived_event).")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -112,6 +178,13 @@ def main():
 
     from parse_geo_series_matrix import parse_series_matrix
     pheno, expr = parse_series_matrix(matrix_path)
+
+    if args.derive_survival_from_dates:
+        start_col, event_date_col, censor_date_col = [
+            c.strip() for c in args.derive_survival_from_dates.split(",")]
+        pheno = derive_survival_from_dates(pheno, start_col, event_date_col, censor_date_col)
+        args.duration_col = "_derived_duration_months"
+        args.event_col = "_derived_event"
 
     platform_id = get_platform_id(matrix_path)
     print(f"Plataforma: {platform_id}")
