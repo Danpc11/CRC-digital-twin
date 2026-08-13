@@ -128,9 +128,22 @@ detalle V1/V2 por CMS y los primeros candidatos que alcanzan el criterio de recu
 patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuerza de evidencia
 del atractor y tratamientos aplicables), simulación contrafactual de tratamiento y una
 pestaña de método con el panel, la evidencia acumulada y las limitaciones.
+
+**Pronóstico e Intervención usan Modern Hopfield V2 como único motor dinámico** (β=3.0,
+fuerza máxima=5.0 por defecto) — reemplaza por completo la dinámica de proyección anterior,
+no es una opción alternativa. Verificado con datos reales de GSE39582 con el criterio más
+estricto disponible (`relax_after_forcing_withdrawal`: éxito medido *después* de retirar el
+forzamiento): los 4 subtipos CMS se alcanzan de forma robusta, incluido CMS2 (antes
+inalcanzable — llegaba a correlación negativa con el objetivo incluso con fuerza=20 bajo la
+dinámica anterior). Ver `MODEL.md` sección 10 para la tabla completa de umbrales V1 vs V2.
+La dinámica de proyección histórica (`projection_legacy`) sigue disponible por script/CLI
+únicamente para reproducibilidad científica de resultados previos, no en la interfaz.
+
 En **Muestras** puede activarse la recuperación Modern Hopfield experimental. Una etiqueta
 dinámica solo se acepta si converge, el equilibrio es estable, el residuo es pequeño y la
 correlación supera el umbral; las discordancias se muestran sin reemplazar el CMS principal.
+Esta es una función distinta del motor dinámico de Pronóstico/Intervención: aquí sigue siendo
+experimental y opcional, mientras que el motor de trayectorias ya no lo es.
 
 ### Ejecutable de un solo archivo (sin instalar Python)
 
