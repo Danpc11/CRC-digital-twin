@@ -29,6 +29,16 @@ log-likelihood ratio test p=0.0015. CMS1 HR=2.01 (p<0.005), CMS4 HR=2.19 (p<0.00
 robustos con la quinta cohorte sumada. Ninguna cohorte individual necesita ser
 significativa por separado para que esto se sostenga; es justamente el punto de agrupar.**
 
+**Comparación directa con CMS1 como referencia (mismo modelo, misma muestra, solo
+reparametrizado)**: CMS2 vs. CMS1, HR=0.50 (IC95% 0.31-0.79), **p<0.005** — CMS2 tiene la
+mitad del riesgo de CMS1 comparado de frente, no solo "bajo por construcción" al ser la
+referencia habitual. CMS3 vs. CMS1: HR=0.66, p=0.15 (tendencia, no significativo). CMS4
+vs. CMS1: HR=1.09, p=0.71 — **sin diferencia significativa entre CMS1 y CMS4** pese a ser
+subtipos biológicamente muy distintos (inmune/MSI vs. mesenquimal). Esto es consistente
+con literatura publicada sobre CMS1 (buen pronóstico en etapa temprana, pero paradójicamente
+mal pronóstico tras la recaída, acercándose al de CMS4 en ese punto) — no es un artefacto
+de este análisis, coincide con lo ya descrito fuera de este proyecto.
+
 **Modelo de Cox estratificado que combina las cuatro cohortes externas
 (GSE17536+GSE17537+GSE14333+GSE33113, n=415, 100 eventos):**
 
