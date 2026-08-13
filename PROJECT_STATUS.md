@@ -81,6 +81,41 @@ confirmado si el mismo patrón (CMS2 estructuralmente inalcanzable con la dinám
 resuelto con la corrección) se sostiene con los centroides calibrados de las cohortes
 externas, que pueden tener geometría de correlación distinta entre subtipos.
 
+### Clasificador dinámico experimental vs. estático: validación de Cox en cohortes externas
+
+Distinto de lo anterior — esto compara el clasificador **estático** (correlación con
+centroides, el principal) contra la recuperación dinámica **experimental** (pestaña
+Muestras, con abstención explícita), corriendo el mismo Cox estratificado sobre las 4
+cohortes externas con cada uno:
+
+| | Estático (`predicted_cms`) | Dinámico (`modern_hopfield_cms`) |
+|---|---|---|
+| n combinado | 415 | 343 (92 abstenciones) |
+| Concordance, modelo crudo (solo CMS) | 0.577 | 0.585 |
+| CMS1 HR, modelo ajustado | 2.09 (p=0.016) | 2.05 (p=0.07, no significativo) |
+| CMS4 HR, modelo ajustado | — | 3.05 (p=0.004, robusto) |
+
+El concordance del modelo crudo es prácticamente idéntico entre ambos clasificadores — la
+diferencia no está ahí. Lo que sí cambia es que **CMS1 pierde significancia** bajo el
+clasificador dinámico en el modelo ajustado por estadio.
+
+**Investigación de sesgo en las 92 abstenciones** (comparando tasa de recaída incluidas vs.
+excluidas): tasa de evento global casi idéntica (incluidas 23.6% vs. excluidas 26.4%), y
+por cohorte la diferencia va en direcciones **opuestas** sin patrón consistente (con
+conteos pequeños por cohorte, n=7 a n=38, donde esa variación es compatible con azar). El
+100% de las abstenciones son por "entrada híbrida o ambigua" — ningún fallo numérico
+(no convergencia, inestabilidad, residuo alto) — consistente con la fracción de tumores
+mixtos/no clasificables ya documentada en la literatura de CMS (~13% en el consorcio
+original), no un artefacto de la implementación.
+
+**Lectura honesta**: no hay evidencia clara de que las abstenciones estén sesgadas por
+desenlace. La explicación más simple del debilitamiento de CMS1 es pérdida de poder
+estadístico (22% menos muestras), no un sesgo direccional demostrado — pero tampoco se
+puede descartar por completo algo más sutil sin un análisis estratificado más profundo. El
+clasificador estático sigue siendo el principal; esto queda documentado como evidencia
+complementaria, no como reemplazo de las cifras existentes (kappa=0.679, Cox con el
+clasificador estático).
+
 ## Simulación de tratamiento
 
 `treatment_perturbation.py` implementa tres mecanismos (inmunoterapia anti-PD1, tratamiento
