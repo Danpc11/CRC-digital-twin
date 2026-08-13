@@ -56,6 +56,31 @@ poder general, no necesariamente evidencia nueva específica de CMS1. CMS3 sigue
 evidencia de valor pronóstico independiente, y con 45% de poder no se puede todavía
 descartar que sí lo tenga.
 
+## Motor dinámico: Modern Hopfield V2
+
+Reemplazó por completo la dinámica de proyección anterior en `app.py` (pestañas Pronóstico
+e Intervención) — no es una alternativa, es el único motor ya en la interfaz. Verificado
+con datos reales de GSE39582 (la cohorte de entrenamiento), con el criterio más estricto
+disponible (éxito medido *después* de retirar el forzamiento, no mientras sigue activo):
+
+| Patrón | Umbral V1 (dinámica original) | Umbral V2 (con corrección basal + estabilizador) |
+|---|---|---|
+| CMS1_MSI_immune | 0.7 | 0.7 |
+| CMS2_canonical_WNT | 3.0 | **1.5** |
+| CMS3_metabolic | 3.0 | **0.7** |
+| CMS4_mesenchymal | 8.0 | **5.0** |
+
+El hallazgo más importante: bajo la dinámica original, CMS2 llegaba a correlación
+**negativa** con su propio objetivo (terminaba pareciéndose al patrón dominante, CMS1) sin
+importar cuánto se aumentara la fuerza — un límite estructural, no de calibración. La
+corrección resuelve esto de forma verificada. Detalle matemático completo en `MODEL.md`
+sección 10.
+
+**Pendiente**: esta verificación se hizo solo sobre GSE39582 (entrenamiento) — no se ha
+confirmado si el mismo patrón (CMS2 estructuralmente inalcanzable con la dinámica original,
+resuelto con la corrección) se sostiene con los centroides calibrados de las cohortes
+externas, que pueden tener geometría de correlación distinta entre subtipos.
+
 ## Simulación de tratamiento
 
 `treatment_perturbation.py` implementa tres mecanismos (inmunoterapia anti-PD1, tratamiento
@@ -83,3 +108,5 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
    para cerrar la brecha de poder restante en CMS4 (76%→80%) y CMS3 (45%→80%)
 2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
    por ARN en el criterio de activación de `anti_egfr`
+3. Verificar si la corrección de Modern Hopfield V2 (umbrales de forzamiento por CMS) se
+   sostiene con los centroides de las cohortes externas, no solo con GSE39582
