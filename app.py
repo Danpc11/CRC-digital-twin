@@ -1103,6 +1103,22 @@ with tab_metodo:
                 unsafe_allow_html=True)
 
     st.divider()
+    st.markdown('<div class="eyebrow">Motor dinámico: Modern Hopfield V2</div>',
+                unsafe_allow_html=True)
+    st.markdown("""
+Pronóstico e Intervención usan Modern Hopfield V2 (β=3.0, fuerza máxima=5.0) como único
+motor — reemplazó por completo la dinámica de proyección anterior, ya no es una opción en
+esta interfaz. Verificado con datos reales de GSE39582, con el criterio más estricto
+disponible (éxito medido *después* de retirar el forzamiento, no mientras sigue activo):
+los 4 subtipos CMS se alcanzan de forma robusta, incluido CMS2 — bajo la dinámica anterior
+llegaba a correlación **negativa** con su propio objetivo sin importar cuánta fuerza se
+aplicara, un límite estructural que la corrección resuelve. Detalle matemático completo en
+`MODEL.md` sección 10; tabla de umbrales verificados en `PROJECT_STATUS.md`.
+    """)
+    st.caption("Esta verificación se hizo sobre GSE39582 (entrenamiento) — pendiente "
+               "confirmar si se sostiene con los centroides de las cohortes externas.")
+
+    st.divider()
     st.markdown('<div class="eyebrow">Qué no hace esta herramienta</div>',
                 unsafe_allow_html=True)
     st.markdown("""
