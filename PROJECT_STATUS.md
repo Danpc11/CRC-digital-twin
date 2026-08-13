@@ -76,10 +76,36 @@ importar cuánto se aumentara la fuerza — un límite estructural, no de calibr
 corrección resuelve esto de forma verificada. Detalle matemático completo en `MODEL.md`
 sección 10.
 
-**Pendiente**: esta verificación se hizo solo sobre GSE39582 (entrenamiento) — no se ha
-confirmado si el mismo patrón (CMS2 estructuralmente inalcanzable con la dinámica original,
-resuelto con la corrección) se sostiene con los centroides calibrados de las cohortes
-externas, que pueden tener geometría de correlación distinta entre subtipos.
+**Verificado con centroides calibrados independientemente en 3 de las 4 cohortes externas**
+(GSE17536, GSE14333, GSE33113). El patrón se repite en las tres, no es una peculiaridad de
+GSE39582:
+
+| Cohorte | CMS1 | CMS2 | CMS3 | CMS4 |
+|---|---|---|---|---|
+| GSE39582 (entrenamiento) | 0.7→0.7 | 3.0→**1.5** | 3.0→**0.7** | 8.0→**5.0** |
+| GSE17536 | 0.7→0.7 | 3.0→**0.7** | 5.0→**1.5** | 8.0→**5.0** |
+| GSE14333 | 0.7→0.7 | 3.0→**0.7** | 5.0→**1.5** | 5.0→5.0 (sin ventaja) |
+| GSE33113 | 0.7→0.7 | 3.0→**0.7** | 3.0→**0.7** | 3.0→**1.5** |
+
+En las 4 calibraciones independientes, CMS2 arranca con correlación **negativa** bajo V1 en
+fuerza baja (se confunde con CMS1, el patrón dominante) y V2 lo resuelve consistentemente
+con fuerza ≤1.5 — un fenómeno estructural reproducible, no un artefacto de una calibración
+específica. Única excepción real: CMS4 en GSE14333 no muestra ventaja de V2 sobre V1 (ambos
+llegan a fuerza=5.0), documentado tal cual.
+
+**Salvedad de tamaño de muestra**: varias clases se calibraron por debajo del mínimo
+recomendado (30) — GSE33113 CMS3 con solo 10 muestras, GSE17536 CMS3 con 20, GSE14333
+CMS1/CMS3 con 22/23. La consistencia del patrón entre calibraciones es alentadora, pero
+esos centroides individuales son más ruidosos que el de GSE39582.
+
+**GSE17537 no se pudo verificar de forma independiente, y no es una tarea pendiente**: las
+55 muestras de esta cohorte tienen `cms_label="none"` — no un error de formato, sino que
+esta cohorte nunca formó parte del conjunto etiquetado originalmente por el consorcio CMS
+(consistente con su uso ya documentado en este proyecto como cohorte "externa nunca usada
+para ajustar el panel", validada contra supervivencia con las predicciones del modelo, no
+contra una etiqueta oficial). Sin verdad de referencia, no existe forma de calibrar
+centroides independientes de esta cohorte — la verificación cruzada queda completa en 3/4,
+y la cuarta no es alcanzable con estos datos, no por falta de intentarlo.
 
 ### Clasificador dinámico experimental vs. estático: validación de Cox en cohortes externas
 
@@ -143,5 +169,3 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
    para cerrar la brecha de poder restante en CMS4 (76%→80%) y CMS3 (45%→80%)
 2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
    por ARN en el criterio de activación de `anti_egfr`
-3. Verificar si la corrección de Modern Hopfield V2 (umbrales de forzamiento por CMS) se
-   sostiene con los centroides de las cohortes externas, no solo con GSE39582
