@@ -35,7 +35,7 @@ def _setup_fixture(tmp_path):
         "CMS_network": ["CMS1", "UNK", "CMS2"],
         "CMS_RFclassifier": ["CMS1", "CMS4", "CMS2"],
         "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples": [
-            "CMS1_MSI_immune", "CMS4_mesenchymal", "CMS2_canonical_WNT"],
+            "CMS1", "CMS4", "CMS2"],  # forma CORTA -- asi viene en el archivo real
     })
     labels.to_csv(labels_dir / "labels.tsv", sep="\t", index=False)
 
@@ -98,6 +98,56 @@ def test_sample_without_official_label_marked_none_not_dropped(tmp_path, monkeyp
     result = pd.read_csv(out_path, sep="\t").set_index("sample_id")
     assert len(result) == 3  # las 3 muestras de expresion, ninguna se perdio
     assert result.loc["TCGA-XX-0000", "cms_label"] == "none"
+
+
+def test_short_form_cms_labels_mapped_to_long_form(tmp_path, monkeypatch):
+    """
+    Regresion de un bug real de produccion: el archivo central de
+    etiquetas da la forma CORTA (CMS1, CMS4, NOLBL), pero
+    load_labeled_dataset() del resto del pipeline exige la forma LARGA
+    (CMS1_MSI_immune, ...) -- sin este mapeo, external_validation.py
+    truena con 'Etiquetas CMS no reconocidas'. Debe usar el MISMO
+    mapeo canonico (CMS_RENAME) que build_external_cohort_generic.py,
+    no uno inventado -- incluye el caso NOLBL, visto en produccion con
+    61 muestras reales de TCGA.
+    """
+    expr_path, clinical_path, labels_path = _setup_fixture(tmp_path)
+    labels = pd.read_csv(labels_path, sep="\t")
+    labels.loc[len(labels)] = ["TCGA-XX-0000", "tcga", "UNK", "NOLBL", "NOLBL"]
+    labels.to_csv(labels_path, sep="\t", index=False)
+
+    out_path = tmp_path / "out.tsv"
+    monkeypatch.setattr(sys, "argv", [
+        "prog", "--expression", str(expr_path), "--clinical", str(clinical_path),
+        "--labels", str(labels_path), "--output", str(out_path),
+    ])
+    mod.main()
+    result = pd.read_csv(out_path, sep="\t").set_index("sample_id")
+
+    esperadas = {"CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic",
+                 "CMS4_mesenchymal", "none"}
+    assert set(result["cms_label"].unique()).issubset(esperadas), (
+        "todas las etiquetas deben quedar en forma larga reconocida por "
+        "load_labeled_dataset(), no en forma corta cruda"
+    )
+    assert result.loc["TCGA-A6-6653", "cms_label"] == "CMS1_MSI_immune"
+    assert result.loc["TCGA-XX-0000", "cms_label"] == "none"  # NOLBL -> none
+
+
+def test_output_is_accepted_by_load_labeled_dataset(tmp_path, monkeypatch):
+    """Prueba end-to-end minima: el archivo generado debe pasar la
+    misma validacion que usa external_validation.py en produccion, no
+    solo verse bien por inspeccion manual."""
+    expr_path, clinical_path, labels_path = _setup_fixture(tmp_path)
+    out_path = tmp_path / "out.tsv"
+    monkeypatch.setattr(sys, "argv", [
+        "prog", "--expression", str(expr_path), "--clinical", str(clinical_path),
+        "--labels", str(labels_path), "--output", str(out_path),
+    ])
+    mod.main()
+
+    from calibration import load_labeled_dataset
+    load_labeled_dataset(str(out_path))  # no debe lanzar ValueError
 
 
 def test_missing_panel_gene_is_reported_not_silently_dropped(tmp_path, monkeypatch, capsys):
