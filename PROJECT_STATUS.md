@@ -165,7 +165,13 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 
 ## Próximos pasos
 
-1. Sumar una quinta cohorte externa para confirmar (o no) el hallazgo nuevo de CMS1, y
-   para cerrar la brecha de poder restante en CMS4 (76%→80%) y CMS3 (45%→80%)
+1. Sumar una quinta cohorte externa para cerrar la brecha de poder real (verificado con
+   `power_analysis.py` sobre las 4 cohortes actuales, n=415, 100 eventos): **CMS1 al 74.7%**
+   (faltan ~7 eventos para 80%) y **CMS3 al 63.6%** (faltan ~18-19 eventos para 80%). CMS4
+   ya no tiene brecha — está al 98.4% de poder (58 eventos disponibles, solo necesitaba 27),
+   la cifra anterior de "76%" quedó desactualizada. Candidata identificada: GSE37892 (130
+   pacientes estadio II/III, Marisa et al. 2013, misma plataforma Affymetrix U133 Plus 2.0
+   — mismo grupo/artículo que GSE39582, pacientes distintos de 6 hospitales franceses no
+   incluidos en el CIT original), en proceso de integración.
 2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
    por ARN en el criterio de activación de `anti_egfr`
