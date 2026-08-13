@@ -44,7 +44,6 @@ from reportlab.platypus import (
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from attractor_model import build_model_from_patterns
 from calibration import load_calibrated_patterns, load_gene_reference_stats, zscore_genes
 from clinical_selection import assess_molecular_eligibility, hybrid_mechanism_hypotheses
 from modern_hopfield import (
@@ -367,27 +366,25 @@ with st.sidebar:
 
         st.divider()
         st.markdown('<div class="eyebrow">Motor dinámico</div>', unsafe_allow_html=True)
-        dynamics_model = st.selectbox(
-            "Modelo para trayectoria e intervención",
-            ["modern_hopfield", "projection_legacy"],
-            index=0,
-            format_func=lambda value: (
-                "Modern Hopfield V2 (predeterminado)"
-                if value == "modern_hopfield" else "Proyección continua (legacy)"),
-        )
-        if dynamics_model == "modern_hopfield":
-            dynamics_beta = st.number_input(
-                "β dinámico", 0.1, 20.0, 3.0, 0.1, key="modern_hopfield_beta")
-            max_forcing_strength = st.number_input(
-                "Fuerza máxima del driver", 0.1, 20.0, 5.0, 0.1,
-                key="modern_hopfield_forcing",
-                help="Magnitud experimental específica de esta calibración; no es una dosis clínica.")
-            st.caption("Reposo estabilizado, transición suave y driver normalizado.")
-        else:
-            dynamics_beta = st.number_input(
-                "β dinámico", 0.1, 20.0, 2.0, 0.1, key="projection_legacy_beta")
-            max_forcing_strength = 0.7
-            st.warning("Modelo histórico disponible para comparación; no es el recomendado.")
+        # Modern Hopfield V2 es el UNICO motor -- reemplaza por completo la
+        # dinamica de proyeccion anterior (decision explicita, no un toggle
+        # con ambas opciones disponibles). El codigo de "projection_legacy"
+        # sigue existiendo en prognosis_demo.py/treatment_simulation_demo.py
+        # para reproducibilidad cientifica de figuras/resultados previos
+        # via CLI, pero ya no se expone como eleccion en la app.
+        dynamics_model = "modern_hopfield"
+        dynamics_beta = st.number_input(
+            "β dinámico", 0.1, 20.0, 3.0, 0.1, key="modern_hopfield_beta",
+            help="Verificado con datos reales de GSE39582: los 4 subtipos son atractores "
+                 "estables desde β≈3.0. Valores mas bajos pueden no conservar los 4.")
+        max_forcing_strength = st.number_input(
+            "Fuerza máxima del driver", 0.1, 20.0, 5.0, 0.1,
+            key="modern_hopfield_forcing",
+            help="Verificado: fuerza≥5.0 alcanza los 4 patrones objetivo (incl. el mas dificil, "
+                 "CMS4) con el criterio mas estricto -- exito medido DESPUES de retirar el "
+                 "forzamiento, no solo mientras esta activo. Magnitud experimental especifica "
+                 "de esta calibracion; no es una dosis clinica.")
+        st.caption("Reposo estabilizado, transición suave y driver normalizado (V2).")
 
     st.divider()
     st.markdown(
@@ -433,27 +430,20 @@ if not patterns:
     st.stop()
 
 st.caption(
-    "Motor dinámico activo: "
-    + ("Modern Hopfield V2" if dynamics_model == "modern_hopfield"
-       else "proyección continua (legacy)")
-    + f" · β={dynamics_beta:.2f}"
-    + (f" · fuerza={max_forcing_strength:.2f}" if dynamics_model == "modern_hopfield" else ""))
+    "Motor dinámico activo: Modern Hopfield V2"
+    f" · β={dynamics_beta:.2f} · fuerza={max_forcing_strength:.2f}")
 
-if dynamics_model == "modern_hopfield":
-    beta_validation = cached_validate_modern_beta(patterns, dynamics_beta)
-    if not beta_validation["valid"]:
-        invalid = ", ".join(beta_validation["invalid_patterns"])
-        st.error(
-            f"β={dynamics_beta:.2f} no conserva los cuatro atractores CMS con "
-            f"correlación ≥0.90. No califican: {invalid}. Las trayectorias con este β "
-            "son exploratorias y no deben interpretarse como recuperación CMS estable.")
-    else:
-        st.success("β validado: los cuatro centroides convergen a atractores estables.")
-
-if dynamics_model == "modern_hopfield":
-    dynamics_matrix, _labels = patterns_to_matrix(patterns)
+beta_validation = cached_validate_modern_beta(patterns, dynamics_beta)
+if not beta_validation["valid"]:
+    invalid = ", ".join(beta_validation["invalid_patterns"])
+    st.error(
+        f"β={dynamics_beta:.2f} no conserva los cuatro atractores CMS con "
+        f"correlación ≥0.90. No califican: {invalid}. Las trayectorias con este β "
+        "son exploratorias y no deben interpretarse como recuperación CMS estable.")
 else:
-    dynamics_matrix, _labels, _ = build_model_from_patterns(patterns)
+    st.success("β validado: los cuatro centroides convergen a atractores estables.")
+
+dynamics_matrix, _labels = patterns_to_matrix(patterns)
 n_genes = len(gene_order)
 
 tab_muestras, tab_paciente, tab_traj, tab_tx, tab_metodo = st.tabs(
