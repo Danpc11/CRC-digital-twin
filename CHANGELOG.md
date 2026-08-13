@@ -4,6 +4,24 @@
 No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
 
+## Modern Hopfield V2 reemplaza por completo el motor de Pronóstico/Intervención
+
+- Verificado con datos reales de GSE39582 (`--compare-stabilized-sweep`, criterio de éxito
+  post-retirada de forzamiento): V2 iguala o mejora a V1 en los 4 CMS. CMS2 pasa de umbral
+  3.0 a **1.5**; antes con V1 llegaba a correlación **negativa** con el objetivo incluso con
+  fuerza=20 (terminaba pareciéndose a CMS1, el patrón dominante, en vez del objetivo). CMS3
+  de 3.0 a 0.7. CMS4 de 8.0 a 5.0 (el más costoso de los 4, único con correlación positiva
+  con CMS1).
+- `app.py`: se quitó el selector de motor dinámico (`projection_legacy` vs `modern_hopfield`)
+  de la barra lateral — Modern Hopfield V2 es ahora el único motor para las pestañas
+  Pronóstico e Intervención, con β=3.0 y fuerza máxima=5.0 como valores por defecto
+  (verificados, no arbitrarios). `projection_legacy` sigue existiendo en
+  `prognosis_demo.py`/`treatment_simulation_demo.py` solo para reproducibilidad científica
+  vía script/CLI, ya no como elección en la interfaz.
+- Se agregaron 3 pruebas de regresión sin cobertura previa (`modern_hopfield_baseline`,
+  `relax_after_forcing_withdrawal`, `summarize_forcing_thresholds`) y se corrigió un import
+  roto en un test. Suite actual: **158 pruebas aprobadas**.
+
 ## Modern Hopfield: estabilización basal, barrido V1/V2 y clasificación experimental
 
 - Se agregó la energía Modern Hopfield y su flujo de gradiente continuo, con Jacobiano
