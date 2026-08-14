@@ -4,6 +4,65 @@
 No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
 
+## Interfaz: más rápida, panel de estado unificado
+
+- `app.py`: la carga de patrones calibrados (`load_calibrated_patterns` +
+  `load_gene_reference_stats`, antes dos lecturas separadas del mismo archivo) ahora está
+  cacheada — antes se re-ejecutaba en **cada** interacción de la app (Streamlit reejecuta
+  todo el script en cualquier rerun, no solo cuando el archivo cambia). Medido: ~11x más
+  rápido en cargas repetidas. La clave de caché incluye `mtime`, así que recalibrar
+  (`cli.py calibrate`) y refrescar la app recoge el cambio sin limpiar caché a mano.
+- La clasificación de cohortes en **Muestras** (z-score + `score_cohort`) también quedó
+  cacheada, con la misma justificación.
+- El encabezado principal reemplaza un `st.caption` suelto seguido de una alerta genérica
+  de Streamlit por una franja de estado unificada (`status_strip`), con el mismo lenguaje
+  visual que ya usan las tarjetas `readout` del resto de la app.
+- Suite actual: **176 pruebas aprobadas**.
+
+## Puente RT-qPCR: de Ct crudo a la escala de referencia congelada
+
+- Nuevo `src/qpcr_bridge.py`: el Ct de RT-qPCR es una escala inversa y en un rango numérico
+  distinto al de expresión log2 de microarreglos usado para calibrar — subir Ct crudo a la
+  app no da error, pero tampoco da una clasificación con sentido. El puente calcula
+  Delta-Ct (signo invertido, misma dirección que expresión) y ajusta una transformación
+  lineal por gen usando muestras ancla, en dos modos: **pareado** (valor real conocido en
+  la escala de referencia, gold standard) y **por_centroide** (solo CMS conocido de cada
+  ancla, más débil pero práctico sin remedición pareada).
+- Verificado con simulación en ambos sentidos: recupera la transformación real casi exacta
+  con anclas pareadas (R²=0.99), funciona razonablemente en el modo práctico (R²=0.68-0.91),
+  y **avisa explícitamente** en los casos donde debería fallar — muy pocas anclas (R²=1.0
+  engañoso con solo 2 puntos) y anclas sin relación lineal real (R² bajo detectado
+  correctamente). No verificado todavía con datos reales de RT-qPCR.
+- `app.py`: nueva sección colapsada (`🧪 Puente RT-qPCR`) al final de la pestaña Muestras —
+  tabla editable de anclas, ajuste con R² por gen visible, y clasificación de un paciente
+  nuevo por Ct crudo una vez ajustado el puente.
+
+## Verificación cruzada de cohortes y validación entre plataformas (RNA-seq)
+
+- Umbrales de forzamiento V1/V2 (ver entrada de Modern Hopfield V2 abajo) verificados con
+  centroides calibrados **independientemente** en 3 cohortes externas adicionales
+  (GSE17536, GSE14333, GSE33113, no solo GSE39582) — el patrón (V2 resuelve la correlación
+  negativa de CMS2 bajo V1) se reproduce en las 4 calibraciones. GSE17537 no se pudo
+  verificar de forma independiente: nunca tuvo etiquetas del consorcio CMS (no es una tarea
+  pendiente, es un límite estructural de esa cohorte).
+- Quinta cohorte externa sumada al Cox combinado: **GSE37892** (130 pacientes estadio II/III,
+  n=545 total, 137 eventos). Cierra la brecha de poder de CMS1 (74.7%→85.4%) y deja a CMS3
+  muy cerca (63.6%→77.5%, faltan ~3 eventos). Nuevo `--derive-survival-from-dates` en
+  `build_external_cohort_generic.py` para cohortes que reportan fechas en vez de duración ya
+  calculada (con el mismo cuidado de tokens "NA" literales que ya existía para duración/evento
+  directos).
+- Investigada y descartada GSE24551 como sexta cohorte (plataforma Exon 1.0 ST, incompatible
+  con la familia U133 Plus 2.0 del resto). GSE12945 (U133 Plus 2.0, compatible) evaluada y
+  descartada por combinación de limitaciones reales: falta AXIN2 en su chip (GPL96/U133A),
+  sin etiqueta CMS oficial, y muy pocos eventos totales.
+- **Validación entre plataformas**: nuevo `src/build_tcga_rnaseq_dataset.py` reconstruye la
+  cohorte TCGA-COAD/READ con los 10 genes completos del panel (el archivo anterior solo
+  tenía 5, de antes de que el panel quedara congelado). Concordancia de clasificación
+  (RNA-seq, n=512 con etiqueta oficial) vs. la etiqueta CMS oficial del consorcio:
+  **kappa=0.663**, prácticamente igual al kappa=0.679 obtenido en microarreglos — el modelo,
+  calibrado exclusivamente en microarreglos, generaliza razonablemente bien a una tecnología
+  de medición que nunca vio durante la calibración.
+
 ## Modern Hopfield V2 reemplaza por completo el motor de Pronóstico/Intervención
 
 - Verificado con datos reales de GSE39582 (`--compare-stabilized-sweep`, criterio de éxito
