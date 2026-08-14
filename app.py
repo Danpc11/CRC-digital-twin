@@ -58,6 +58,7 @@ from prognosis_demo import (
     classify_current_state,
     simulate_longitudinal_patient,
 )
+from qpcr_bridge import apply_qpcr_bridge, compute_delta_ct, fit_qpcr_bridge_from_known_cms
 from survival_validation import score_cohort
 from treatment_perturbation import TREATMENT_MECHANISMS, describe_treatment
 from treatment_simulation_demo import simulate_with_optional_treatment
@@ -609,6 +610,112 @@ with tab_muestras:
             st.download_button("Descargar tabla clasificada",
                                 scored.to_csv(sep="\t", index=False).encode(),
                                 file_name="scored_cohort.tsv")
+
+    st.divider()
+    with st.expander("🧪 Puente RT-qPCR (Ct crudo → escala del modelo)"):
+        st.markdown(
+            '<div class="eyebrow">Para cuando tu dato de entrada es Ct, no expresión ya normalizada</div>',
+            unsafe_allow_html=True)
+        st.markdown(
+            "El Ct es una escala inversa y en un rango numérico distinto al que se usó para "
+            "calibrar (expresión log2 de microarreglos) — subir valores de Ct crudos a la tabla "
+            "de arriba **no da error, pero tampoco da una clasificación con sentido**. "
+            "Este puente ajusta una transformación lineal por gen usando muestras de referencia "
+            "("
+            "**ancla**) con subtipo CMS ya conocido, y la aplica antes de clasificar. "
+            "No verificado todavía con datos reales — verificado con simulación. Antes de confiar "
+            "en esto para una decisión clínica, correr sobre muestras de referencia con CMS ya "
+            "conocido y confirmar que el resultado es el esperado."
+        )
+
+        st.markdown("**Paso 1 — muestras ancla** (mínimo 4 por clase que te importe; con 2 el "
+                    "ajuste puede verse perfecto y aun así no servir — se avisa si pasa esto).")
+        anchor_template = pd.DataFrame({
+            "sample_id": ["ancla_1", "ancla_2"],
+            "cms_label": ["CMS1_MSI_immune", "CMS4_mesenchymal"],
+            "ct_referencia": [22.0, 21.5],
+            **{gene: [25.0, 25.0] for gene in gene_order},
+        })
+        anchors_edited = st.data_editor(
+            st.session_state.get("qpcr_anchor_table", anchor_template),
+            num_rows="dynamic", use_container_width=True, key="qpcr_anchor_editor",
+            column_config={
+                "cms_label": st.column_config.SelectboxColumn(
+                    options=list(patterns.keys()), required=True),
+            },
+        )
+        st.session_state["qpcr_anchor_table"] = anchors_edited
+
+        if st.button("Ajustar puente con estas anclas"):
+            filas_validas = anchors_edited.dropna(
+                subset=["cms_label", "ct_referencia"] + gene_order)
+            if len(filas_validas) < 2:
+                st.error("Hacen falta al menos 2 filas completas (idealmente ≥4 por clase) "
+                          "para ajustar el puente.")
+            else:
+                delta_ct_anclas = {gene: [] for gene in gene_order}
+                for _, fila in filas_validas.iterrows():
+                    dct = compute_delta_ct(
+                        {gene: fila[gene] for gene in gene_order}, fila["ct_referencia"])
+                    for gene in gene_order:
+                        delta_ct_anclas[gene].append(dct[gene])
+                try:
+                    bridge = fit_qpcr_bridge_from_known_cms(
+                        delta_ct_anclas, filas_validas["cms_label"].tolist(), patterns, gene_order)
+                    st.session_state["qpcr_bridge"] = bridge
+                except ValueError as err:
+                    st.error(str(err))
+                    bridge = None
+
+                if bridge:
+                    tabla_r2 = pd.DataFrame([
+                        {"gen": g, "a": round(bridge[g]["a"], 3) if bridge[g]["a"] is not None else None,
+                         "b": round(bridge[g]["b"], 3) if bridge[g]["b"] is not None else None,
+                         "R²": round(bridge[g]["r2"], 3) if bridge[g].get("r2") is not None else None,
+                         "n_anclas": bridge[g]["n_anclas"],
+                         "aviso": bridge[g].get("aviso", "")}
+                        for g in gene_order
+                    ])
+                    st.dataframe(tabla_r2, use_container_width=True)
+                    genes_con_aviso = tabla_r2[tabla_r2["aviso"] != ""]["gen"].tolist()
+                    if genes_con_aviso:
+                        st.warning(f"Genes con ajuste dudoso: {', '.join(genes_con_aviso)} — "
+                                   "revisar sus anclas antes de confiar en la clasificación "
+                                   "de un paciente real para ese gen específicamente.")
+                    else:
+                        st.success("Puente ajustado sin avisos en ningún gen.")
+
+        if "qpcr_bridge" in st.session_state:
+            st.markdown("**Paso 2 — clasificar un paciente nuevo por Ct crudo**")
+            with st.form("qpcr_patient_form"):
+                ct_ref_paciente = st.number_input("Ct del gen de referencia", value=22.0, step=0.1)
+                ct_genes_paciente = {}
+                cols = st.columns(5)
+                for i, gene in enumerate(gene_order):
+                    ct_genes_paciente[gene] = cols[i % 5].number_input(
+                        f"Ct {gene}", value=25.0, step=0.1, key=f"qpcr_ct_{gene}")
+                enviado = st.form_submit_button("Clasificar")
+
+            if enviado:
+                dct_paciente = compute_delta_ct(ct_genes_paciente, ct_ref_paciente)
+                try:
+                    valor_calibrado = apply_qpcr_bridge(
+                        dct_paciente, st.session_state["qpcr_bridge"], gene_order)
+                    df_paciente_qpcr = pd.DataFrame([dict(zip(gene_order, valor_calibrado))])
+                    frozen = st.session_state.get("gene_stats")
+                    z_paciente = zscore_genes(df_paciente_qpcr, gene_order, stats=frozen)
+                    corrs = {label: float(np.corrcoef(z_paciente.iloc[0].to_numpy(), c)[0, 1])
+                             for label, c in patterns.items()}
+                    predicho = max(corrs, key=corrs.get)
+                    st.markdown(cms_tag(predicho), unsafe_allow_html=True)
+                    st.dataframe(
+                        pd.DataFrame({"CMS": list(corrs.keys()),
+                                      "correlación": [round(v, 3) for v in corrs.values()]})
+                        .sort_values("correlación", ascending=False),
+                        use_container_width=True, hide_index=True,
+                    )
+                except ValueError as err:
+                    st.error(str(err))
 
 # ======================================================================
 # 2. PACIENTE -- vista clinica consolidada: un paciente, una pantalla.
