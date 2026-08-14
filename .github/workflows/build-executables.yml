@@ -102,6 +102,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - uses: actions/download-artifact@v7
         with:
