@@ -118,6 +118,16 @@ st.markdown("""
   .scope { border-top: 1px solid #E3E6EA; margin-top: 1.4rem; padding-top: 0.7rem;
            font-size: 0.76rem; color: #6C737F; line-height: 1.55; }
 
+  .status-strip { display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap;
+                  border: 1px solid #E3E6EA; border-left-width: 4px; border-radius: 3px;
+                  padding: 0.55rem 1.1rem; background: #FCFCFD; margin: 0.3rem 0 1.1rem 0; }
+  .status-strip .item { font-family: ui-monospace, Menlo, Consolas, monospace;
+                        font-size: 0.82rem; color: #4A5058; white-space: nowrap; }
+  .status-strip .item b { color: #1A1D21; font-weight: 600; }
+  .status-strip .msg { font-size: 0.82rem; color: #4A5058; flex: 1; min-width: 200px; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+                margin-right: 0.4rem; vertical-align: middle; }
+
   section[data-testid="stSidebar"] { border-right: 1px solid #E3E6EA; }
   div[data-testid="stMetricValue"] { font-family: ui-monospace, Menlo, Consolas, monospace; }
 
@@ -158,6 +168,48 @@ def readout(eyebrow: str, value: str, unit: str = "", accent: str = "#4A5058") -
             f'<div class="eyebrow">{eyebrow}</div>'
             f'<div class="value" style="color:{accent}">{value} '
             f'<span class="unit">{unit}</span></div></div>')
+
+
+def status_strip(items: list[tuple[str, str]], msg: str, ok: bool) -> str:
+    """Franja horizontal de estado del motor: pares (etiqueta, valor) +
+    un mensaje de validación, como una sola pieza visual en vez de
+    un caption suelto seguido de una alerta separada de Streamlit."""
+    accent = "#1B7F5A" if ok else "#B03A2E"
+    items_html = "".join(
+        f'<span class="item">{label} <b>{value}</b></span>' for label, value in items)
+    return (f'<div class="status-strip" style="border-left-color:{accent}">'
+            f'{items_html}'
+            f'<span class="msg"><span class="status-dot" style="background:{accent}"></span>'
+            f'{msg}</span></div>')
+
+
+# --- carga de patrones cacheada -- sin esto, load_calibrated_patterns()
+# (y load_gene_reference_stats(), que antes re-parseaba el MISMO
+# archivo por separado) se re-ejecutan en cada rerun de Streamlit --
+# es decir, en CUALQUIER interaccion en CUALQUIER pestana de la app,
+# no solo cuando el archivo de patrones realmente cambia. La clave de
+# cache incluye mtime para "Ruta local", asi que si recalibras
+# (cli.py calibrate) y el archivo cambia en disco, la app lo detecta
+# sin necesitar limpiar el cache a mano.
+@st.cache_data(show_spinner=False)
+def _load_patterns_from_path(path: str, _mtime: float):
+    patterns, gene_order = load_calibrated_patterns(path)
+    gene_stats = load_gene_reference_stats(path)
+    return patterns, gene_order, gene_stats
+
+
+@st.cache_data(show_spinner=False)
+def _load_patterns_from_bytes(file_bytes: bytes):
+    from io import BytesIO
+    _df = pd.read_csv(BytesIO(file_bytes), sep="\t", index_col="gene")
+    gene_order = list(_df.index)
+    pattern_cols = [c for c in _df.columns if not c.startswith("_ref_")]
+    patterns = {c: _df[c].to_numpy() for c in pattern_cols}
+    gene_stats = None
+    if "_ref_mean" in _df.columns and "_ref_std" in _df.columns:
+        gene_stats = {g: (float(_df.loc[g, "_ref_mean"]), float(_df.loc[g, "_ref_std"]))
+                       for g in gene_order}
+    return patterns, gene_order, gene_stats
 
 
 # --- simulacion cacheada -- sin esto, cada interaccion con un slider
@@ -337,19 +389,12 @@ with st.sidebar:
     if mode == "Subir archivo":
         up = st.file_uploader("calibrated_patterns.tsv", type=["tsv", "txt"])
         if up is not None:
-            _df = pd.read_csv(up, sep="\t", index_col="gene")
-            gene_order = list(_df.index)
-            pattern_cols = [c for c in _df.columns if not c.startswith("_ref_")]
-            patterns = {c: _df[c].to_numpy() for c in pattern_cols}
-            if "_ref_mean" in _df.columns and "_ref_std" in _df.columns:
-                gene_stats = {g: (float(_df.loc[g, "_ref_mean"]), float(_df.loc[g, "_ref_std"]))
-                               for g in gene_order}
+            patterns, gene_order, gene_stats = _load_patterns_from_bytes(up.getvalue())
     else:
         path = st.text_input("Ruta", value=default or "results_demo/calibrated_patterns.tsv",
                               label_visibility="collapsed")
         if Path(path).exists():
-            patterns, gene_order = load_calibrated_patterns(path)
-            gene_stats = load_gene_reference_stats(path)
+            patterns, gene_order, gene_stats = _load_patterns_from_path(path, Path(path).stat().st_mtime)
         else:
             st.info("Sin patrones cargados. Genera unos con `python3 cli.py demo`, "
                     "o sube un archivo.")
@@ -430,19 +475,19 @@ if not patterns:
     )
     st.stop()
 
-st.caption(
-    "Motor dinámico activo: Modern Hopfield V2"
-    f" · β={dynamics_beta:.2f} · fuerza={max_forcing_strength:.2f}")
-
 beta_validation = cached_validate_modern_beta(patterns, dynamics_beta)
 if not beta_validation["valid"]:
     invalid = ", ".join(beta_validation["invalid_patterns"])
-    st.error(
-        f"β={dynamics_beta:.2f} no conserva los cuatro atractores CMS con "
-        f"correlación ≥0.90. No califican: {invalid}. Las trayectorias con este β "
-        "son exploratorias y no deben interpretarse como recuperación CMS estable.")
+    msg = (f"No conserva los 4 atractores CMS con correlación ≥0.90 (no califican: {invalid}). "
+           "Las trayectorias con este β son exploratorias, no una recuperación CMS estable.")
 else:
-    st.success("β validado: los cuatro centroides convergen a atractores estables.")
+    msg = "Los 4 centroides convergen a atractores estables con este β."
+
+st.markdown(status_strip(
+    [("Motor", "Modern Hopfield V2"), ("β", f"{dynamics_beta:.2f}"),
+     ("fuerza", f"{max_forcing_strength:.2f}")],
+    msg, ok=beta_validation["valid"],
+), unsafe_allow_html=True)
 
 dynamics_matrix, _labels = patterns_to_matrix(patterns)
 n_genes = len(gene_order)
@@ -453,6 +498,24 @@ tab_muestras, tab_paciente, tab_traj, tab_tx, tab_metodo = st.tabs(
 
 # ======================================================================
 # 1. MUESTRAS
+@st.cache_data(show_spinner=False)
+def _parse_cohort_upload(file_bytes: bytes) -> pd.DataFrame:
+    from io import BytesIO
+    return pd.read_csv(BytesIO(file_bytes), sep="\t")
+
+
+@st.cache_data(show_spinner=False)
+def _classify_cohort(df: pd.DataFrame, gene_order: list, patterns: dict,
+                       stats_a_usar) -> tuple:
+    """z-score + clasificacion, cacheados juntos -- sin esto, subir una
+    cohorte y despues interactuar con CUALQUIER otra parte de la app
+    (otra pestana, un slider) vuelve a correr esto desde cero, aunque
+    la tabla no haya cambiado. Devuelve (z, scored) o lanza ValueError."""
+    z = zscore_genes(df, gene_order, stats=stats_a_usar)
+    scored = score_cohort(z, gene_order, patterns)
+    return z, scored
+
+
 # ======================================================================
 with tab_muestras:
     st.markdown("Asigna subtipo CMS a cada muestra aplicando los patrones cargados. "
@@ -468,7 +531,7 @@ with tab_muestras:
             'Las columnas de genes deben coincidir con el panel cargado.</div>',
             unsafe_allow_html=True)
     else:
-        df = pd.read_csv(data_file, sep="\t")
+        df = _parse_cohort_upload(data_file.getvalue())
         missing = sorted(set(gene_order) - set(df.columns))
         if missing:
             st.error(
@@ -513,7 +576,7 @@ with tab_muestras:
                           f"de la calibración (apropiado para n={n_muestras} muestra(s)).")
 
             try:
-                z = zscore_genes(df, gene_order, stats=stats_a_usar)
+                z, scored = _classify_cohort(df, gene_order, patterns, stats_a_usar)
             except ValueError as err:
                 st.error(
                     f"No se puede normalizar la tabla: {err}\n\n"
@@ -522,8 +585,6 @@ with tab_muestras:
                     "de volver a cargarla."
                 )
                 st.stop()
-
-            scored = score_cohort(z, gene_order, patterns)
 
             with st.expander("Recuperación dinámica Modern Hopfield (experimental)"):
                 st.caption(
