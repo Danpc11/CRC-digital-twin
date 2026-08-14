@@ -26,6 +26,12 @@ results*/
 figures/*.png
 !figures/.gitkeep
 
+# --- network_analysis/: mismo criterio, binarios/salidas locales ---
+# (los datos de network_analysis/ viven en data/, ya cubierto arriba)
+network_analysis/bin/
+network_analysis/logs/
+.snakemake/
+
 # --- Sistema operativo ---
 .DS_Store
 Thumbs.db

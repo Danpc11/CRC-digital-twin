@@ -1,0 +1,95 @@
+# network_analysis (CRC) pipeline configuration.
+# Relative paths are resolved against the Snakefile's directory
+# (network_analysis/), regardless of where `snakemake` is invoked from.
+
+# Raw input matrix. Not versioned (see repo .gitignore, data/* is
+# gitignored). Path and filename confirmed directly from
+# src/build_tcga_rnaseq_dataset.py (its `--expression` default and
+# module docstring): genes as rows (index name "feature"), samples as
+# columns, already log-transformed -- matches this file exactly.
+# Placed here (2026-08-15) from a byte-identical copy Daniel left at
+# /STORAGE/genut/calixto/CRC-dt/TCGACRC_expression.tsv for hachepunto;
+# still worth a final confirmation from Daniel that this specific copy
+# matches his original (an earlier, unresolved note flagged a possible
+# sample-count discrepancy: Synapse syn2023932 = 577 raw samples vs.
+# 263 here -- could be a pre-filtered subset, not yet checked).
+raw_expression_matrix: "../data/raw_synapse/tcga_rnaseq/TCGACRC_expression-merged.tsv"
+
+# Outputs of normalize_expression.py / ARACNe3 inputs (-e, -r). -r is
+# currently the FULL gene list (all-vs-all network, not just TFs) --
+# normalize_expression.py generates it from the same rows that survive QC.
+expression_matrix: "data/processed/crc_expression_aracne3.tsv"
+regulators: "data/processed/regulators_full.txt"
+
+results_dir: "results"
+
+aracne3:
+  # Used DIRECTLY if already executable -- expected if ARACNe3 is
+  # properly installed in your environment. Point this at your own
+  # build with +x and the pipeline never copies anything.
+  binary: "/STORAGE/genut/software/ARACNe3/build/src/app/ARACNe3_app_release"
+  # Fallback: only used (and only copied once) if `binary` above is not
+  # executable in this environment.
+  binary_fallback_copy: "bin/ARACNe3_app_release"
+  threads: 70
+  adaptive: true
+  # In --adaptive mode, -x is the minimum number of UNIQUE targets per
+  # regulator (regulon occupancy), not the number of subnetworks/
+  # bootstraps as in ARACNe-AP -- same flag name, different meaning.
+  # With -r = all genes, raising this can substantially increase runtime.
+  x_target_per_regulator: 30
+  runid: "crc_net"
+  seed: 9001
+  # If false, deletes outdir/subnets/ and outdir/subnets_log/ after the
+  # run (ARACNe3 always writes them during generation; there's no flag
+  # to skip that, only to clean up afterward).
+  keep_subnets: false
+
+# Community detection (Infomap + Leiden) on the consolidated network.
+community_detection:
+  # count.values >= this value (number of ARACNe3 subnetworks, out of
+  # 25, supporting the edge). min_count=2 produced a giant module in
+  # both algorithms; 3 fixes it, at the cost of dropping TGFB1 (no
+  # edges reproducible in >=3 subnetworks).
+  min_count: 3
+  # 'mi' (mutual information) or 'count' (number of supporting
+  # subnetworks) as edge weight.
+  weight: mi
+  infomap:
+    # -1 = finest level of Infomap's multi-level hierarchy (default).
+    # Infomap gives a hierarchy, not a single flat partition like
+    # Leiden -- comparing the wrong level against Leiden's partition
+    # gives a false total-disagreement reading.
+    depth: -1
+    # Infomap is a stochastic local search; 10 independent trials, keep
+    # the one with the lowest codelength.
+    num_trials: 10
+    # Infomap's default (1.0). First knob to raise if a giant module
+    # reappears.
+    markov_time: 1.0
+    seed: 9001
+  leiden:
+    # 'modularity', NOT igraph's 'CPM' default -- with CPM,
+    # resolution=1.0 demands near-clique modules (see run_leiden.py
+    # docstring).
+    objective: modularity
+    # Raised from 1.0 (default) to 80 after a sweep, to match Infomap's
+    # finest level (~1,750 modules) for a fair Adjusted Rand Index
+    # comparison (0.4175 at resolution=80).
+    resolution: 80
+    # -1 = iterate until stable (igraph's default of 2 may not have
+    # converged).
+    n_iterations: -1
+    seed: 9001
+
+# Panel-gene neighborhoods (Infomap/Leiden consensus or union, see
+# panel_neighborhoods.py) + ORA (GO/KEGG/Reactome/Hallmark, see
+# ora_panel_neighborhoods.R) + static publication Sankey figure (see
+# generate_ora_sankey.py).
+ora:
+  # count.values threshold for the direct-neighbor fallback used by
+  # panel genes absent from the min-count-filtered community network
+  # (currently only TGFB1). Distinct from community_detection.min_count.
+  fallback_min_count: 2
+  # Raster resolution for the static Sankey figure's PNG export.
+  png_dpi: 300

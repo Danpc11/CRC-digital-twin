@@ -1,0 +1,317 @@
+"""
+network_analysis (CRC) pipeline: normalizes the expression matrix and
+runs ARACNe3 to build an all-vs-all gene regulatory network, runs
+community detection (Infomap + Leiden) on the result, defines a final
+network neighborhood for each of the 10 dt panel genes, runs ORA
+(GO/KEGG/Reactome/Hallmark) on those neighborhoods, and renders the
+static publication Sankey figure summarizing the ORA results.
+
+    snakemake --cores 70
+"""
+
+import os
+from pathlib import Path
+
+configfile: "config.yaml"
+
+PROJECT_DIR = Path(workflow.basedir).resolve()
+
+RAW_MATRIX = PROJECT_DIR / config["raw_expression_matrix"]
+NORM_MATRIX = PROJECT_DIR / config["expression_matrix"]
+REGULATORS = PROJECT_DIR / config["regulators"]
+RESULTS_DIR = PROJECT_DIR / config["results_dir"]
+LOG_DIR = PROJECT_DIR / "logs"
+
+ARACNE = config["aracne3"]
+RUNID = ARACNE["runid"]
+OUTDIR = RESULTS_DIR / RUNID
+
+# Uses the configured binary directly if it's already executable
+# (expected in a correctly installed environment). Only if it is NOT
+# executable does the `prepare_aracne3_binary` fallback rule activate,
+# copying it once to `binary_fallback_copy` (which we do control) and
+# chmod +x there. In a properly installed environment that rule never
+# enters the DAG and nothing gets copied.
+ARACNE_BINARY_CONFIGURED = Path(ARACNE["binary"])
+NEED_BINARY_FALLBACK = not os.access(ARACNE_BINARY_CONFIGURED, os.X_OK)
+if NEED_BINARY_FALLBACK:
+    BINARY = PROJECT_DIR / ARACNE["binary_fallback_copy"]
+else:
+    BINARY = ARACNE_BINARY_CONFIGURED
+CONSOLIDATED = OUTDIR / f"consolidated-net_{RUNID}.tsv"
+ARACNE_LOG = OUTDIR / f"log_{RUNID}.txt"
+
+CD = config["community_detection"]
+MIN_COUNT = CD["min_count"]
+INFOMAP_CFG = CD["infomap"]
+LEIDEN_CFG = CD["leiden"]
+
+COMM_NET = OUTDIR / f"{RUNID}_mincount{MIN_COUNT}.net"
+INFOMAP_MODULES = OUTDIR / f"{RUNID}_infomap_modules_mc{MIN_COUNT}.tsv"
+LEIDEN_MODULES = OUTDIR / f"{RUNID}_leiden_modules_mc{MIN_COUNT}_res{LEIDEN_CFG['resolution']}.tsv"
+
+ORA_CFG = config["ora"]
+
+NEIGH_SUMMARY = OUTDIR / "panel_neighborhoods_consensus.tsv"
+NEIGH_GENESETS_DIR = OUTDIR / "neighborhoods"
+NEIGH_FINAL_SUMMARY = OUTDIR / "panel_neighborhoods_final.tsv"
+NEIGH_FINAL_DIR = OUTDIR / "neighborhoods_final"
+
+ORA_DIR = OUTDIR / "ora"
+ORA_SUMMARY = ORA_DIR / "ora_summary.tsv"
+
+SANKEY_SVG = ORA_DIR / "ora_sankey_static_dark.svg"
+SANKEY_PNG = ORA_DIR / "ora_sankey_static_dark.png"
+
+
+rule all:
+    input:
+        str(CONSOLIDATED),
+        str(INFOMAP_MODULES),
+        str(LEIDEN_MODULES),
+        str(NEIGH_FINAL_SUMMARY),
+        str(ORA_SUMMARY),
+        str(SANKEY_SVG),
+        str(SANKEY_PNG),
+
+
+rule normalize_expression:
+    """QC + formatting in one step (see scripts/normalize_expression.py
+    -- the input is already log2(RSEM normalized_count+1), so no
+    CPM/TPM/log2 is re-applied)."""
+    input:
+        str(RAW_MATRIX),
+    output:
+        matrix=str(NORM_MATRIX),
+        regulators=str(REGULATORS),
+    log:
+        str(LOG_DIR / "normalize_expression.log"),
+    shell:
+        "python3 {PROJECT_DIR}/scripts/normalize_expression.py "
+        "--input {input} "
+        "--output-matrix {output.matrix} "
+        "--output-regulators {output.regulators} "
+        "> {log} 2>&1"
+
+
+if NEED_BINARY_FALLBACK:
+
+    rule prepare_aracne3_binary:
+        """Fallback: only included in the DAG when aracne3.binary
+        (config.yaml) is not executable in this environment. Copies it
+        once to bin/ (which we control) and chmods +x there; the
+        original is never touched. If ARACNe3 is rebuilt upstream,
+        delete bin/ARACNe3_app_release to force a fresh copy.
+
+        In an environment where ARACNe3 is already installed with
+        execute permission, this rule doesn't exist in the DAG and
+        `aracne3` uses aracne3.binary directly -- nothing gets copied."""
+        output:
+            str(BINARY),
+        params:
+            src=str(ARACNE_BINARY_CONFIGURED),
+        shell:
+            "mkdir -p $(dirname {output}) && "
+            "cp {params.src} {output} && "
+            "chmod +x {output}"
+
+
+rule aracne3:
+    """Runs ARACNe3 in adaptive mode with ALL genes as regulators
+    (all-vs-all network). Without --consolidate/--noConsolidate (the
+    default), ARACNe3 generates subnetworks AND writes the consolidated
+    network in one command -- --consolidate means "reuse subnetworks
+    that already exist on disk", not "skip intermediates". Intermediate
+    files are written inevitably during generation; they're deleted
+    afterward unless keep_subnets=true in the config."""
+    input:
+        matrix=str(NORM_MATRIX),
+        regulators=str(REGULATORS),
+        binary=str(BINARY),
+    output:
+        consolidated=str(CONSOLIDATED),
+        log=str(ARACNE_LOG),
+    params:
+        outdir=str(OUTDIR),
+        results_dir=str(RESULTS_DIR),
+        x=ARACNE["x_target_per_regulator"],
+        runid=RUNID,
+        seed=ARACNE["seed"],
+        keep_subnets=ARACNE["keep_subnets"],
+    threads: ARACNE["threads"]
+    log:
+        str(LOG_DIR / f"aracne3_{RUNID}.log"),
+    shell:
+        # outdir/.ARACNe3_cached/ (MI null-model cache) is created
+        # relative to the process's cwd, not inside -o -- hence the cd
+        # into results_dir, so the cache lands next to the results
+        # instead of the project root.
+        """
+        mkdir -p {params.outdir} {params.results_dir}
+        cd {params.results_dir} && \
+        {input.binary} \
+          -e {input.matrix} \
+          -r {input.regulators} \
+          -o {params.outdir} \
+          --adaptive \
+          -x {params.x} \
+          --threads {threads} \
+          --runid {params.runid} \
+          --seed {params.seed} \
+          > {log} 2>&1
+        if [ "{params.keep_subnets}" != "True" ]; then
+          rm -rf {params.outdir}/subnets {params.outdir}/subnets_log
+        fi
+        """
+
+
+rule infomap_modules:
+    """Exports the consolidated network to Pajek and runs Infomap
+    (Python API) to assign each gene to a module. Parameters are fixed
+    in config.yaml/community_detection."""
+    input:
+        str(CONSOLIDATED),
+    output:
+        net=str(COMM_NET),
+        modules=str(INFOMAP_MODULES),
+    params:
+        min_count=MIN_COUNT,
+        weight=CD["weight"],
+        depth=INFOMAP_CFG["depth"],
+        num_trials=INFOMAP_CFG["num_trials"],
+        markov_time=INFOMAP_CFG["markov_time"],
+        seed=INFOMAP_CFG["seed"],
+    log:
+        str(LOG_DIR / f"infomap_{RUNID}.log"),
+    shell:
+        "python3 {PROJECT_DIR}/scripts/format_for_infomap.py "
+        "--input {input} "
+        "--output-net {output.net} "
+        "--weight {params.weight} "
+        "--min-count {params.min_count} "
+        "--run-infomap "
+        "--output-modules {output.modules} "
+        "--depth {params.depth} "
+        "--num-trials {params.num_trials} "
+        "--markov-time {params.markov_time} "
+        "--seed {params.seed} "
+        "> {log} 2>&1"
+
+
+rule leiden_modules:
+    """Runs Leiden (igraph/leidenalg) on the SAME consolidated network,
+    with the same min-count/weight as infomap_modules, so both
+    algorithms receive an identical network for comparison."""
+    input:
+        str(CONSOLIDATED),
+    output:
+        str(LEIDEN_MODULES),
+    params:
+        min_count=MIN_COUNT,
+        weight=CD["weight"],
+        objective=LEIDEN_CFG["objective"],
+        resolution=LEIDEN_CFG["resolution"],
+        n_iterations=LEIDEN_CFG["n_iterations"],
+        seed=LEIDEN_CFG["seed"],
+    log:
+        str(LOG_DIR / f"leiden_{RUNID}.log"),
+    shell:
+        "python3 {PROJECT_DIR}/scripts/run_leiden.py "
+        "--input {input} "
+        "--output-modules {output} "
+        "--weight {params.weight} "
+        "--min-count {params.min_count} "
+        "--objective {params.objective} "
+        "--resolution {params.resolution} "
+        "--n-iterations {params.n_iterations} "
+        "--seed {params.seed} "
+        "> {log} 2>&1"
+
+
+rule panel_neighborhoods:
+    """Final network neighborhood for each of the 10 dt panel genes:
+    Infomap-cap-Leiden consensus where the two algorithms agree enough
+    for a non-trivial intersection, their union otherwise (flagged lower
+    confidence). TGFB1 has no edges surviving min-count filtering, so it
+    falls back to direct count.values>=ora.fallback_min_count neighbors
+    in the unfiltered consolidated network -- a different, weaker kind
+    of evidence than the module-based neighborhoods of the other nine
+    genes. See scripts/panel_neighborhoods.py docstring for the full
+    per-gene rationale."""
+    input:
+        infomap=str(INFOMAP_MODULES),
+        leiden=str(LEIDEN_MODULES),
+        consolidated=str(CONSOLIDATED),
+    output:
+        summary=str(NEIGH_SUMMARY),
+        genesets=directory(str(NEIGH_GENESETS_DIR)),
+        final_summary=str(NEIGH_FINAL_SUMMARY),
+        final_dir=directory(str(NEIGH_FINAL_DIR)),
+    params:
+        fallback_min_count=ORA_CFG["fallback_min_count"],
+    log:
+        str(LOG_DIR / f"panel_neighborhoods_{RUNID}.log"),
+    shell:
+        "python3 {PROJECT_DIR}/scripts/panel_neighborhoods.py "
+        "--infomap-modules {input.infomap} "
+        "--leiden-modules {input.leiden} "
+        "--consolidated {input.consolidated} "
+        "--out-summary {output.summary} "
+        "--out-genesets-dir {output.genesets} "
+        "--out-final-summary {output.final_summary} "
+        "--out-final-dir {output.final_dir} "
+        "--fallback-min-count {params.fallback_min_count} "
+        "> {log} 2>&1"
+
+
+rule ora_panel_neighborhoods:
+    """ORA (hypergeometric test, BH) on each panel gene's final
+    neighborhood against GO BP, GO MF, KEGG, Reactome, and MSigDB
+    Hallmarks, using the full 20,260-gene candidate set (REGULATORS) as
+    background -- not the min-count-filtered community network, which is
+    already a non-neutral, connectivity-biased subset. Requires R with
+    clusterProfiler/org.Hs.eg.db/ReactomePA/msigdbr (see
+    scripts/ora_panel_neighborhoods.R)."""
+    input:
+        neighborhoods_dir=str(NEIGH_FINAL_DIR),
+        universe=str(REGULATORS),
+    output:
+        summary=str(ORA_SUMMARY),
+    params:
+        out_dir=str(ORA_DIR),
+    log:
+        str(LOG_DIR / f"ora_panel_neighborhoods_{RUNID}.log"),
+    shell:
+        "Rscript {PROJECT_DIR}/scripts/ora_panel_neighborhoods.R "
+        "--neighborhoods-dir {input.neighborhoods_dir} "
+        "--universe {input.universe} "
+        "--out-dir {params.out_dir} "
+        "> {log} 2>&1"
+
+
+rule ora_sankey_figure:
+    """Static, non-interactive publication figure: confidence tier ->
+    panel gene (CMS-axis color) -> significant ORA pathway, fixed
+    dark/black theme, no title/caption (figure only + color legend),
+    sized to an exact 11in print width with the 2-3 longest route labels
+    wrapped to a second line rather than shrinking every label to fit
+    the longest one. SVG + a Chrome-headless-rasterized PNG (ora.png_dpi
+    in config.yaml). See scripts/generate_ora_sankey.py docstring."""
+    input:
+        ora_summary=str(ORA_SUMMARY),
+        neighborhoods_final=str(NEIGH_FINAL_SUMMARY),
+    output:
+        svg=str(SANKEY_SVG),
+        png=str(SANKEY_PNG),
+    params:
+        dpi=ORA_CFG["png_dpi"],
+    log:
+        str(LOG_DIR / f"ora_sankey_figure_{RUNID}.log"),
+    shell:
+        "python3 {PROJECT_DIR}/scripts/generate_ora_sankey.py "
+        "--ora-summary {input.ora_summary} "
+        "--neighborhoods-final {input.neighborhoods_final} "
+        "--out-svg {output.svg} "
+        "--out-png {output.png} "
+        "--dpi {params.dpi} "
+        "> {log} 2>&1"
