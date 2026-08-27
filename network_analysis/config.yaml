@@ -64,9 +64,21 @@ community_detection:
     # Infomap is a stochastic local search; 10 independent trials, keep
     # the one with the lowest codelength.
     num_trials: 10
-    # Infomap's default (1.0). First knob to raise if a giant module
-    # reappears.
-    markov_time: 1.0
+    # Set to 0.8 (2026-08-21) after a full-trial sweep on the 577-sample
+    # network, where the default (1.0) produced a giant module again
+    # (7,601/20,278 genes, 37.5%). CORRECTION to an earlier note here:
+    # *raising* markov_time makes modules FEWER/LARGER, not more --
+    # confirmed empirically (1.0 -> giant; 0.9 -> total collapse to 1
+    # module; going down from 1.0 is what breaks the giant module up).
+    # The landscape on this network is NOT a smooth gradient: quick
+    # low-trial sweeps looked reasonable across a wide middle range, but
+    # full 10-trial optimization revealed most of that range collapses
+    # into 60-90% singleton modules instead (e.g. 0.2-0.7 all did this).
+    # 0.8 was the one value found with neither pathology: no dominant
+    # module (largest = 0.6% of the network) and the lowest singleton
+    # rate (14.7%) of any non-degenerate point tested. Re-validate this
+    # value (don't assume it transfers) if the network changes again.
+    markov_time: 0.8
     seed: 9001
   leiden:
     # 'modularity', NOT igraph's 'CPM' default -- with CPM,

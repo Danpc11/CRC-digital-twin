@@ -21,34 +21,41 @@ at the cost of a smaller (possibly very small) gene set.
 Also reports each algorithm's module alone and the union, so the
 trade-off is visible rather than hidden behind the consensus number.
 
-TGFB1 has zero edges surviving min-count>=3 (see CLAUDE.md) and is
-therefore absent from both module files -- no community-based
-neighborhood can be defined for it from this network. Flagged
-separately, not silently dropped.
+Any panel gene with zero edges surviving min-count>=3 is absent from
+both module files -- no community-based neighborhood can be defined for
+it from this network (happened for TGFB1 on the 263-sample network; not
+guaranteed to stay that way on a different network, so this is checked
+per gene at runtime, not assumed). Flagged separately, not silently
+dropped.
 
-Final per-gene resolution (decided after inspecting the consensus
-numbers below -- see CLAUDE.md "Proximos pasos" and
-results/crc_net/panel_neighborhoods_final.tsv for the write-up):
+Per-gene resolution rule (general, computed fresh from each run's own
+Jaccard values -- NOT a hardcoded per-gene list. An earlier version of
+this script hardcoded which genes counted as "consensus" vs. "union"
+based on one specific run's numbers; that broke the instant the network
+changed -- TGFB1 moved from "absent" to "present" on a rerun and had
+nowhere to go, ValueError):
 
-- MLH1, MYC, SI, VIM, FABP1 (Jaccard 0.10-1.00, consensus n=1-9):
-  consensus (Infomap cap Leiden module members, mc3). Both algorithms
-  agree enough that the intersection is a meaningful, non-empty core.
-- GNLY, USP18, AXIN2, CPS1 (Jaccard 0.00-0.13): consensus is empty
-  (CPS1) or too small (n=1-3) for ORA to have any power. Fall back to
-  the UNION of the two mc3 modules instead -- larger, noisier, and
-  explicitly flagged as lower-confidence exploratory input for ORA.
-- TGFB1: absent from the mc3 network entirely. Re-running Infomap/
-  Leiden on the min-count>=2 network (crc_net_infomap_modules.tsv /
-  crc_net_leiden_modules.tsv, already computed) does NOT help -- TGFB1
-  falls into the known giant/near-giant module at that threshold
-  (Infomap module of 11,382 genes = 56% of the network; Leiden module
-  of 2,578 genes), which is uninformative as a "neighborhood" for
-  enrichment. Instead, TGFB1 uses its 7 DIRECT edges with
-  count.values>=2 in the consolidated network (not a community
-  assignment -- local adjacency only), collapsed to undirected. This
-  is a different, weaker kind of evidence than the module-based
-  neighborhoods used for the other 9 genes and should be reported as
-  such.
+- If a gene's Infomap/Leiden consensus (intersection) is non-empty AND
+  its Jaccard index (consensus / union) is >= JACCARD_THRESHOLD, use
+  the consensus: both algorithms agree enough that the intersection is
+  a meaningful, non-empty core. Confidence: high.
+- Otherwise (consensus empty, or Jaccard below threshold -- the overlap
+  is small enough to plausibly be incidental rather than real
+  agreement), fall back to the UNION of the two mc3 modules instead --
+  larger, noisier, explicitly flagged as lower-confidence exploratory
+  input for ORA.
+- Any gene absent from the mc3 network entirely (no edges survived the
+  count.values reproducibility filter) has no module-based neighborhood
+  to fall back to at all. Instead it uses its DIRECT edges at a relaxed
+  count.values>=fallback_min_count threshold in the unfiltered
+  consolidated network (local adjacency, not a community assignment) --
+  a different, weaker kind of evidence than the module-based
+  neighborhoods used for the rest of the panel, reported as such.
+
+JACCARD_THRESHOLD=0.2 was picked by inspecting the 263-sample run's own
+values: MLH1/MYC/SI/VIM (0.35-1.00) clearly agreed, GNLY/USP18/AXIN2/CPS1
+(0.05-0.19) clearly didn't -- 0.2 falls cleanly in the gap. Revisit if a
+future network's Jaccard distribution doesn't have as clean a gap.
 """
 
 import argparse
@@ -60,12 +67,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 from network_utils import PANEL_GENES  # noqa: E402
 
-# Genes where the mc3 Infomap/Leiden consensus (intersection) is non-empty
-# and large enough to be worth using as-is.
-USE_CONSENSUS = {"MLH1", "MYC", "SI", "VIM", "FABP1"}
-# Genes where consensus is empty/too small (n<=3) -- use the union instead,
-# flagged as lower-confidence.
-USE_UNION = {"GNLY", "USP18", "AXIN2", "CPS1"}
+# Minimum Jaccard(Infomap module, Leiden module) to trust the consensus
+# (intersection) as real agreement rather than incidental overlap -- see
+# module docstring for how this was picked.
+JACCARD_THRESHOLD = 0.2
 
 
 def parse_args():
@@ -135,20 +140,19 @@ def main():
                 "consensus_genes": "",
             })
             print(f"{gene}: ABSENT from min-count-3 network (no edges "
-                  f"survived reproducibility filter) -- no module-based "
-                  f"neighborhood defined. See TGFB1 handling note.")
+                  f"survived reproducibility filter) -- falling back to "
+                  f"direct neighbors.")
 
-            if gene == "TGFB1":
-                direct = direct_neighbors(args.consolidated, gene, args.fallback_min_count)
-                out = args.out_final_dir / f"{gene}.txt"
-                out.write_text("\n".join(sorted(direct)) + "\n")
-                final_rows.append({
-                    "gene": gene, "method": f"direct_neighbors_mincount{args.fallback_min_count}",
-                    "n": len(direct), "confidence": "low (not module-based)",
-                    "genes": ",".join(sorted(direct)),
-                })
-                print(f"  -> fallback: {len(direct)} direct neighbors "
-                      f"(count.values>={args.fallback_min_count}): {sorted(direct)}")
+            direct = direct_neighbors(args.consolidated, gene, args.fallback_min_count)
+            out = args.out_final_dir / f"{gene}.txt"
+            out.write_text("\n".join(sorted(direct)) + "\n")
+            final_rows.append({
+                "gene": gene, "method": f"direct_neighbors_mincount{args.fallback_min_count}",
+                "n": len(direct), "confidence": "low (not module-based)",
+                "genes": ",".join(sorted(direct)),
+            })
+            print(f"  -> fallback: {len(direct)} direct neighbors "
+                  f"(count.values>={args.fallback_min_count}): {sorted(direct)}")
             continue
 
         consensus = im_members & le_members
@@ -178,12 +182,10 @@ def main():
               f"consensus n={len(consensus)}, union n={len(union)}, "
               f"jaccard={jaccard:.3f}")
 
-        if gene in USE_CONSENSUS:
+        if consensus and jaccard >= JACCARD_THRESHOLD:
             method, chosen, confidence = "consensus", consensus, "high"
-        elif gene in USE_UNION:
-            method, chosen, confidence = "union", union, "low (consensus too small/empty)"
         else:
-            raise ValueError(f"{gene} not assigned to USE_CONSENSUS or USE_UNION")
+            method, chosen, confidence = "union", union, "low (consensus too small/empty)"
 
         out = args.out_final_dir / f"{gene}.txt"
         out.write_text("\n".join(sorted(chosen)) + ("\n" if chosen else ""))
