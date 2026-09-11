@@ -41,6 +41,28 @@ DOS MODOS DE ANCLAJE (VERIFICADOS AMBOS, CON RIGOR DISTINTO)
      cual NO siempre es cierto. Usar con cautela, con el R2 del ajuste
      como senal de que tan bien esta funcionando.
 
+ESCALAS -- LEER ANTES DE TOCAR ESTE MODULO (bug corregido 2026-09-11)
+-----------------------------------------------------------------------
+Hay DOS escalas numericas en juego y no son intercambiables:
+
+  * escala CRUDA de referencia: expresion log2 de microarreglos, donde
+    viven _ref_mean/_ref_std (calibrated_patterns.tsv). Es la escala que
+    espera zscore_genes(..., stats=frozen_stats).
+  * escala Z: z-score contra esa referencia. Los CENTROIDES calibrados
+    (patterns) estan en escala Z, no en escala cruda.
+
+El modo "por_centroide" usa los centroides como objetivo, asi que sin
+mas produce valores en escala Z. Si despues se les aplica
+zscore_genes(stats=frozen) se normaliza DOS VECES con estadisticas de
+escalas distintas y la clasificacion sale sin sentido (verificado: un
+paciente CMS1 sintetico salia CMS2). Por eso
+fit_qpcr_bridge_from_known_cms acepta gene_stats y, cuando se le pasan,
+convierte los objetivos a escala cruda (z*std+mean) para que la
+posterior normalizacion congelada sea correcta. Si NO se pasan
+gene_stats, el resultado esta en escala Z y NO debe volverse a
+normalizar -- ver apply_qpcr_bridge(..., expected_scale) y
+classify_delta_ct(), que resuelve la escala automaticamente.
+
 NO VERIFICADO TODAVIA CON DATOS REALES DE RT-qPCR -- este modulo se
 construyo y probo con datos simulados. Antes de confiar en el en una
 demo con pacientes reales, correr el protocolo de la seccion "USO"
@@ -48,14 +70,15 @@ sobre muestras de referencia con CMS ya conocido y confirmar que la
 clasificacion resultante es la esperada.
 
 USO
-    from qpcr_bridge import compute_delta_ct, fit_qpcr_bridge, apply_qpcr_bridge
+    from qpcr_bridge import compute_delta_ct, fit_qpcr_bridge_from_known_cms, classify_delta_ct
 
     delta_ct_ancla = {gen: [...] for gen in genes}  # Delta-Ct de N muestras ancla
     cms_ancla = ["CMS1_MSI_immune", "CMS3_metabolic", ...]  # CMS conocido de cada ancla
+    frozen = load_gene_reference_stats("calibrated_patterns.tsv")
 
-    bridge = fit_qpcr_bridge(delta_ct_ancla, cms_ancla, patterns, gene_order, modo="por_centroide")
-    valor_calibrado = apply_qpcr_bridge(delta_ct_paciente_nuevo, bridge, gene_order)
-    # valor_calibrado ya esta en la escala que espera zscore_genes(..., stats=frozen_stats)
+    bridge = fit_qpcr_bridge_from_known_cms(
+        delta_ct_ancla, cms_ancla, patterns, gene_order, gene_stats=frozen)
+    cms, corrs, z = classify_delta_ct(delta_ct_paciente, bridge, gene_order, patterns, frozen)
 """
 
 import numpy as np
@@ -122,6 +145,7 @@ def fit_qpcr_bridge(
 def fit_qpcr_bridge_from_known_cms(
     delta_ct_anchors: dict[str, list[float]], anchor_cms_labels: list[str],
     patterns: dict[str, np.ndarray], gene_order: list[str], min_r2: float = 0.5,
+    gene_stats: dict[str, tuple[float, float]] | None = None,
 ) -> dict:
     """
     Modo "por_centroide": arma los objetivos de anclaje a partir del
@@ -129,21 +153,53 @@ def fit_qpcr_bridge_from_known_cms(
     ancla, en vez de un valor pareado real -- mas debil (asume que la
     muestra ancla se parece a su clase "tipica"), pero es lo unico
     disponible sin remedicion pareada.
+
+    gene_stats: {gen: (ref_mean, ref_std)} de la calibracion. Si se
+    pasan, los objetivos se llevan a escala CRUDA (z*std+mean) y el
+    puente resultante produce valores listos para
+    zscore_genes(..., stats=gene_stats). Si NO se pasan, los objetivos
+    quedan en escala Z y el resultado NO debe volverse a normalizar.
+    El puente guarda en "_meta" en que escala esta para que
+    apply_qpcr_bridge pueda avisar si se usa mal.
     """
     anchor_targets = {gene: [] for gene in gene_order}
     for label in anchor_cms_labels:
         if label not in patterns:
             raise ValueError(f"CMS '{label}' no esta en los patrones calibrados: {list(patterns)}")
         for i, gene in enumerate(gene_order):
-            anchor_targets[gene].append(float(patterns[label][i]))
+            z_target = float(patterns[label][i])
+            if gene_stats is not None:
+                if gene not in gene_stats:
+                    raise ValueError(f"gene_stats no tiene referencia para '{gene}'")
+                mu, sigma = gene_stats[gene]
+                if sigma == 0 or np.isnan(sigma):
+                    raise ValueError(f"sigma de referencia invalido para '{gene}'")
+                anchor_targets[gene].append(z_target * sigma + mu)
+            else:
+                anchor_targets[gene].append(z_target)
 
     delta_ct_subset = {gene: delta_ct_anchors[gene] for gene in gene_order}
-    return fit_qpcr_bridge(delta_ct_subset, anchor_targets, min_r2=min_r2)
+    bridge = fit_qpcr_bridge(delta_ct_subset, anchor_targets, min_r2=min_r2)
+    bridge["_meta"] = {"output_scale": "raw" if gene_stats is not None else "z"}
+    return bridge
 
 
-def apply_qpcr_bridge(delta_ct_patient: dict, bridge: dict, gene_order: list[str]) -> np.ndarray:
-    """Aplica la transformacion ajustada a un paciente nuevo -- devuelve
-    el vector ya en la escala que espera zscore_genes(..., stats=frozen_stats)."""
+def apply_qpcr_bridge(
+    delta_ct_patient: dict, bridge: dict, gene_order: list[str],
+    expected_scale: str | None = None,
+) -> np.ndarray:
+    """Aplica la transformacion ajustada a un paciente nuevo.
+
+    expected_scale: "raw" o "z". Si se indica y no coincide con la escala
+    en la que se ajusto el puente (bridge["_meta"]["output_scale"]),
+    lanza ValueError -- es la proteccion contra la doble normalizacion.
+    """
+    meta_scale = bridge.get("_meta", {}).get("output_scale")
+    if expected_scale is not None and meta_scale is not None and expected_scale != meta_scale:
+        raise ValueError(
+            f"El puente produce valores en escala '{meta_scale}' pero se esperaba "
+            f"'{expected_scale}'. Si vas a aplicar zscore_genes(stats=frozen) despues, "
+            "ajusta el puente con gene_stats; si no, no vuelvas a normalizar.")
     valores = []
     for gene in gene_order:
         ajuste = bridge.get(gene)
@@ -151,3 +207,30 @@ def apply_qpcr_bridge(delta_ct_patient: dict, bridge: dict, gene_order: list[str
             raise ValueError(f"No hay ajuste valido para '{gene}' -- revisar anclas de ese gen.")
         valores.append(ajuste["a"] * delta_ct_patient[gene] + ajuste["b"])
     return np.array(valores)
+
+
+def classify_delta_ct(
+    delta_ct_patient: dict, bridge: dict, gene_order: list[str],
+    patterns: dict[str, np.ndarray],
+    gene_stats: dict[str, tuple[float, float]] | None = None,
+) -> tuple[str, dict[str, float], np.ndarray]:
+    """Camino unico y seguro: Delta-Ct -> escala del modelo -> z -> CMS.
+
+    Resuelve la escala segun como se ajusto el puente, de modo que la
+    normalizacion congelada se aplica exactamente UNA vez (o ninguna).
+    Devuelve (cms_predicho, correlaciones, vector_z).
+    """
+    scale = bridge.get("_meta", {}).get("output_scale", "z")
+    valores = apply_qpcr_bridge(delta_ct_patient, bridge, gene_order)
+    if scale == "raw":
+        if gene_stats is None:
+            raise ValueError("El puente esta en escala cruda: hacen falta gene_stats para el z-score.")
+        z = np.array([(valores[i] - gene_stats[g][0]) / gene_stats[g][1]
+                      for i, g in enumerate(gene_order)])
+    else:
+        z = valores
+    if np.linalg.norm(z) < 1e-8 or np.std(z) < 1e-12:
+        return "none", {k: float("nan") for k in patterns}, z
+    corrs = {label: float(np.corrcoef(z, np.asarray(c, dtype=float))[0, 1])
+             for label, c in patterns.items()}
+    return max(corrs, key=corrs.get), corrs, z
