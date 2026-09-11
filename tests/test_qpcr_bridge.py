@@ -140,3 +140,119 @@ def test_apply_bridge_raises_clear_error_for_missing_gene_fit():
     bridge = {"MYC": {"a": 1.0, "b": 0.0, "r2": 0.9, "n_anclas": 5}}
     with pytest.raises(ValueError, match="AXIN2"):
         apply_qpcr_bridge({"MYC": 10.0, "AXIN2": 5.0}, bridge, ["MYC", "AXIN2"])
+
+
+# ----------------------------------------------------------------------
+# Regresion del bug de doble normalizacion (2026-09-11)
+# ----------------------------------------------------------------------
+
+def _cohorte_sintetica_calibrada():
+    """Cohorte sintetica en escala 'cruda' (medias por gen lejos de 0,
+    como microarreglo), patrones calibrados y estadisticas congeladas."""
+    from calibration import calibrate_patterns_from_data, compute_gene_stats
+    import pandas as pd
+
+    rng = np.random.default_rng(7)
+    genes = ["G1", "G2", "G3", "G4", "G5", "G6"]
+    ref_mean = np.array([8.0, 6.5, 10.2, 5.1, 9.4, 7.7])  # escala log2 tipica
+    ref_sd = np.array([0.8, 1.1, 0.6, 1.3, 0.9, 0.7])
+    centroids_z = {
+        "CMS1_MSI_immune":    np.array([ 1.2,  1.0, -0.4, -0.5, -0.6, -0.5]),
+        "CMS2_canonical_WNT": np.array([-0.5, -0.4,  1.1,  1.0, -0.5, -0.4]),
+        "CMS3_metabolic":     np.array([-0.4, -0.5, -0.5,  1.0,  1.1, -0.6]),
+        "CMS4_mesenchymal":   np.array([-0.5, -0.5, -0.4, -0.5,  0.9,  1.2]),
+    }
+    rows = []
+    for label, cz in centroids_z.items():
+        for i in range(60):
+            z = cz + rng.normal(0, 0.6, len(genes))
+            raw = ref_mean + ref_sd * z
+            rows.append({"sample_id": f"{label}_{i}", "cms_label": label,
+                         **dict(zip(genes, raw))})
+    df = pd.DataFrame(rows)
+    patterns, genes = calibrate_patterns_from_data(df, genes)
+    stats = compute_gene_stats(df, genes)
+    return df, genes, patterns, stats
+
+
+def test_bridge_with_gene_stats_then_frozen_zscore_classifies_correctly():
+    """Flujo REAL de la app: puente ajustado con gene_stats -> apply ->
+    zscore congelado -> correlacion. Antes del fix, el puente devolvia
+    escala z y el zscore congelado se aplicaba encima (doble
+    normalizacion): un CMS1 claro salia CMS2."""
+    from calibration import zscore_genes
+    import pandas as pd
+
+    df, genes, patterns, stats = _cohorte_sintetica_calibrada()
+    # Delta-Ct simulado = transformacion lineal desconocida de la escala cruda
+    a_real, b_real = 0.9, -4.0
+    anclas = df.groupby("cms_label").head(6)
+    dct_anclas = {g: (a_real * anclas[g] + b_real).tolist() for g in genes}
+    bridge = fit_qpcr_bridge_from_known_cms(
+        dct_anclas, anclas["cms_label"].tolist(), patterns, genes, gene_stats=stats)
+    assert bridge["_meta"]["output_scale"] == "raw"
+
+    aciertos = 0
+    pacientes = df.groupby("cms_label").tail(10)
+    for _, pt in pacientes.iterrows():
+        dct = {g: a_real * pt[g] + b_real for g in genes}
+        crudo = apply_qpcr_bridge(dct, bridge, genes, expected_scale="raw")
+        z = zscore_genes(pd.DataFrame([dict(zip(genes, crudo))]), genes, stats=stats).iloc[0].to_numpy()
+        corrs = {k: np.corrcoef(z, v)[0, 1] for k, v in patterns.items()}
+        aciertos += max(corrs, key=corrs.get) == pt["cms_label"]
+    assert aciertos / len(pacientes) >= 0.8
+
+
+def test_classify_delta_ct_matches_manual_path():
+    from calibration import zscore_genes
+    from qpcr_bridge import classify_delta_ct
+    import pandas as pd
+
+    df, genes, patterns, stats = _cohorte_sintetica_calibrada()
+    anclas = df.groupby("cms_label").head(6)
+    dct_anclas = {g: anclas[g].tolist() for g in genes}
+    bridge = fit_qpcr_bridge_from_known_cms(
+        dct_anclas, anclas["cms_label"].tolist(), patterns, genes, gene_stats=stats)
+    pt = df.iloc[0]
+    dct = {g: float(pt[g]) for g in genes}
+    label, corrs, z = classify_delta_ct(dct, bridge, genes, patterns, stats)
+    crudo = apply_qpcr_bridge(dct, bridge, genes)
+    z_manual = zscore_genes(pd.DataFrame([dict(zip(genes, crudo))]), genes, stats=stats).iloc[0].to_numpy()
+    assert np.allclose(z, z_manual)
+    assert label == max(corrs, key=corrs.get)
+
+
+def test_apply_bridge_refuses_scale_mismatch():
+    """La proteccion explicita contra volver a normalizar un puente en escala z."""
+    df, genes, patterns, stats = _cohorte_sintetica_calibrada()
+    anclas = df.groupby("cms_label").head(4)
+    dct_anclas = {g: anclas[g].tolist() for g in genes}
+    bridge_z = fit_qpcr_bridge_from_known_cms(
+        dct_anclas, anclas["cms_label"].tolist(), patterns, genes)  # sin gene_stats
+    assert bridge_z["_meta"]["output_scale"] == "z"
+    with pytest.raises(ValueError, match="escala"):
+        apply_qpcr_bridge({g: 1.0 for g in genes}, bridge_z, genes, expected_scale="raw")
+
+
+def test_bridge_without_gene_stats_must_not_be_rezscored():
+    """Documenta el bug: si se z-scorea un puente en escala z con stats
+    congelados, la clasificacion se degrada de forma medible."""
+    from calibration import zscore_genes
+    import pandas as pd
+
+    df, genes, patterns, stats = _cohorte_sintetica_calibrada()
+    anclas = df.groupby("cms_label").head(6)
+    dct_anclas = {g: anclas[g].tolist() for g in genes}
+    bridge_z = fit_qpcr_bridge_from_known_cms(
+        dct_anclas, anclas["cms_label"].tolist(), patterns, genes)
+    pacientes = df.groupby("cms_label").tail(10)
+    ok_correcto = ok_doble = 0
+    for _, pt in pacientes.iterrows():
+        dct = {g: float(pt[g]) for g in genes}
+        z = apply_qpcr_bridge(dct, bridge_z, genes)  # ya es z
+        c1 = {k: np.corrcoef(z, v)[0, 1] for k, v in patterns.items()}
+        ok_correcto += max(c1, key=c1.get) == pt["cms_label"]
+        z2 = zscore_genes(pd.DataFrame([dict(zip(genes, z))]), genes, stats=stats).iloc[0].to_numpy()
+        c2 = {k: np.corrcoef(z2, v)[0, 1] for k, v in patterns.items()}
+        ok_doble += max(c2, key=c2.get) == pt["cms_label"]
+    assert ok_correcto > ok_doble
