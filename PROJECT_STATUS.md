@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-**Última actualización:** 2026-09-09. Historial detallado en `CHANGELOG.md`.
+**Última actualización:** 2026-09-11. Historial detallado en `CHANGELOG.md`.
 
 ## Panel actual
 
@@ -15,6 +15,44 @@ validación externa completa"). `MYC`→`TP53RK`/`SLC5A6` se evaluó pero no se 
 CMS corresponde a los subtipos moleculares consensuados de cáncer colorrectal (*Consensus
 Molecular Subtypes*).
 
+## ⚠️ Estado de la validación: qué es confirmatorio y qué no (2026-09-11)
+
+Revisión metodológica externa del 2026-09-11. Conclusión: **hoy no existe ninguna cohorte
+de validación limpia**, y las cifras de la tabla de abajo deben leerse como *validación
+retrospectiva de desarrollo* (lo mismo que ya imprime `external_validation.py`), no como
+validación externa confirmatoria:
+
+- GSE17536 se usó iterativamente para ajustar el panel y a la vez entra al Cox agrupado.
+- El cambio de panel del 2026-09-09 (`FABP1→GALNT8`, `SI→AGR2`) se decidió con selección
+  data-driven **y validación en las 5 cohortes externas**; el Cox agrupado de 5 cohortes
+  (p=0.000532) se calcula sobre esas mismas 5 cohortes. Es selección y evaluación sobre la
+  misma muestra: los HR y p están optimistamente sesgados.
+- Por lo anterior, la descripción de GSE17537 como "nunca usada para ajustar el panel" ya
+  no es exacta desde el 2026-09-09.
+- Hay decenas de p-valores (por cohorte, por clasificador, crudo/ajustado, reparametrizado)
+  sin ninguna corrección por multiplicidad, y la narrativa de "GSE33113 fue la que permitió
+  la conclusión" es el patrón clásico de *forking paths*.
+
+**Qué reportar como resultado principal mientras no haya cohorte nueva**: el
+leave-one-cohort-out ya implementado en `pooled_cox_validation.py`
+(`leave_one_cohort_out_validation`), no el Cox agrupado in-sample.
+
+**Qué hace falta para volver a tener validación confirmatoria**: (1) congelar el panel
+actual por escrito (este archivo + tag de git), (2) conseguir al menos una cohorte del
+CRCSC con etiqueta CMS oficial y RFS que **no** haya sido tocada (candidatas: GSE38832,
+GSE29621, GSE13294), (3) correr `external_validation.py` una sola vez sobre ella y
+reportar ese resultado tal cual salga.
+
+**Otras correcciones de la misma revisión** (detalle en `CHANGELOG.md`):
+- Bug de doble normalización en el puente qPCR de la app (clasificación sin sentido en el
+  flujo Ct → CMS). Corregido y cubierto por tests de regresión.
+- La pestaña Paciente presentaba como "alerta de recurrencia" la recaída que el propio
+  simulador inyecta en el mes 15. Ahora se etiqueta explícitamente como escenario hipotético.
+- El "origen" (x=0 en z-score) es el tumor promedio de la cohorte, no ausencia de tumor;
+  documentado en `prognosis.py` y `treatment_perturbation.py`.
+- La asimetría de umbrales V1 (CMS2 "inalcanzable") se puede diagnosticar con
+  `src/pattern_norm_diagnostic.py` antes de atribuirla a biología.
+
 ## Evidencia acumulada
 
 | Cohorte | Rol | n | valor p (log-rank) |
@@ -22,7 +60,7 @@ Molecular Subtypes*).
 | GSE39582 | Entrenamiento | 557 | 1.84e-05 |
 | TCGA-COAD/READ | Descartada (sin supervivencia libre de recaída [RFS] curada, solo supervivencia global [OS]) | 558 | 0.33 (ninguno separa — problema del desenlace) |
 | GSE17536 | Externa (usada iterativamente para ajustar el panel) | 145 | 0.153 |
-| GSE17537 | Externa (nunca usada para ajustar el panel) | 55 | 0.881 |
+| GSE17537 | Externa (no usada para ajustar el panel hasta 2026-09-09; sí entró en la validación del cambio de panel) | 55 | 0.881 |
 | GSE14333 | Externa | 126 | 0.166 |
 | GSE33113 | Externa (estadio II homogéneo) | 89 | **0.00034** |
 | GSE37892 | Externa (endpoint: metástasis a distancia, no recaída general) | 130 | 0.098 (modelo) / 0.189 (etiqueta oficial) — no significativa sola |
