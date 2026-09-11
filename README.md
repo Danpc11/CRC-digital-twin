@@ -235,7 +235,7 @@ python3 -m pytest tests/ -v
 
 ## Panel actual (10 genes, todos compatibles con RT-qPCR)
 
-`MLH1`, `GNLY`, `USP18` (eje CMS1) · `MYC`, `AXIN2` (eje CMS2) · `FABP1`, `CPS1`, `SI` (eje
+`MLH1`, `GNLY`, `USP18` (eje CMS1) · `MYC`, `AXIN2` (eje CMS2) · `GALNT8`, `CPS1`, `AGR2` (eje
 CMS3) · `VIM`, `TGFB1` (eje CMS4). Ver `PROJECT_STATUS.md` para la justificación de cada gen.
 Este es el panel del pipeline calibrado. El modelo conceptual predeterminado de
 `src/attractor_model.py` conserva un panel histórico de ocho genes para sus demostraciones y

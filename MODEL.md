@@ -7,7 +7,7 @@ longitudinal y simulación de tratamiento. Para el estado empírico del proyecto
 
 Un paciente se representa como un vector $x \in \mathbb{R}^N$, donde cada componente es la
 expresión normalizada (puntuación z) de uno de los $N$ genes del panel ($N=10$ en el pipeline
-calibrado actual: `MLH1`, `GNLY`, `USP18`, `MYC`, `AXIN2`, `FABP1`, `CPS1`, `SI`, `VIM`,
+calibrado actual: `MLH1`, `GNLY`, `USP18`, `MYC`, `AXIN2`, `GALNT8`, `CPS1`, `AGR2`, `VIM`,
 `TGFB1`). El modelo conceptual predeterminado de `attractor_model.py` mantiene un panel
 histórico de ocho genes para demostraciones y pruebas unitarias; no se usa con cohortes reales.
 

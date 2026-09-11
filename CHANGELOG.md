@@ -4,6 +4,96 @@
 No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
 
+## Cambio de panel CMS3: `FABP1`→`GALNT8`, `SI`→`AGR2` (aprobado por Daniel)
+
+- **Motivación**: exploración data-driven (proyecto hermano
+  `network_analysis`, ver su `CLAUDE.md` para el detalle metodológico
+  completo) mostró que `FABP1` no aportaba ninguna señal para
+  distinguir CMS3 del resto — MI=0.000 en TCGA (577 muestras, red de
+  ARACNe3) y AUC≈azar (0.549) en GSE39582 (método independiente:
+  AUC uno-contra-el-resto + ANOVA F + Random Forest sobre el
+  transcriptoma completo). `SI` estaba casi igual de débil (ANOVA
+  F=7.3, el valor más bajo de todo el panel).
+- **Candidatos evaluados con 4 criterios** (estadística en 2 cohortes,
+  cruce contra red de coexpresión, revisión de literatura con citas
+  verificadas contra PubMed/CrossRef, factibilidad de RT-qPCR vía
+  Primer-BLAST + catálogos comerciales TaqMan/IDT): `GALNT8` y `AGR2`
+  superaron a los genes actuales en las 4 rondas, sin problemas de
+  especificidad de primer (`GALNT8` confirmado sin cruce con su
+  parálogo `GALNT18`, con el que se había confundido en una cita de
+  literatura inicial; `AGR2` sin cruce con `AGR3` pese a un bloque de
+  homología real en el screening inicial).
+- **Recalibración en GSE39582** (cohorte de entrenamiento, 566
+  muestras): Cohen's kappa 0.679→**0.728**, log-rank p (RFS)
+  0.000391→**1.841e-05**. Concordancia CMS3 específicamente:
+  65.2%→**91.3%**.
+- **Validación externa real, 5 cohortes nunca usadas para calibrar**
+  (`GSE17536`, `GSE17537`, `GSE14333`, `GSE33113`, `GSE37892`; Cox
+  estratificado por cohorte, n=545, 137 eventos — mismo n exacto que
+  la comparación de referencia anterior): Concordance 0.587→**0.591**,
+  log-likelihood ratio test p=0.0015→**0.000532**, CMS1 HR
+  2.01→**2.11** (p<0.005), CMS4 HR 2.19→**2.50** (p<0.005). El panel
+  nuevo gana en las tres métricas del Cox combinado.
+- **`MYC` se mantiene sin cambio** — el reemplazo `MYC`→`TP53RK`
+  (o `SLC5A6`) se evaluó con el mismo rigor pero no se aprobó; ver
+  entrada siguiente para el detalle completo de por qué.
+- **Dos bugs de parseo pre-existentes encontrados y corregidos en la
+  raíz** al reconstruir las 5 cohortes externas desde el
+  `series_matrix` crudo de GEO (Daniel solo había compartido la
+  versión ya recortada al panel viejo): `parse_geo_series_matrix.py`
+  dividía las celdas de `!Sample_characteristics_ch1` por `;` asumiendo
+  que siempre separa atributos empacados (lógica agregada para
+  GSE14333), pero en GSE17536/GSE17537 el `;` está *dentro* del propio
+  nombre de un atributo (`"dfs_event (disease free survival; cancer
+  recurrence): valor"`) — truncaba el nombre de columna (los valores
+  nunca se vieron afectados). Corregido con una heurística real: una
+  celda se trata como empacada solo si *cada* segmento separado por
+  `;` trae su propio `:`; si no, se usa el primer `:` de la celda
+  completa. Verificado sin regresión en GSE14333 y sin cambio en
+  ningún resultado ya reportado tras la corrección.
+- Documentación (`README.md`, `PROJECT_STATUS.md`, `MODEL.md`)
+  actualizada para reflejar el panel nuevo — estaban desactualizados,
+  contradiciendo el código. Revisión en dos rondas (manual + agente de
+  code review independiente) antes de dar esto por terminado.
+  176/176 pruebas pasan, sin regresiones.
+
+## `TP53RK` evaluado como reemplazo de `MYC` — no incorporado
+
+- Candidato más sólido estadística y mecanísticamente de todos los
+  evaluados en la ronda de selección data-driven (componente del
+  complejo KEOPS, conexión mecanística con los programas de
+  biogénesis/traducción impulsados por MYC — no una analogía genérica).
+  Mejor que `MYC` en discriminación de subtipo (ANOVA F=122.2 vs. 55.3
+  en GSE39582).
+- Probado con la misma metodología completa que el cambio de `GALNT8`/
+  `AGR2` (recalibración + validación externa en las 5 cohortes + Cox
+  combinado), agregándolo como tercer cambio (`MYC`→`TP53RK`) sobre el
+  panel ya aprobado:
+
+  | métrica | panel viejo | 2 genes (aprobado) | 3 genes (+`TP53RK`) |
+  |---|---|---|---|
+  | Kappa (GSE39582) | 0.679 | 0.728 | **0.752** |
+  | log-rank p, GSE39582 (RFS) | 0.000391 | **1.841e-05** | 0.0005794 |
+  | Cox combinado — Concordance | 0.587 | 0.591 | **0.592** |
+  | Cox combinado — p global | 0.0015 | **0.000532** | 0.0007645 |
+  | Cox combinado — CMS1 HR | 2.01 | **2.11** | 2.02 |
+  | Cox combinado — CMS4 HR | 2.19 | **2.50** | 2.42 |
+
+- Por cohorte: `TP53RK` mejora notablemente `GSE37892` (p 0.098→0.042,
+  cruza a significativo) pero debilita bastante `GSE33113` (p
+  0.00034→0.0077, la cohorte más fuerte de las 5, aunque sigue
+  significativo).
+- **Conclusión: `TP53RK` mejora la clasificación de subtipo (kappa,
+  la métrica de re-sustitución) pero el panel de 2 genes ya aprobado
+  gana en las tres métricas del Cox combinado** (concordance,
+  significancia global, ambos HR) — la validación externa real, no
+  solo la cohorte de entrenamiento. Mismo patrón que ya se documentó
+  con `CKLF` más abajo en este archivo: un candidato con mejor
+  discriminación univariada no necesariamente mejora la validación
+  externa real. **No incorporado** — queda como candidato documentado
+  para una futura revisión del eje CMS2 si se quiere retomar, con la
+  evidencia cuantitativa ya en mano para esa discusión.
+
 ## Interfaz: más rápida, panel de estado unificado
 
 - `app.py`: la carga de patrones calibrados (`load_calibrated_patterns` +

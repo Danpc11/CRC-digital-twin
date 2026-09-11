@@ -29,7 +29,7 @@ RAW_GEO = Path(__file__).resolve().parents[1] / "data" / "raw_geo"
 RAW_SYNAPSE = Path(__file__).resolve().parents[1] / "data" / "raw_synapse"
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "gse17537_cms_labeled.tsv"
 
-TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
+TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
 
 CMS_RENAME = {
     "CMS1": "CMS1_MSI_immune",
@@ -44,6 +44,8 @@ CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 # Nombres reales confirmados en gse17537_phenotype.tsv (distintos a
 # GSE39582 -- no asumir que son iguales entre cohortes)
 DFS_TIME_COL = "characteristics__dfs_time"
+# Mismo bug de parseo que en build_gse17536_dataset.py, ya corregido en
+# la raiz (parse_geo_series_matrix.py) -- ver comentario extenso ahi.
 DFS_EVENT_COL = "characteristics__dfs_event (disease free survival; cancer recurrence)"
 # Estadio clinico -- para el modelo de Cox ajustado (--adjust-stage)
 STAGE_COL = "characteristics__ajcc_stage"

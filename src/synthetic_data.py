@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
 
 TRUE_CENTROIDS = {
     "CMS1_MSI_immune":    np.array([-2.0, 2.0, 2.0, -1.0, -1.0, -0.8, -0.8, -0.8, -1.0, -0.8]),

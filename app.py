@@ -1241,7 +1241,7 @@ with tab_metodo:
         st.markdown("**10 genes, todos amplificables por RT-qPCR**")
         for lab, genes in [("CMS1_MSI_immune", "MLH1 · GNLY · USP18"),
                             ("CMS2_canonical_WNT", "MYC · AXIN2"),
-                            ("CMS3_metabolic", "FABP1 · CPS1 · SI"),
+                            ("CMS3_metabolic", "GALNT8 · CPS1 · AGR2"),
                             ("CMS4_mesenchymal", "VIM · TGFB1")]:
             st.markdown(
                 f'{cms_tag(lab)} <span class="mono" style="font-size:.85rem">{genes}</span>',

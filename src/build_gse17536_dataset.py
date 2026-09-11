@@ -29,7 +29,7 @@ RAW_GEO = Path(__file__).resolve().parents[1] / "data" / "raw_geo"
 RAW_SYNAPSE = Path(__file__).resolve().parents[1] / "data" / "raw_synapse"
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "gse17536_cms_labeled.tsv"
 
-TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
+TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
 
 CMS_RENAME = {
     "CMS1": "CMS1_MSI_immune",
@@ -44,6 +44,15 @@ CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 # Nombres reales confirmados en gse17536_phenotype.tsv (distintos a
 # GSE39582 -- no asumir que son iguales entre cohortes)
 DFS_TIME_COL = "characteristics__dfs_time"
+# BUG DE PARSEO ENCONTRADO Y CORREGIDO 2026-09-09 en la RAIZ
+# (parse_geo_series_matrix.py, no aqui): el nombre real de este atributo
+# trae un ';' DENTRO del propio nombre de campo ("dfs_event (disease
+# free survival; cancer recurrence): valor"). El parser compartido
+# dividia por ';' a ciegas asumiendo que siempre separa atributos
+# EMPACADOS (logica agregada para GSE14333), truncando el nombre. Ya
+# corregido con una heuristica (solo trata la celda como empacada si
+# CADA segmento trae su propio ':'; si no, usa el primer ':' de la
+# celda completa) -- el nombre de abajo es el correcto de nuevo.
 DFS_EVENT_COL = "characteristics__dfs_event (disease free survival; cancer recurrence)"
 # Estadio clinico -- necesario para el modelo de Cox ajustado
 # (pooled_cox_validation.py --adjust-stage). Si no existe, el dataset se

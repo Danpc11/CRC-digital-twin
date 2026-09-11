@@ -43,7 +43,10 @@ from scipy.integrate import solve_ivp
 # PROJECT_STATUS.md). MLH1 va PRIMERO y con signo negativo en CMS1: la
 # senal real es BAJA expresion (silenciamiento epigenetico de MLH1 como
 # causa de MSI esporadica, ver CHANGELOG) -- no alta.
-GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
+# Actualizado 2026-09-09: FABP1->GALNT8, SI->AGR2 (aprobado por Daniel,
+# ver network_analysis/CLAUDE.md, seccion "Seleccion data-driven de un
+# panel mas predictivo" para la justificacion completa).
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
 N = len(GENES)
 
 CMS_LABELS = ["CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_mesenchymal"]
@@ -54,7 +57,7 @@ CMS_LABELS = ["CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_m
 # Signos por eje, consistentes con los centroides de synthetic_data.py:
 #   CMS1: MLH1 BAJO (silenciamiento -> MSI), GNLY/USP18 altos (inmune)
 #   CMS2: MYC/AXIN2 altos (WNT)
-#   CMS3: FABP1/CPS1/SI altos (metabolico)
+#   CMS3: GALNT8/CPS1/AGR2 altos (metabolico)
 #   CMS4: VIM/TGFB1 altos (mesenquimal)
 CMS_PATTERNS = {
     "CMS1_MSI_immune":    np.array([-0.9,  0.9,  0.9, -0.6, -0.5, -0.4, -0.4, -0.4, -0.6, -0.4]),

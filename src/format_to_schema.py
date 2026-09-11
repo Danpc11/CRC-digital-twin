@@ -34,9 +34,9 @@ ENTREZ_TO_SYMBOL = {
     "11274": "USP18",
     "4609": "MYC",
     "8313": "AXIN2",
-    "2168": "FABP1",
+    "26290": "GALNT8",  # actualizado 2026-09-09 (reemplaza FABP1); verificado via NCBI Entrez, no el ID 51803 (descontinuado, fusionado a este)
     "1373": "CPS1",
-    "6476": "SI",
+    "10551": "AGR2",  # actualizado 2026-09-09 (reemplaza SI)
     "7431": "VIM",
     "7040": "TGFB1",
 }

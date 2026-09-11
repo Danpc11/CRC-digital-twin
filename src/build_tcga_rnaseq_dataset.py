@@ -37,7 +37,7 @@ import pandas as pd
 
 from build_external_cohort_generic import CMS_RENAME
 
-GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "FABP1", "CPS1", "SI", "VIM", "TGFB1"]
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
 
 RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw_synapse" / "tcga_rnaseq"
 LABELS_PATH = Path(__file__).resolve().parents[1] / "data" / "raw_synapse" / "tcga_cms_labels" / "cms_labels_public_all.txt"

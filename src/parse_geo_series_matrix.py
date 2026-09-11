@@ -103,20 +103,31 @@ def parse_series_matrix(path):
             values = [x.strip('"') for x in line.split("\t")[1:]]
             for sid, v in zip(sample_ids, values):
                 # Una celda puede traer UN solo "atributo: valor"
-                # (formato de GSE39582/GSE17536/GSE17537) o VARIOS
-                # empacados con ';' en una sola celda (formato de
-                # GSE14333: "Location: Right; DukesStage: A;
-                # DFS_Time: 3.64; DFS_Cens: 1; ..."). Separar por
-                # ';' primero maneja ambos casos: con un solo
-                # segmento, el resultado es identico al caso simple.
-                for segment in v.split(";"):
-                    segment = segment.strip()
-                    if ":" in segment:
+                # (formato de GSE39582) o VARIOS empacados con ';' en
+                # una sola celda (formato de GSE14333: "Location:
+                # Right; DukesStage: A; DFS_Time: 3.64; DFS_Cens: 1").
+                # Distinguir los dos casos NO es tan simple como
+                # "separar por ';' siempre" -- BUG ENCONTRADO
+                # 2026-09-09: en GSE17536/GSE17537 el NOMBRE del
+                # atributo mismo trae un ';' ("dfs_event (disease free
+                # survival; cancer recurrence): valor"), y separar a
+                # ciegas trunca el nombre al segmento que trae el ':'.
+                # Heuristica correcta: en un empacado real (GSE14333),
+                # CADA segmento resultante de split(';') trae su propio
+                # ':' (name:value, name:value, ...). Si al menos un
+                # segmento NO trae ':', el ';' es parte del nombre de
+                # un atributo unico -- no partir la celda, usar solo el
+                # PRIMER ':' de la celda completa.
+                segments = [s.strip() for s in v.split(";")]
+                if segments and all(":" in s for s in segments):
+                    for segment in segments:
                         attr_name, attr_value = segment.split(":", 1)
                         metadata_per_sample[sid][attr_name.strip()] = attr_value.strip()
-                    # segmento sin ':' no se puede asociar a un
-                    # atributo con seguridad -- se omite en vez de
-                    # adivinar
+                elif ":" in v:
+                    attr_name, attr_value = v.split(":", 1)
+                    metadata_per_sample[sid][attr_name.strip()] = attr_value.strip()
+                # celda sin ningun ':' no se puede asociar a un
+                # atributo con seguridad -- se omite en vez de adivinar
             continue
 
     phenotype = pd.DataFrame.from_dict(metadata_per_sample, orient="index")

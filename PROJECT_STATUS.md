@@ -1,13 +1,17 @@
 # Estado del proyecto
 
-**Última actualización:** agosto 2026. Historial detallado en `CHANGELOG.md`.
+**Última actualización:** 2026-09-09. Historial detallado en `CHANGELOG.md`.
 
 ## Panel actual
 
 10 genes, todos medibles mediante qPCR con transcripción inversa (RT-qPCR): `MLH1`, `GNLY`,
 `USP18` (CMS1) · `MYC`, `AXIN2` (CMS2) ·
-`FABP1`, `CPS1`, `SI` (CMS3) · `VIM`, `TGFB1` (CMS4). Congelado — no agregar genes sin
+`GALNT8`, `CPS1`, `AGR2` (CMS3) · `VIM`, `TGFB1` (CMS4). Congelado — no agregar genes sin
 justificación cuantitativa nueva (cada gen tiene costo real en un ensayo RT-qPCR).
+Actualizado 2026-09-09: `FABP1`→`GALNT8`, `SI`→`AGR2` (aprobado por Daniel, basado en
+selección data-driven + validación externa en 5 cohortes — ver
+`network_analysis/CLAUDE.md`, sección "Cambio ejecutado en el panel real de dt +
+validación externa completa"). `MYC`→`TP53RK`/`SLC5A6` se evaluó pero no se aprobó.
 CMS corresponde a los subtipos moleculares consensuados de cáncer colorrectal (*Consensus
 Molecular Subtypes*).
 
@@ -15,19 +19,26 @@ Molecular Subtypes*).
 
 | Cohorte | Rol | n | valor p (log-rank) |
 |---|---|---|---|
-| GSE39582 | Entrenamiento | 557 | 0.00039 |
+| GSE39582 | Entrenamiento | 557 | 1.84e-05 |
 | TCGA-COAD/READ | Descartada (sin supervivencia libre de recaída [RFS] curada, solo supervivencia global [OS]) | 558 | 0.33 (ninguno separa — problema del desenlace) |
-| GSE17536 | Externa (usada iterativamente para ajustar el panel) | 145 | 0.090 |
-| GSE17537 | Externa (nunca usada para ajustar el panel) | 55 | 0.71 |
-| GSE14333 | Externa | 126 | 0.59 |
-| GSE33113 | Externa (estadio II homogéneo) | 89 | **0.031** |
-| GSE37892 | Externa (endpoint: metástasis a distancia, no recaída general) | 130 | 0.1447 (modelo) / 0.1893 (etiqueta oficial) — no significativa sola |
+| GSE17536 | Externa (usada iterativamente para ajustar el panel) | 145 | 0.153 |
+| GSE17537 | Externa (nunca usada para ajustar el panel) | 55 | 0.881 |
+| GSE14333 | Externa | 126 | 0.166 |
+| GSE33113 | Externa (estadio II homogéneo) | 89 | **0.00034** |
+| GSE37892 | Externa (endpoint: metástasis a distancia, no recaída general) | 130 | 0.098 (modelo) / 0.189 (etiqueta oficial) — no significativa sola |
 
 **Modelo de Cox estratificado que combina las cinco cohortes externas
-(GSE17536+GSE17537+GSE14333+GSE33113+GSE37892, n=545, 137 eventos): Concordance=0.587,
-log-likelihood ratio test p=0.0015. CMS1 HR=2.01 (p<0.005), CMS4 HR=2.19 (p<0.005) —
-robustos con la quinta cohorte sumada. Ninguna cohorte individual necesita ser
-significativa por separado para que esto se sostenga; es justamente el punto de agrupar.**
+(GSE17536+GSE17537+GSE14333+GSE33113+GSE37892, n=545, 137 eventos): Concordance=0.591,
+log-likelihood ratio test p=0.000532. CMS1 HR=2.11 (p<0.005), CMS4 HR=2.50 (p<0.005) —
+mejora en las tres métricas frente al panel anterior (Concordance 0.587→0.591, p
+0.0015→0.000532, CMS1 2.01→2.11, CMS4 2.19→2.50; detalle completo en
+`network_analysis/CLAUDE.md`). Ninguna cohorte individual necesita ser significativa por
+separado para que esto se sostenga; es justamente el punto de agrupar.**
+
+**⚠️ Nota (2026-09-09): la comparación reparametrizada contra CMS1 como referencia y el
+modelo de 4 cohortes ajustado por estadio (más abajo en esta sección) reflejan todavía el
+panel ANTERIOR (`FABP1`/`SI`) — no se recalcularon con el cambio de panel. No citarlos como
+vigentes sin volver a correrlos con `GALNT8`/`AGR2` primero.**
 
 **Comparación directa con CMS1 como referencia (mismo modelo, misma muestra, solo
 reparametrizado)**: CMS2 vs. CMS1, HR=0.50 (IC95% 0.31-0.79), **p<0.005** — CMS2 tiene la
