@@ -94,9 +94,25 @@ def infer_gene_columns(df: pd.DataFrame, non_gene_cols: set[str] | None = None) 
         "kras_status", "braf_status", "msi_status",
         # salidas del propio pipeline
         "predicted_cms", "classification_confidence",
+        "cms_interpretation", "cms_primary_tendency", "cms_secondary_tendency",
+        "cms_margin", "cms_entropy",
     }
     candidate = [c for c in df.columns if c not in non_gene_cols]
+    # Columnas generadas por score_cohort / score_cohort_modern_hopfield
+    # (cms1_tendency..., modern_hopfield_*). Si alguien re-alimenta un
+    # scored_*.tsv al pipeline, sin esto entrarian como "genes" -- el
+    # mismo tipo de contaminacion silenciosa que ya paso con 'stage'.
+    candidate = [
+        c for c in candidate
+        if not (c.endswith("_tendency") or c.startswith("modern_hopfield_"))
+    ]
     numeric = [c for c in candidate if pd.api.types.is_numeric_dtype(df[c])]
+    if not numeric:
+        return numeric
+    dropped = [c for c in df.columns if c not in numeric and c not in non_gene_cols
+               and pd.api.types.is_numeric_dtype(df[c])]
+    if dropped:
+        print(f"AVISO: columnas numericas excluidas por ser salidas del pipeline: {dropped}")
     return numeric
 
 
