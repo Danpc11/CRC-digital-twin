@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-176%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-185%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -17,14 +17,17 @@ El repositorio incluye además una recuperación dinámica **Modern Hopfield exp
 energía explícita, criterios de convergencia/estabilidad y comparación longitudinal V1/V2;
 se reporta por separado y no sustituye silenciosamente la clasificación validada.
 
-Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md`.
+Para el estado actual del proyecto (qué evidencia hay, qué falta), ver `PROJECT_STATUS.md` —
+en particular la sección **"Estado de la validación"**: las cohortes externas actuales
+intervinieron en la selección del panel, así que sus cifras son validación retrospectiva de
+desarrollo, no confirmatoria.
 Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
 (la dinámica, por qué regla de proyección y no Hebb, cómo se calibra), ver `MODEL.md`.
 
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (176 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (185 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -123,6 +126,11 @@ La salida incluye el residuo del campo en el origen, dirección del desplazamien
 detalle V1/V2 por CMS y los primeros candidatos que alcanzan el criterio de recuperación.
 
 ### Interfaz web
+
+Las pestañas **Paciente**, **Trayectoria** e **Intervención** muestran *escenarios
+hipotéticos*: el simulador inyecta una recaída en un mes programado y observa la
+dinámica. No calculan un pronóstico a partir de mediciones longitudinales del paciente
+(no existen esos datos). Lo único específico del paciente es la dirección del perfil.
 
 `python3 cli.py app` inicia una aplicación con cinco pestañas: clasificación de muestras contra
 patrones calibrados, pronóstico longitudinal post-quirúrgico (con alerta, fuerza de evidencia
