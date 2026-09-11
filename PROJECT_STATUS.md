@@ -15,8 +15,6 @@ validación externa completa"). `MYC`→`TP53RK`/`SLC5A6` se evaluó pero no se 
 CMS corresponde a los subtipos moleculares consensuados de cáncer colorrectal (*Consensus
 Molecular Subtypes*).
 
-## ⚠️ Estado de la validación: qué es confirmatorio y qué no (2026-09-11)
-
 Revisión metodológica externa del 2026-09-11. Conclusión: **hoy no existe ninguna cohorte
 de validación limpia**, y las cifras de la tabla de abajo deben leerse como *validación
 retrospectiva de desarrollo* (lo mismo que ya imprime `external_validation.py`), no como
