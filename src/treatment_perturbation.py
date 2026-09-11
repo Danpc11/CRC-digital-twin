@@ -32,6 +32,12 @@ hundiria mas en ese atractor, el opuesto biologico de lo que hace un
 tratamiento que funciona. Los "target_genes" de cada mecanismo abajo
 son la base biologica del criterio de eficacia, no la direccion de la fuerza:
 
+  NOTA SOBRE EL "ORIGEN" (2026-09-11): jalar hacia x=0 significa jalar
+  hacia el tumor promedio de la cohorte de calibracion (z-score), no
+  hacia "sin tumor". Es una convencion del simulador coherente con
+  prognosis.py, no una afirmacion biologica -- ver ADVERTENCIA en ese
+  modulo.
+
   1. Inmunoterapia (anti-PD-1, ej. pembrolizumab)
      Eficaz especificamente en tumores MSI-H/dMMR (eje CMS1).
      KEYNOTE-177 (Andre et al. 2020, NEJM; actualizacion a 5 anios,
@@ -59,9 +65,11 @@ son la base biologica del criterio de eficacia, no la direccion de la fuerza:
   3. Quimioterapia citotoxica (ej. FOLFOX)
      Efecto general (mecanismo no CMS-especifico), pero
      con hipotesis de eficacia relativa dependiente del contexto CMS.
-     En este proyecto CMS4 presenta HR promedio=2.06 ajustado por
-     estadio, pero viola riesgos proporcionales y no puede describirse
-     como efecto uniforme ni como respuesta terapeutica confirmada.
+     En este proyecto CMS4 presenta HR>1 consistentemente en el Cox
+     agrupado (la cifra exacta depende del panel/version, ver
+     PROJECT_STATUS.md; no se repite aqui para no quedar obsoleta),
+     pero viola riesgos proporcionales y no puede describirse como
+     efecto uniforme ni como respuesta terapeutica confirmada.
 """
 
 import numpy as np
@@ -88,7 +96,7 @@ TREATMENT_MECHANISMS = {
         "target_genes": ["VIM", "TGFB1"],
         "criterio": "reduced_efficacy_cms4",
         "evidence": (
-            "CMS4 muestra HR promedio=2.06 ajustado por estadio (p=0.018), con "
+            "CMS4 muestra HR>1 en el Cox agrupado (cifra vigente en PROJECT_STATUS.md), con "
             "violacion de riesgos proporcionales; esto es evidencia pronostica "
             "retrospectiva, NO evidencia de respuesta a quimioterapia. La direccion "
             "mecanistica se apoya solo como hipotesis en literatura CMS."
