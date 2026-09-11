@@ -10,17 +10,29 @@ Formalismo:
     (z-score) de un gen marcador. Cada subtipo CMS se codifica como un
     patron objetivo p_mu en R^N, y la matriz de acoplamiento W se
     construye con la regla de proyeccion (pseudo-inversa de
-    Personnaz-Guyon-Dreyfus) para que cada patron sea un punto fijo
-    EXACTO del sistema linealizado, evitando el limite de capacidad de
-    la regla de Hebb clasica (~0.14 N patrones).
+    Personnaz, Guyon y Dreyfus, 1985) para que cada patron sea un punto
+    fijo EXACTO del sistema LINEAL dx/dt = -x + W x, evitando el limite
+    de capacidad de la regla de Hebb clasica (~0.14 N patrones).
+
+    IMPORTANTE: con la no linealidad tanh(beta x) los patrones p_mu NO
+    son puntos fijos exactos del sistema completo: el equilibrio real
+    es la solucion de x = W tanh(beta x) + I, que queda CERCA de p_mu
+    (residuo ||-p + W tanh(beta p)|| ~ 0.16-0.28 con centroides reales
+    de norma ~2.2) pero no coincide. Por eso los equilibrios reales se
+    localizan numericamente en dynamics_diagnostics.py, y por eso la
+    clasificacion se hace por correlacion (invariante a la escala), no
+    por distancia al patron.
 
     Dinamica:
         dx/dt = -x + W @ tanh(beta * x) + I_driver + I_noise
 
     donde I_driver es un termino de forzamiento constante que representa
-    el sesgo introducido por mutaciones conductoras (drivers), e
-    I_noise es ruido gaussiano opcional (dinamica de Langevin) para
-    estudiar transiciones estocasticas entre cuencas de atraccion.
+    el sesgo introducido por mutaciones conductoras (drivers). El ruido
+    (dinamica de Langevin) se integra APARTE con simulate_langevin()
+    usando Euler-Maruyama con paso fijo: meter ruido dentro del lado
+    derecho de un integrador adaptativo (RK45) no integra una ecuacion
+    diferencial estocastica -- el control de paso reacciona al ruido y
+    el resultado no tiene la estadistica correcta.
 
 NOTA DE ALCANCE: los patrones p_mu de CMS_PATTERNS abajo son
 PLACEHOLDERS cualitativos sobre el panel actual de 10 genes (ver
@@ -76,8 +88,11 @@ P = np.stack([CMS_PATTERNS[label] for label in CMS_LABELS], axis=1)  # (N, 4)
 def projection_weight_matrix(patterns: np.ndarray) -> np.ndarray:
     """
     Construye W tal que W @ p_mu = p_mu para cada patron (punto fijo
-    exacto del sistema linealizado dx/dt = -x + W x), usando la regla
-    de proyeccion de Personnaz-Guyon-Dreyfus (Kohonen, 1972).
+    exacto del sistema LINEAL dx/dt = -x + W x; ver nota del modulo
+    sobre el sistema no lineal), usando la regla de proyeccion de
+    Personnaz, Guyon y Dreyfus (1985). La memoria de matriz de
+    correlacion de Kohonen (1972) es el antecedente lineal, no la
+    misma regla.
 
     patterns: array (N, M) con M patrones como columnas.
 
@@ -123,11 +138,45 @@ DRIVER_BIAS = {
 # ---------------------------------------------------------------------
 
 def dynamics(t, x, W, I_driver, beta=2.0, noise_sigma=0.0, rng=None):
-    dxdt = -x + W @ np.tanh(beta * x) + I_driver
+    """Campo determinista. noise_sigma se conserva en la firma por
+    compatibilidad pero ya no se acepta > 0: usar simulate_langevin()."""
     if noise_sigma > 0.0:
-        rng = rng or np.random.default_rng()
-        dxdt = dxdt + noise_sigma * rng.standard_normal(x.shape)
-    return dxdt
+        raise ValueError(
+            "dynamics() es determinista. Para ruido usa simulate_langevin() "
+            "(Euler-Maruyama con paso fijo); sumar ruido dentro de solve_ivp/RK45 "
+            "no integra correctamente una ecuacion diferencial estocastica.")
+    return -x + W @ np.tanh(beta * x) + I_driver
+
+
+def simulate_langevin(
+    W: np.ndarray,
+    I_driver: np.ndarray,
+    x0: np.ndarray,
+    noise_sigma: float,
+    t_span: tuple[float, float] = (0.0, 20.0),
+    dt: float = 0.01,
+    beta: float = 2.0,
+    seed: int | None = None,
+) -> dict:
+    """
+    Integra dx = (-x + W tanh(beta x) + I) dt + sigma dB con
+    Euler-Maruyama a paso fijo -- la forma correcta de anadir ruido
+    gaussiano a la dinamica (el incremento de Wiener escala con
+    sqrt(dt), no con dt).
+    """
+    if dt <= 0:
+        raise ValueError("dt debe ser > 0")
+    rng = np.random.default_rng(seed)
+    t0, t1 = t_span
+    n_steps = int(np.ceil((t1 - t0) / dt))
+    t = t0 + dt * np.arange(n_steps + 1)
+    x = np.empty((len(x0), n_steps + 1))
+    x[:, 0] = x0
+    sqrt_dt = np.sqrt(dt)
+    for k in range(n_steps):
+        drift = -x[:, k] + W @ np.tanh(beta * x[:, k]) + I_driver
+        x[:, k + 1] = x[:, k] + drift * dt + noise_sigma * sqrt_dt * rng.standard_normal(len(x0))
+    return {"t": t, "x": x}
 
 
 def simulate_patient(
