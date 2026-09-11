@@ -12,6 +12,7 @@ USO:
     python3 cli.py validate-external --patterns P.tsv --input X.tsv --output results/
     python3 cli.py pooled-cox --cohort NOMBRE ruta.tsv [--cohort ...] --output results/
     python3 cli.py cox-diagnostics --input scored.tsv [--input ...] --adjust-stage --output results/
+    python3 cli.py cox-clinical --cohort NOMBRE scored.tsv --covariate msi_status=dMMR --output results/
     python3 cli.py dynamics-diagnostics --patterns P.tsv --output results/
     python3 cli.py prognosis --patterns P.tsv
     python3 cli.py simulate-treatment --patterns P.tsv --treatment immunotherapy_antiPD1
@@ -136,6 +137,21 @@ def cmd_cox_diagnostics(args):
     if args.output:
         argv += ["--output", args.output]
     _run_module("cox_diagnostics.py", argv)
+
+
+def cmd_cox_clinical(args):
+    argv = []
+    for name, path in args.cohort:
+        argv += ["--cohort", name, path]
+    for spec in args.covariate:
+        argv += ["--covariate", spec]
+    if args.subgroup:
+        argv += ["--subgroup", args.subgroup]
+    argv += ["--group-col", args.group_col, "--reference", args.reference,
+             "--stage-col", args.stage_col, "--output", args.output]
+    if args.keep_stage_iv:
+        argv.append("--keep-stage-iv")
+    _run_module("cox_clinical_adjustment.py", argv)
 
 
 def cmd_dynamics_diagnostics(args):
@@ -291,6 +307,21 @@ def build_parser():
                    dest="no_time_varying_cms", action="store_true")
     s.add_argument("--output")
     s.set_defaults(func=cmd_cox_diagnostics)
+
+    s = sub.add_parser("cox-clinical",
+                        help="¿CMS conserva su HR tras ajustar por estadio + covariables clinicas de rutina (p. ej. MMR)?")
+    s.add_argument("--cohort", action="append", nargs=2, metavar=("NOMBRE", "SCORED_TSV"), required=True)
+    s.add_argument("--covariate", action="append", required=True, metavar="COLUMNA=NIVEL",
+                   help="Indicador binario, ej. msi_status=dMMR (repetible)")
+    s.add_argument("--subgroup", metavar="COLUMNA=NIVEL",
+                   help="Repetir CMS+estadio solo dentro del subgrupo, ej. msi_status=pMMR")
+    s.add_argument("--group-col", choices=["predicted_cms", "modern_hopfield_cms", "cms_label"],
+                   default="predicted_cms")
+    s.add_argument("--reference", default="CMS2_canonical_WNT")
+    s.add_argument("--stage-col", default="stage")
+    s.add_argument("--keep-stage-iv", action="store_true")
+    s.add_argument("--output", default="results_cox_clinical")
+    s.set_defaults(func=cmd_cox_clinical)
 
     s = sub.add_parser("dynamics-diagnostics",
                         help="Equilibrios y estabilidad reales de la dinamica no lineal (jacobiano, cuencas de atraccion)")

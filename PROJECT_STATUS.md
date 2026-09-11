@@ -51,6 +51,33 @@ reportar ese resultado tal cual salga.
 - La asimetría de umbrales V1 (CMS2 "inalcanzable") se puede diagnosticar con
   `src/pattern_norm_diagnostic.py` antes de atribuirla a biología.
 
+## ¿Qué añade CMS sobre la clínica de rutina? (MMR) — 2026-09-11
+
+Objeción razonable de una revisión externa: CMS1 ≈ dMMR/MSI-H, que ya tiene prueba clínica
+estándar (IHC de MMR). Lo defendible del panel es lo que aporte *más allá* de estadio + MMR,
+es decir CMS4 (mesenquimal, sin prueba de rutina) y CMS3. GSE39582 anota MMR (`msi_status`),
+así que se corrió `cli.py cox-clinical` (RFS, estadio I-III, n=449, 132 eventos, subtipo
+**predicho** con el panel v0.2.0; salidas en `results_cox_clinical_gse39582/`):
+
+| Modelo | HR CMS4 (IC95%) | p | HR CMS3 | HR CMS1 | HR dMMR | C |
+|---|---|---|---|---|---|---|
+| A. CMS solo | 2.02 (1.30–3.13) | 0.0017 | 1.70 | 0.74 | — | 0.597 |
+| B. CMS + estadio | 1.74 (1.12–2.71) | 0.014 | 1.55 | 0.69 | — | 0.648 |
+| C. estadio + MMR (sin CMS) | — | — | — | — | 0.49 (p=0.03) | 0.620 |
+| **D. CMS + estadio + MMR** | **1.77 (1.13–2.75)** | **0.012** | 1.55 (p=0.06) | 0.84 (n.s.) | 0.69 (n.s.) | 0.649 |
+| E. CMS + estadio, **solo pMMR** (n=380, 122 ev.) | **1.76 (1.13–2.76)** | **0.013** | 1.51 (p=0.08) | 0.82 | — | 0.636 |
+
+- Solapamiento: 64/75 dMMR caen en CMS1 predicho (85%); CMS2-4 predichos son pMMR en >95%.
+- **CMS4 conserva su HR tras ajustar por estadio y MMR, y dentro de los pMMR** (log-rank
+  CMS4 vs resto en pMMR: p=0.005). Aporte conjunto de CMS sobre estadio+MMR: LRT χ²=9.9,
+  3 df, p=0.019; ΔC-index +0.03. Schoenfeld sin violaciones.
+- CMS1 en GSE39582 tiene HR<1 (RFS, estadios I-III): coherente con el buen pronóstico de
+  MSI en etapa temprana; su señal la absorbe dMMR. Esto contrasta con el HR≈2.1 de CMS1 en
+  el Cox agrupado de las 5 externas — heterogeneidad real entre cohortes, no reconciliada.
+- **Límite**: in-sample (GSE39582 es la cohorte de calibración). Ninguna de las 5 externas
+  anota MMR; TCGA tiene MSI pero no RFS curado. Replicarlo fuera de muestra requiere una
+  cohorte nueva con MMR + RFS (GSE38832 y GSE13294 son candidatas; verificar anotación).
+
 ## Evidencia acumulada
 
 | Cohorte | Rol | n | valor p (log-rank) |
@@ -75,6 +102,15 @@ separado para que esto se sostenga; es justamente el punto de agrupar.**
 modelo de 4 cohortes ajustado por estadio (más abajo en esta sección) reflejan todavía el
 panel ANTERIOR (`FABP1`/`SI`) — no se recalcularon con el cambio de panel. No citarlos como
 vigentes sin volver a correrlos con `GALNT8`/`AGR2` primero.**
+
+**Actualización 2026-09-11 — modelo ajustado por estadio recalculado con el panel v0.2.0,
+5 cohortes** (`pooled-cox --adjust-stage`; n=518, 117 eventos, estadio IV excluido): estadio
+HR 3.19; **CMS1 HR 2.12 (1.22–3.68, p=0.0075), CMS3 HR 2.19 (1.18–4.05, p=0.013), CMS4 HR
+2.26 (1.35–3.81, p=0.0021)**; C-index 0.701 vs 0.658 solo estadio; aporte incremental de CMS
+LRT p=0.0055, ΔC +0.043 (IC95% bootstrap +0.027 a +0.070). **Leave-one-cohort-out** (el
+resultado a reportar como principal): CMS aporta sobre estadio con p<0.02 en 4/5 pliegues de
+entrenamiento, pero la ganancia de C-index en la cohorte omitida es pequeña (0.000–0.069).
+CMS3 solo alcanza significancia tras ajustar; leerlo con cautela (pocos eventos).
 
 **Comparación directa con CMS1 como referencia (mismo modelo, misma muestra, solo
 reparametrizado)**: CMS2 vs. CMS1, HR=0.50 (IC95% 0.31-0.79), **p<0.005** — CMS2 tiene la

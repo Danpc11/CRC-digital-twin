@@ -1,5 +1,47 @@
 # Historial de cambios
 
+## 2026-09-11 — ¿qué añade CMS sobre la clínica de rutina? Cox ajustado por MMR
+
+Pregunta de una revisión externa: el eje CMS1 se solapa con dMMR, que ya tiene
+prueba clínica estándar (IHC de MMR). El valor nuevo del panel tendría que estar
+en CMS4 (y CMS3). GSE39582 anota estatus MMR, así que se puede responder.
+
+### Añadido
+- `src/cox_clinical_adjustment.py` + subcomando `cli.py cox-clinical`: modelos de
+  Cox anidados sobre la misma muestra — A) CMS; B) CMS + estadio; C) estadio +
+  covariables clínicas (sin CMS); D) CMS + estadio + clínica; E) CMS + estadio
+  dentro de un subgrupo (p. ej. solo pMMR). Reporta HR/IC95%/p, LRT anidado D vs C,
+  ΔC-index y Schoenfeld del modelo D. Reutiliza `build_cox_frame`,
+  `nested_model_increment`, `harmonize_stage` y `check_proportional_hazards`.
+  Covariables binarias genéricas (`--covariate columna=nivel`, repetible).
+- `build_gse39582_dataset.py` arrastra `msi_status` (pMMR/dMMR), `kras_status` y
+  `braf_status` (WT/M) al TSV. El esquema ya reservaba esos nombres en
+  `infer_gene_columns`; `score_cohort` los propaga a `scored_cohort.tsv`.
+- `tests/test_cox_clinical_adjustment.py` (4) y `tests/test_clinical_covariates.py`
+  (3). Suite: 185 → 192.
+
+### Resultado (GSE39582, panel v0.2.0, RFS, estadio I-III, n=449, 132 eventos)
+- Solapamiento real: 64/75 dMMR caen en CMS1 predicho (85%); 64/109 CMS1 predichos
+  son dMMR. CMS2-4 predichos son pMMR en >95%.
+- **CMS4 conserva su efecto tras ajustar por estadio y MMR**: HR 2.02 (crudo) →
+  1.74 (+estadio) → **1.77, IC95% 1.13–2.75, p=0.012** (+estadio+MMR). Dentro de
+  los 380 pMMR: HR 1.76 (p=0.013), log-rank CMS4 vs resto p=0.005.
+- CMS3: HR 1.55, p=0.06 en D (borderline). CMS1: HR 0.84, n.s. — en esta cohorte el
+  efecto de CMS1 lo absorbe dMMR (HR dMMR 0.49 sin CMS → 0.69 n.s. con CMS).
+- Aporte conjunto de CMS sobre estadio+MMR: LRT χ²=9.9, 3 df, **p=0.019**; C-index
+  0.620 → 0.649. Schoenfeld sin violaciones.
+- **Límite**: es in-sample (GSE39582 es la cohorte de calibración) y ninguna de las
+  5 cohortes externas anota MMR; TCGA tiene MSI pero no RFS. Reportar como tal.
+
+### Corregido
+- **`clinical_covariates.harmonize_stage` no reconocía estadios float (`"2.0"`)**:
+  en cuanto una columna numérica trae un faltante, pandas la sube a float y el
+  estadio quedaba 0/566 mapeado — el Cox ajustado se caía en silencio para
+  GSE39582. Las cohortes externas no lo sufrían (estadio entero o texto). Ahora
+  normaliza numéricos enteros antes de mapear; test de regresión añadido. El aviso
+  de "valores no reconocidos" ya no lista los que mapean a faltante a propósito
+  (`"0"`, `"unknown"`).
+
 ## 2026-09-11 — revisión metodológica y correcciones
 
 ### Corregido

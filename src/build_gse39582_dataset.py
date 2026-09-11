@@ -40,6 +40,20 @@ CMS_LABEL_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 # Estadio clinico -- para el modelo de Cox ajustado (--adjust-stage)
 STAGE_COL = "characteristics__tnm.stage"
 
+# Covariables clinicas adicionales que GSE39582 si anota (Marisa et al.
+# 2013) y que el esquema del proyecto ya reserva como columnas no-gen
+# (ver calibration.infer_gene_columns): estatus MMR, KRAS y BRAF.
+# Se arrastran tal cual al TSV para poder ajustar el Cox por ellas
+# (cox_clinical_adjustment.py) -- en particular MMR, porque el eje CMS1
+# se solapa con dMMR, que ya tiene prueba clinica de rutina (IHC), y la
+# pregunta relevante es si CMS4/CMS3 aportan pronostico MAS ALLA de eso.
+# Valores crudos de la fuente: msi_status = pMMR/dMMR; kras/braf = WT/M.
+CLINICAL_COLS = {
+    "characteristics__mmr.status": "msi_status",
+    "characteristics__kras.mutation": "kras_status",
+    "characteristics__braf.mutation": "braf_status",
+}
+
 
 def parse_platform_annotation(path) -> pd.DataFrame:
     """
@@ -78,12 +92,18 @@ def parse_platform_annotation(path) -> pd.DataFrame:
 
 
 def _keep_cols(pheno):
-    """Columnas de fenotipo a conservar: supervivencia + estadio si existe."""
+    """Columnas de fenotipo a conservar: supervivencia + estadio + covariables
+    clinicas (MMR/KRAS/BRAF) si existen."""
     cols = ["characteristics__rfs.delay", "characteristics__rfs.event"]
     if STAGE_COL in pheno.columns:
         cols.append(STAGE_COL)
     else:
         print(f"AVISO: no se encontro '{STAGE_COL}' -- sin ajuste por estadio.")
+    for raw_col, schema_col in CLINICAL_COLS.items():
+        if raw_col in pheno.columns:
+            cols.append(raw_col)
+        else:
+            print(f"AVISO: no se encontro '{raw_col}' -- '{schema_col}' no estara disponible.")
     return cols
 
 
@@ -155,7 +175,13 @@ def main():
         "characteristics__rfs.delay": "relapse_free_months",
         "characteristics__rfs.event": "relapse_event",
         STAGE_COL: "stage",
+        **CLINICAL_COLS,
     })
+    for schema_col in CLINICAL_COLS.values():
+        if schema_col in merged.columns:
+            n_ok = int(merged[schema_col].notna().sum())
+            print(f"  {schema_col}: {n_ok}/{len(merged)} con dato -- "
+                  f"{merged[schema_col].value_counts(dropna=False).to_dict()}")
     merged["cms_label"] = merged["cms_label"].replace(CMS_RENAME)
 
     # rfs.delay/rfs.event vienen como texto ('NA' para faltantes) del

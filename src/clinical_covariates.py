@@ -87,9 +87,18 @@ def harmonize_stage(values: pd.Series, cohort_name: str = "", verbose: bool = Tr
     sin que nadie lo note.
     """
     raw = values.astype(str).str.strip().str.lower()
+    # Estadios numericos leidos como float ("2.0") -- pasa en cuanto la
+    # columna trae un solo faltante, porque pandas la sube a float. Sin
+    # esto, GSE39582 (2 NaN en tnm.stage) quedaba con 0/566 mapeados y el
+    # modelo ajustado se caia en silencio (bug encontrado 2026-09-11).
+    numeric = pd.to_numeric(raw, errors="coerce")
+    is_int_like = numeric.notna() & (numeric == numeric.round())
+    raw = raw.where(~is_int_like, numeric[is_int_like].astype("Int64").astype(str).str.lower())
     mapped = raw.map(STAGE_MAP)
 
-    unmapped = sorted(set(raw[mapped.isna() & (raw != "nan")].unique()))
+    # "No reconocido" = no esta en STAGE_MAP. Los que si estan pero mapean
+    # a NaN a proposito ("0", "unknown"...) no son un error de mapeo.
+    unmapped = sorted(set(raw[~raw.isin(STAGE_MAP.keys())].unique()) - {"nan"})
     if verbose:
         prefix = f"[{cohort_name}] " if cohort_name else ""
         n_ok = int(mapped.notna().sum())

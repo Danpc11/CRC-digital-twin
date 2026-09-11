@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-185%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-192%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -27,7 +27,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (185 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (192 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -93,7 +93,7 @@ python3 cli.py test                  # suite de regresión
 ```
 
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
-`cox-diagnostics`, `dynamics-diagnostics`, `modern-hopfield`, `prognosis`,
+`cox-diagnostics`, `cox-clinical`, `dynamics-diagnostics`, `modern-hopfield`, `prognosis`,
 `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
 
@@ -330,6 +330,23 @@ estratificado por cohorte (`strata=["cohort"]`), igual que `pooled-cox` — usar
 `--no-stratify` solo para comparación/depuración explícita, nunca para el resultado
 reportado.
 
+**¿Qué añade el subtipo sobre la clínica de rutina?** El eje CMS1 se solapa con dMMR, que ya
+tiene prueba estándar (IHC de MMR). Para saber si CMS4/CMS3 aportan pronóstico *más allá* de
+estadio + MMR, `cox-clinical` ajusta modelos de Cox anidados sobre la misma muestra y repite
+CMS + estadio dentro del subgrupo pMMR:
+
+```bash
+python3 cli.py cox-clinical \
+  --cohort GSE39582 results_gse39582/scored_cohort.tsv \
+  --covariate msi_status=dMMR --subgroup msi_status=pMMR \
+  --output results_cox_clinical/
+```
+
+Requiere que el `scored_*.tsv` traiga la covariable (GSE39582 la trae vía
+`build_gse39582_dataset.py`: `msi_status`, `kras_status`, `braf_status`). Hoy ninguna cohorte
+externa anota MMR, así que este análisis es in-sample sobre la cohorte de calibración; el
+resultado vigente está en `PROJECT_STATUS.md`.
+
 ### Agregar una cohorte nueva del CRCSC
 
 Flujo de dos pasos — diagnosticar antes de construir, nunca asumir nombres de columna:
@@ -359,6 +376,9 @@ TCGA-02     CMS2_canonical_WNT   -0.88   3.55    ...  12.1                 1
   `CMS4_mesenchymal`, o `none` para muestras no clasificadas por el consorcio
 - Columnas de genes: cualquier subconjunto numérico — `calibration.py` infiere las columnas
   de genes automáticamente
+- `stage`, `msi_status`, `kras_status`, `braf_status`: opcionales, covariables clínicas
+  (`calibration.py` nunca las trata como genes); `stage` habilita `--adjust-stage`,
+  `msi_status` habilita `cox-clinical --covariate msi_status=dMMR`
 - `relapse_free_months` / `relapse_event`: opcionales, solo necesarias para
   `survival_validation.py` / `external_validation.py`
 
