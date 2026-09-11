@@ -58,7 +58,7 @@ from prognosis_demo import (
     classify_current_state,
     simulate_longitudinal_patient,
 )
-from qpcr_bridge import apply_qpcr_bridge, compute_delta_ct, fit_qpcr_bridge_from_known_cms
+from qpcr_bridge import classify_delta_ct, compute_delta_ct, fit_qpcr_bridge_from_known_cms
 from survival_validation import score_cohort
 from treatment_perturbation import TREATMENT_MECHANISMS, describe_treatment
 from treatment_simulation_demo import simulate_with_optional_treatment
@@ -327,9 +327,12 @@ def build_patient_pdf(sample_id, predicted_cms, confidence, evidence, t_checks, 
 
     if alert:
         story.append(Paragraph(
-            f"<b>Alerta de recurrencia simulada en el mes {t_checks[alert_idx]}.</b>", body_style))
+            f"<b>Escenario hipotético:</b> el detector identifica la recaída <i>inyectada por el "
+            f"modelo</i> en el mes {t_checks[alert_idx]} (inicio programado: mes 15). "
+            "No es una predicción de recurrencia para este paciente.", body_style))
     else:
-        story.append(Paragraph("Sin alerta en la ventana simulada.", body_style))
+        story.append(Paragraph("Escenario hipotético: el detector no identificó la recaída "
+                               "inyectada en la ventana simulada.", body_style))
     story.append(Spacer(1, 8))
     story.append(Image(img_buf, width=15 * cm, height=7 * cm))
     story.append(Spacer(1, 14))
@@ -549,7 +552,22 @@ with tab_muestras:
             # PERO para cohortes grandes (validacion externa), NO forzar
             # esto: cada cohorte auto-normalizandose contra si misma es
             # la practica correcta ahi.
-            usar_stats_congeladas = n_muestras < 10
+            # Antes esto cambiaba solo con n<10: el mismo paciente podia recibir otra
+            # etiqueta segun cuantas filas mas trajera el archivo. Ahora la eleccion
+            # es explicita; el default sigue el criterio anterior pero queda visible.
+            modo_norm = st.radio(
+                "Normalización",
+                ["Referencia congelada de la calibración (GSE39582, log2 RMA Affymetrix)",
+                 "Auto-normalizar contra esta misma tabla (cohorte grande, otra plataforma)"],
+                index=0 if n_muestras < 10 else 1,
+                help="La referencia congelada asume que tus valores están en la misma escala "
+                     "que la calibración (expresión log2 de microarreglo). Para una cohorte "
+                     "grande de otra plataforma, auto-normalizar corrige efectos de lote. "
+                     "Con n<10 auto-normalizar es inestable; con n=1 es imposible.",
+                key="modo_normalizacion")
+            usar_stats_congeladas = modo_norm.startswith("Referencia")
+            if not usar_stats_congeladas and n_muestras < 10:
+                st.warning(f"Auto-normalizar con n={n_muestras} es estadísticamente inestable.")
 
             if usar_stats_congeladas and gene_stats is None:
                 if n_muestras == 1:
@@ -720,9 +738,19 @@ with tab_muestras:
                         {gene: fila[gene] for gene in gene_order}, fila["ct_referencia"])
                     for gene in gene_order:
                         delta_ct_anclas[gene].append(dct[gene])
+                frozen_bridge = st.session_state.get("gene_stats")
+                if frozen_bridge is None:
+                    st.error("Los patrones cargados no traen estadísticas de referencia "
+                             "(_ref_mean/_ref_std). Sin ellas no se puede llevar el Ct a la escala "
+                             "del modelo de forma correcta. Recalibra con `run_pipeline.py` actual.")
+                    st.stop()
                 try:
+                    # gene_stats es OBLIGATORIO aqui: sin el, los objetivos del puente quedan
+                    # en escala z y el z-score congelado posterior normalizaria dos veces
+                    # (bug corregido 2026-09-11, ver docstring de qpcr_bridge.py).
                     bridge = fit_qpcr_bridge_from_known_cms(
-                        delta_ct_anclas, filas_validas["cms_label"].tolist(), patterns, gene_order)
+                        delta_ct_anclas, filas_validas["cms_label"].tolist(), patterns, gene_order,
+                        gene_stats=frozen_bridge)
                     st.session_state["qpcr_bridge"] = bridge
                 except ValueError as err:
                     st.error(str(err))
@@ -760,14 +788,10 @@ with tab_muestras:
             if enviado:
                 dct_paciente = compute_delta_ct(ct_genes_paciente, ct_ref_paciente)
                 try:
-                    valor_calibrado = apply_qpcr_bridge(
-                        dct_paciente, st.session_state["qpcr_bridge"], gene_order)
-                    df_paciente_qpcr = pd.DataFrame([dict(zip(gene_order, valor_calibrado))])
                     frozen = st.session_state.get("gene_stats")
-                    z_paciente = zscore_genes(df_paciente_qpcr, gene_order, stats=frozen)
-                    corrs = {label: float(np.corrcoef(z_paciente.iloc[0].to_numpy(), c)[0, 1])
-                             for label, c in patterns.items()}
-                    predicho = max(corrs, key=corrs.get)
+                    predicho, corrs, _z_paciente = classify_delta_ct(
+                        dct_paciente, st.session_state["qpcr_bridge"], gene_order,
+                        patterns, gene_stats=frozen)
                     st.markdown(cms_tag(predicho), unsafe_allow_html=True)
                     st.dataframe(
                         pd.DataFrame({"CMS": list(corrs.keys()),
@@ -797,12 +821,20 @@ with tab_paciente:
         pred_p = fila["predicted_cms"]
         conf_p = float(fila["classification_confidence"])
 
+        st.warning(
+            "**Escenario hipotético, no pronóstico.** La trayectoria de abajo NO se calcula a partir "
+            "de mediciones longitudinales de este paciente (no existen en la cohorte). Es una "
+            "simulación en la que el modelo *inyecta* una recaída a partir del mes 15 en la dirección "
+            "del perfil de expresión medido. Por construcción, esa recaída siempre aparece; la "
+            "'alerta' confirma que el detector la ve, no que el paciente vaya a recaer. Lo único "
+            "específico del paciente aquí es la dirección (su subtipo) y, por tanto, qué mecanismos "
+            "de tratamiento tienen dirección de efecto simulada.")
         with st.spinner("Simulando trayectoria..."):
             t_p, x_p = cached_trajectory(
                 dynamics_matrix, cohort_genes_p, driver_p, n_genes, 10, 15,
                 dynamics_model, dynamics_beta, max_forcing_strength)
             hazard_p = hazard_from_trajectory(x_p)
-            alert_p, idx_p = detect_recurrence_signal(hazard_p, baseline_window=2, threshold_sigma=3.0)
+            alert_p, idx_p = detect_recurrence_signal(hazard_p, baseline_window=3, threshold_sigma=3.0)
 
         h1, h2, h3 = st.columns([2, 1, 1])
         h1.markdown(
@@ -893,7 +925,7 @@ with tab_paciente:
 
         st.divider()
 
-        st.markdown('<div class="eyebrow">Riesgo simulado en el tiempo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="eyebrow">Riesgo simulado en el tiempo (escenario what-if con recaída inyectada en el mes 15)</div>', unsafe_allow_html=True)
         fig_p, ax_p = plt.subplots(figsize=(8, 3))
         ax_p.plot(t_p, hazard_p, color=CMS_COLOR.get(pred_p, "#D55E00"), marker="o",
                   markersize=4, linewidth=2)
@@ -908,9 +940,11 @@ with tab_paciente:
         st.pyplot(fig_p)
 
         if alert_p:
-            st.error(f"Alerta de recurrencia simulada en el mes {t_p[idx_p]}.")
+            st.info(f"El detector identifica la recaída *inyectada* en el mes {t_p[idx_p]} "
+                    f"(inicio programado: mes 15). No es una predicción sobre este paciente.")
         else:
-            st.success("Sin alerta en la ventana simulada.")
+            st.info("El detector no identificó la recaída inyectada en la ventana simulada "
+                    "(posible sensibilidad insuficiente con este perfil).")
 
         with st.expander("Ver detalle molecular (10 genes)"):
             fig_g, ax_g = plt.subplots(figsize=(8, 3))
@@ -1079,8 +1113,10 @@ with tab_traj:
             attractor, corr = classify_current_state(x_at, patterns)
             ev = EVIDENCE_STRENGTH.get(attractor, {})
 
-            st.markdown(readout("Alerta de recurrencia", f"mes {t_checks[alert_idx]}",
+            st.markdown(readout("Recaída inyectada detectada", f"mes {t_checks[alert_idx]}",
                                  accent="#B03A2E"), unsafe_allow_html=True)
+            st.caption(f"La recaída se programó en el mes {onset}; esto mide cuándo el detector "
+                       "la ve, no una predicción.")
             st.markdown(
                 f'<div class="eyebrow">Dirección</div>{cms_tag(attractor)} '
                 f'<span class="mono" style="font-size:.85rem;color:#6C737F">'
