@@ -1,5 +1,48 @@
 # Historial de cambios
 
+## 2026-09-11 — revisión metodológica y correcciones
+
+### Corregido
+- **`src/qpcr_bridge.py` / `app.py`: doble normalización en el puente RT-qPCR.** El modo
+  "por centroide" ajustaba ΔCt → centroide (escala z) y la app aplicaba encima
+  `zscore_genes(stats=frozen)` (escala log2 cruda). Un paciente CMS1 sintético salía CMS2.
+  `fit_qpcr_bridge_from_known_cms` acepta ahora `gene_stats` y lleva los objetivos a
+  escala cruda; el puente guarda su escala en `_meta`; `apply_qpcr_bridge(expected_scale=)`
+  rechaza el uso incorrecto; `classify_delta_ct()` es el camino único ΔCt → CMS. La app
+  exige estadísticas de referencia para ajustar el puente. Tests de regresión nuevos.
+- **`app.py`, pestañas Paciente/Trayectoria y PDF:** la "alerta de recurrencia" era la
+  recaída inyectada por el propio simulador en el mes 15 (aparecía siempre, para todos).
+  Ahora se declara como escenario hipotético y el texto dice qué mide realmente.
+- **`app.py`, normalización:** el cambio silencioso a estadísticas congeladas con n<10 hacía
+  que el mismo paciente recibiera otra etiqueta según cuántas filas trajera el archivo.
+  Ahora es un selector explícito (el default reproduce el criterio anterior).
+- **`src/calibration.py`:** `infer_gene_columns` excluye las columnas que genera el propio
+  pipeline (`*_tendency`, `cms_margin`, `cms_entropy`, `modern_hopfield_*`, ...). Antes,
+  re-alimentar un `scored_*.tsv` las trataba como genes.
+- **`src/attractor_model.py`:** `dynamics()` ya no acepta `noise_sigma>0` (sumar ruido en el
+  RHS de RK45 no integra una EDE). Nuevo `simulate_langevin()` con Euler–Maruyama.
+  Docstrings: los patrones son punto fijo exacto del sistema *lineal*, no del no lineal;
+  cita corregida (Personnaz–Guyon–Dreyfus 1985).
+- **`src/prognosis.py`:** con `baseline_window<3` la σ basal no es estimable; se usa un piso
+  absoluto explícito (`absolute_floor`) y se emite `UserWarning`. Advertencia conceptual
+  sobre qué es el "origen" en z-score.
+- **`src/treatment_perturbation.py`:** retirada la cifra HR=2.06 (panel anterior) que
+  contradecía la nota de `PROJECT_STATUS.md`.
+
+### Añadido
+- `src/pattern_norm_diagnostic.py`: compara umbrales de forzamiento V1 con centroides tal
+  cual vs. con norma igualada, para separar "asimetría de normas" y "deriva pre-recaída"
+  de cualquier interpretación biológica del hallazgo "CMS2 inalcanzable".
+- `tests/test_regressions_2026_09_11.py` y 4 tests nuevos en `tests/test_qpcr_bridge.py`.
+  Suite: 176 → 185.
+
+### Documentación
+- `PROJECT_STATUS.md`: sección "Estado de la validación" — las 5 cohortes externas
+  intervinieron en la selección del panel; el Cox agrupado in-sample no es validación
+  confirmatoria; LOCO como resultado principal; plan para una cohorte intocada.
+- `README.md`: aviso sobre escenarios hipotéticos en la interfaz; conteo de tests.
+
+
 **Formato:** más reciente primero.
 No sigue un versionado semántico estricto (es un proyecto de investigación)
 — cada entrada es un hito de desarrollo.
