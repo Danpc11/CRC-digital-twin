@@ -59,7 +59,7 @@ MIN_BASELINE_FOR_SIGMA = 3  # con menos puntos, sigma basal no es estimable
 
 def detect_recurrence_signal(
     hazard_series: np.ndarray,
-    baseline_window: int = 2,
+    baseline_window: int = MIN_BASELINE_FOR_SIGMA,
     threshold_sigma: float = 3.0,
     absolute_floor: float = 0.1,
 ) -> tuple[bool, int | None]:
@@ -69,6 +69,9 @@ def detect_recurrence_signal(
     basal (los primeros `baseline_window` puntos, tipicamente las
     mediciones inmediatamente post-quirurgicas donde se espera
     enfermedad residual minima).
+
+    Por defecto se usan MIN_BASELINE_FOR_SIGMA (3) puntos basales;
+    se requiere al menos un punto posterior para evaluar una alerta.
 
     Devuelve (alerta_detectada, indice_del_primer_timepoint_de_alerta).
 
@@ -110,7 +113,7 @@ def detect_recurrence_signal(
 
 
 def summarize_patient_trajectory(
-    t_points: np.ndarray, x_series: np.ndarray, baseline_window: int = 2
+    t_points: np.ndarray, x_series: np.ndarray, baseline_window: int = MIN_BASELINE_FOR_SIGMA
 ) -> dict:
     """Resumen de alto nivel de una trayectoria de seguimiento de un paciente."""
     hazard = hazard_from_trajectory(x_series)
