@@ -160,22 +160,25 @@ def simulate_langevin(
 ) -> dict:
     """
     Integra dx = (-x + W tanh(beta x) + I) dt + sigma dB con
-    Euler-Maruyama a paso fijo -- la forma correcta de anadir ruido
-    gaussiano a la dinamica (el incremento de Wiener escala con
-    sqrt(dt), no con dt).
+    Euler-Maruyama con paso dt y ultimo paso recortado a t1.
+    El incremento de Wiener escala con la raiz cuadrada de la
+    duracion real de cada paso, no con su duracion.
     """
-    if dt <= 0:
-        raise ValueError("dt debe ser > 0")
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError("dt debe ser finito y > 0")
     rng = np.random.default_rng(seed)
     t0, t1 = t_span
+    if not np.isfinite([t0, t1]).all() or t1 < t0:
+        raise ValueError("t_span debe ser finito y cumplir t1 >= t0")
     n_steps = int(np.ceil((t1 - t0) / dt))
-    t = t0 + dt * np.arange(n_steps + 1)
-    x = np.empty((len(x0), n_steps + 1))
+    t = t0 + dt * np.arange(n_steps)
+    # Evita sobrepasar t1 o duplicarlo por redondeo de punto flotante.
+    t = np.append(t[t < t1], t1)
+    x = np.empty((len(x0), len(t)))
     x[:, 0] = x0
-    sqrt_dt = np.sqrt(dt)
-    for k in range(n_steps):
+    for k, step_dt in enumerate(np.diff(t)):
         drift = -x[:, k] + W @ np.tanh(beta * x[:, k]) + I_driver
-        x[:, k + 1] = x[:, k] + drift * dt + noise_sigma * sqrt_dt * rng.standard_normal(len(x0))
+        x[:, k + 1] = x[:, k] + drift * step_dt + noise_sigma * np.sqrt(step_dt) * rng.standard_normal(len(x0))
     return {"t": t, "x": x}
 
 
