@@ -86,14 +86,23 @@ def harmonize_stage(values: pd.Series, cohort_name: str = "", verbose: bool = Tr
     sin aviso es exactamente el tipo de error que corrompe un analisis
     sin que nadie lo note.
     """
-    raw = values.astype(str).str.strip().str.lower()
+    # Faltantes primero, ANTES de convertir a texto: en dtypes anulables
+    # (Int64, string) astype(str) produce el literal "<NA>", que no es un
+    # valor "no reconocido" sino un faltante.
+    missing = values.isna().to_numpy()
+    raw_arr = values.astype(str).str.strip().str.lower().to_numpy(dtype=object)
     # Estadios numericos leidos como float ("2.0") -- pasa en cuanto la
     # columna trae un solo faltante, porque pandas la sube a float. Sin
     # esto, GSE39582 (2 NaN en tnm.stage) quedaba con 0/566 mapeados y el
     # modelo ajustado se caia en silencio (bug encontrado 2026-09-11).
-    numeric = pd.to_numeric(raw, errors="coerce")
-    is_int_like = numeric.notna() & (numeric == numeric.round())
-    raw = raw.where(~is_int_like, numeric[is_int_like].astype("Int64").astype(str).str.lower())
+    # Se trabaja posicionalmente (numpy) para no depender del indice de la
+    # Series (indices duplicados rompian Series.where), y solo se
+    # normalizan enteros finitos representables (evita inf / 1e300).
+    numeric = pd.to_numeric(pd.Series(raw_arr), errors="coerce").to_numpy(dtype=float)
+    is_int_like = np.isfinite(numeric) & (np.abs(numeric) < 2 ** 53) & (numeric == np.round(numeric))
+    raw_arr = np.where(is_int_like, np.where(is_int_like, numeric, 0).astype(np.int64).astype(str), raw_arr)
+    raw_arr = np.where(missing, "nan", raw_arr)
+    raw = pd.Series(raw_arr, index=values.index, dtype=object)
     mapped = raw.map(STAGE_MAP)
 
     # "No reconocido" = no esta en STAGE_MAP. Los que si estan pero mapean

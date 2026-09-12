@@ -112,3 +112,33 @@ def test_subgroup_model_runs_and_skips_when_too_small():
     # subgrupo dMMR: pocos eventos -> debe omitirse sin tronar
     tiny = fit_subgroup_model(data.head(40), "msi_status", "dMMR", "CMS2_canonical_WNT")
     assert tiny is None
+
+
+def test_binary_indicator_handles_numeric_coding_and_constant_guard():
+    from cox_clinical_adjustment import check_indicator_varies
+    ind = binary_indicator(pd.Series([1.0, 0.0, np.nan, "1"]), "1")
+    assert ind.tolist()[:2] == [1.0, 0.0] and np.isnan(ind.iloc[2]) and ind.iloc[3] == 1.0
+    with pytest.raises(ValueError, match="constante"):
+        check_indicator_varies(pd.Series([0.0, 0.0, np.nan]), "msi_status_MSI")
+    check_indicator_varies(pd.Series([0.0, 1.0]), "ok")  # no truena
+
+
+def test_drop_unclassified_removes_none_and_indeterminado():
+    from cox_clinical_adjustment import drop_unclassified
+    df = pd.DataFrame({"g": ["CMS1_MSI_immune", "none", "indeterminado", "CMS4_mesenchymal"]})
+    assert drop_unclassified(df, "g")["g"].tolist() == ["CMS1_MSI_immune", "CMS4_mesenchymal"]
+
+
+def test_subgroup_model_skipped_when_a_cms_level_has_no_events_in_subgroup():
+    df = _synthetic_cohort()
+    data = prepare_single_frame(df, [("msi_status", "dMMR")], verbose=False)
+    # dentro de dMMR casi no hay CMS2 (la referencia): el modelo E debe omitirse
+    sub = fit_subgroup_model(data, "msi_status", "dMMR", "CMS2_canonical_WNT")
+    assert sub is None
+
+
+def test_incremental_table_keeps_aic_columns():
+    df = _synthetic_cohort()
+    data = prepare_single_frame(df, [("msi_status", "dMMR")], verbose=False)
+    inc = fit_nested_clinical_models(data, ["msi_status_dMMR"], "CMS2_canonical_WNT")["increment"]
+    assert "aic_partial_estadio_clinica" in inc and "aic_partial_mas_cms" in inc

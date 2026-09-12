@@ -64,6 +64,15 @@ from clinical_covariates import harmonize_stage
 from cox_diagnostics import check_proportional_hazards
 from pooled_cox_validation import build_cox_frame, nested_model_increment, stratified_c_index
 
+# Valores de la columna de grupo que NO son subtipos: 'none' = etiqueta
+# oficial sin consenso; 'indeterminado' = abstencion de modern_hopfield_cms
+# (pooled_cox_validation.py los filtra igual).
+UNCLASSIFIED_LEVELS = ("none", "indeterminado")
+# Minimos por nivel CMS para ajustar el modelo de subgrupo sin separacion
+# completa (HR -> inf con IC (0, inf)).
+MIN_LEVEL_N = 5
+MIN_LEVEL_EVENTS = 1
+
 
 def parse_level_spec(spec: str) -> tuple[str, str]:
     """'msi_status=dMMR' -> ('msi_status', 'dMMR'). Falla claro si no trae '='."""
@@ -76,13 +85,40 @@ def parse_level_spec(spec: str) -> tuple[str, str]:
     return col, level
 
 
+def _normalize_level(text: str) -> str:
+    """'1.0' -> '1', ' dMMR ' -> 'dmmr': mismo tratamiento que harmonize_stage
+    para columnas 0/1 que pandas sube a float al traer un faltante."""
+    t = str(text).strip().lower()
+    try:
+        num = float(t)
+    except ValueError:
+        return t
+    if np.isfinite(num) and abs(num) < 2 ** 53 and num == round(num):
+        return str(int(num))
+    return t
+
+
 def binary_indicator(values: pd.Series, positive_level: str) -> pd.Series:
     """1 si el valor es `positive_level`, 0 si es otro valor no faltante, NaN si falta.
-    Comparacion insensible a mayusculas/espacios (dMMR == dmmr == ' dMMR ')."""
-    raw = values.astype("string").str.strip().str.lower()
-    out = (raw == positive_level.strip().lower()).astype("float")
-    out[raw.isna() | (raw == "nan") | (raw == "na") | (raw == "")] = np.nan
-    return out
+    Comparacion insensible a mayusculas/espacios y a codificacion numerica
+    (dMMR == dmmr == ' dMMR '; 1 == 1.0 == '1')."""
+    missing = values.isna().to_numpy()
+    raw = np.array([_normalize_level(v) for v in values.to_numpy(dtype=object)], dtype=object)
+    missing |= np.isin(raw, ["nan", "na", "", "<na>", "none"])
+    out = (raw == _normalize_level(positive_level)).astype(float)
+    out[missing] = np.nan
+    return pd.Series(out, index=values.index)
+
+
+def check_indicator_varies(indicator: pd.Series, name: str) -> None:
+    """Un indicador constante (todo 0 o todo 1) hace que lifelines truene con un
+    ConvergenceError opaco; mejor fallar aqui con un mensaje util (nivel mal
+    escrito, columna codificada distinto, etc.)."""
+    vals = indicator.dropna().unique()
+    if len(vals) < 2:
+        raise ValueError(
+            f"El indicador '{name}' es constante ({vals.tolist()}): revisa que el NIVEL exista en la "
+            "columna (mayusculas/espacios no importan; 1 y 1.0 son equivalentes).")
 
 
 def indicator_name(col: str, level: str) -> str:
@@ -121,12 +157,21 @@ def prepare_single_frame(
         indicator_name(c, l) for c, l in covariates]
     n_before = len(out)
     out = out.dropna(subset=needed)
+    for col, level in covariates:
+        check_indicator_varies(out[indicator_name(col, level)], indicator_name(col, level))
     if verbose:
         print(f"n con datos completos para el Cox: {len(out)} (de {n_before}); "
               f"eventos = {int(out[event_col].sum())}")
         for col, level in covariates:
             print(f"  {indicator_name(col, level)} = 1 en {int(out[indicator_name(col, level)].sum())} pacientes")
     return out
+
+
+def drop_unclassified(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    """Quita los centinelas que no son subtipos: 'none' (etiqueta oficial sin
+    consenso) e 'indeterminado' (abstencion de modern_hopfield_cms). Sin esto
+    entrarian al Cox como un quinto nivel y el LRT tendria un df de mas."""
+    return df[~df[group_col].isin(UNCLASSIFIED_LEVELS)]
 
 
 def crosstab_group_by_covariate(df: pd.DataFrame, group_col: str, covariate_col: str) -> pd.DataFrame:
@@ -226,7 +271,9 @@ def fit_nested_clinical_models(
                                        models["C_estadio_clinica"][1],
                                        models["D_cms_estadio_clinica"][1])
     # nested_model_increment nombra las columnas pensando en estadio;
-    # aqui la linea base es estadio + clinica -- renombrar para no confundir.
+    # aqui la linea base es estadio + clinica -- renombrar para no confundir,
+    # conservando TODO (incluido AIC) para que la tabla sea comparable con
+    # cox_incremental_value.tsv de pooled-cox.
     increment = {
         "lr_chi2": increment["lr_chi2"], "df": increment["df"],
         "p_incremental_cms_sobre_clinica": increment["p_incremental"],
@@ -236,6 +283,8 @@ def fit_nested_clinical_models(
         "c_index_estratificado_estadio_clinica": increment.get("c_index_stratified_stage_only"),
         "c_index_estratificado_mas_cms": increment.get("c_index_stratified_stage_plus_cms"),
         "delta_c_index_estratificado": increment.get("delta_c_index_stratified"),
+        "aic_partial_estadio_clinica": increment["aic_partial_stage_only"],
+        "aic_partial_mas_cms": increment["aic_partial_stage_plus_cms"],
         "n": n, "eventos": events,
     }
     return {"models": models, "summary": pd.concat(tables), "increment": increment}
@@ -261,6 +310,18 @@ def fit_subgroup_model(
     print(counts.to_string())
     for msg in sparse_level_warnings(sub, group_col, event_col, label):
         print("AVISO: " + msg)
+    # Cada nivel CMS -- la referencia incluida -- necesita pacientes Y eventos
+    # dentro del subgrupo; si no, el Cox se separa por completo y devuelve
+    # HR ~1e6 con IC (0, inf), que no son un resultado sino un artefacto.
+    per_level = sub.groupby(group_col)[event_col].agg(["size", "sum"])
+    thin = per_level[(per_level["size"] < MIN_LEVEL_N) | (per_level["sum"] < MIN_LEVEL_EVENTS)]
+    if reference not in per_level.index or not thin.empty:
+        detail = {lv: (int(r["size"]), int(r["sum"])) for lv, r in thin.iterrows()}
+        print(f"AVISO: dentro de {subgroup_col}={subgroup_level} hay niveles CMS sin pacientes o sin "
+              f"eventos suficientes (n, eventos): {detail}"
+              f"{'; falta la referencia ' + reference if reference not in per_level.index else ''}. "
+              "Se omite el modelo E (el ajuste se separaria por completo).")
+        return None
     cph, cox_df = fit_cox(sub, ["stage_harmonized"], reference, True, group_col,
                           duration_col, event_col)
     return cph, _summary_table(cph, label, len(sub), int(sub[event_col].sum()), cox_df)
@@ -295,8 +356,10 @@ def main():
         frames.append(df)
         print(f"{name}: {len(df)} muestras desde {path}")
     raw = pd.concat(frames, ignore_index=True)
-    if args.group_col == "cms_label":
-        raw = raw[raw[args.group_col] != "none"]
+    n_raw = len(raw)
+    raw = drop_unclassified(raw, args.group_col)
+    if len(raw) < n_raw:
+        print(f"{n_raw - len(raw)} muestras sin subtipo ({'/'.join(UNCLASSIFIED_LEVELS)}) excluidas")
 
     # 1. Solapamiento CMS x covariable (con TODOS los pacientes, antes de filtrar)
     for col, _ in covariates:

@@ -78,6 +78,72 @@
 - `tests/test_regressions_2026_09_12.py` (8 tests). `tests/test_app_functions.py` actualizado con
   el nuevo import. Suite: 192 → 213.
 
+## 2026-09-11 — CMS1 dividido por MMR y preselección de genes de referencia
+
+Dos análisis cortos pedidos por la revisión externa del manuscrito.
+
+### Añadido
+- `src/cms_subgroup_split.py` + `cli.py cms-split`: parte un subtipo por una
+  covariable binaria (p. ej. CMS1 por MMR) y compara pronóstico — Cox + estadio con
+  los grupos partidos, log-rank y Cox dentro del subtipo, RFS a 3/5 años por KM,
+  tablas descriptivas (BRAF/KRAS/estadio) y Cox con covariable extra. Misma muestra
+  analítica que `cox-clinical` por default (covariable conocida en todos).
+- `src/reference_gene_stability.py` + `cli.py reference-genes`: preselección in silico
+  de genes de referencia para RT-qPCR entre los 5 de Oncotype DX Colon (ATP5E, GPX1,
+  PGK1, UBB, VDAC2) y 6 clásicos (ACTB, GAPDH, B2M, HPRT1, RPLP0, TBP): SD, η² de
+  ANOVA por CMS y estadio, M de geNorm (con eliminación por pasos) y ρ tipo
+  NormFinder, en GSE39582 y TCGA; ranking combinado y concordancia entre plataformas.
+- `tests/test_cms_subgroup_split.py` (6) y `tests/test_reference_gene_stability.py`
+  (5), más regresiones en `test_cox_clinical_adjustment.py` y `test_clinical_covariates.py`.
+  Suite: 223 → 246 al reubicar estos cambios sobre la revisión del 2026-09-15 (ver "Corregido tras revisión" abajo).
+
+### Resultados (GSE39582, panel v0.2.0)
+- **CMS1 por MMR** (n=449, 132 eventos; 60 CMS1-dMMR / 37 CMS1-pMMR): HR vs CMS2
+  ajustado por estadio 0.58 (0.27–1.24) y 0.83 (0.40–1.72). Dentro de CMS1, pMMR vs
+  dMMR: log-rank p=0.25, HR 1.48 (0.56–3.91). RFS 5 años 0.85 vs 0.75. Dirección
+  coherente con la hipótesis "los CMS1-pMMR van peor", **pero sin poder (17
+  eventos) y ambos subgrupos con HR<1**: no explica el HR≈2.1 de CMS1 en las
+  externas. Los CMS1-pMMR son mayoritariamente BRAF-WT (26/31); añadir BRAF no cambia
+  nada.
+- **Genes de referencia** (GSE39582 n=585 / TCGA n=577): recomendados **UBB, RPLP0,
+  TBP, ACTB** (quinto opcional: VDAC2 o PGK1); excluir **ATP5E** (η² CMS 0.38/0.28:
+  cambia con el subtipo), **GAPDH** (metabólico, η² CMS 0.17/0.14), **B2M** (MHC-I) y
+  **HPRT1** (SD alta una vez excluido su probe de fondo). Ninguno varía con el estadio
+  (η² ≤ 0.035). Preselección in silico: confirmar en FFPE.
+
+### Corregido tras revisión de código independiente (agente, nivel alto)
+- `reference_gene_stability.py`: los probes de fondo (media >2 log2 por debajo del probe
+  más expresado del gen) ya no entran al promedio. Promediar `HPRT1` 1565446_at (media 2.4)
+  con 202854_at (9.7) reducía su SD a la mitad; con el arreglo `HPRT1` pasa del 6.º al
+  10.º lugar y sale de la recomendación. `gse39582_per_probe.tsv` marca qué probes se
+  usaron. Flag `--probe-max-gap`.
+- `cox_clinical_adjustment.fit_subgroup_model`: el modelo E exige que cada nivel CMS (la
+  referencia incluida) tenga pacientes y eventos dentro del subgrupo; antes
+  `--subgroup msi_status=dMMR` producía HR ~1e6 con IC (0, ∞) por separación completa y
+  los escribía como resultado.
+- `cms_subgroup_split.fit_group_cox`: `n_grupo`/`eventos_grupo` se calculan sobre la muestra
+  que ajustó el modelo (con `--extra-covariate` se perdían pacientes sin la covariable y los
+  conteos seguían siendo los del modelo base).
+- `binary_indicator` normaliza códigos numéricos (`1.0` ≡ `1`) y un indicador constante
+  (nivel mal escrito) falla con mensaje claro en vez de `ConvergenceError` de lifelines.
+- `harmonize_stage`: la normalización de floats trabaja posicionalmente (índices duplicados
+  ya no rompen), ignora `inf`/valores no representables, y los `<NA>` de dtypes anulables
+  se tratan como faltantes, no como "no reconocidos".
+- `cms_subgroup_split`: `--split-cms` se valida contra la columna (antes un typo degeneraba
+  en un Cox sin partición con salidas vacías y exit 0).
+- Ambos scripts excluyen `none` **e** `indeterminado` (abstención de `modern_hopfield_cms`)
+  de la columna de grupo, igual que `pooled_cox_validation.py`.
+- `cli.py`: `cox-clinical` y `cms-split` exponen `--duration-col`/`--event-col` (cohortes
+  con OS) y `--keep-missing-by`; se quita la restricción `choices=` en `--group-col`.
+- `cox_clinical_incremental.tsv` conserva las columnas AIC, comparable con
+  `cox_incremental_value.tsv` de `pooled-cox`.
+- 8 tests de regresión nuevos.
+
+### Notas
+- La copia local `data/raw_synapse/tcga_rnaseq/TCGACRC_expression-merged.tsv` de este
+  checkout era la matriz vieja de 263 muestras; se reemplazó por la canónica de 577
+  (misma que usa `build_tcga_rnaseq_dataset.py` en la máquina de Daniel; `data/` no se
+  versiona, así que no afecta al repo).
 
 ## 2026-09-11 — ¿qué añade CMS sobre la clínica de rutina? Cox ajustado por MMR
 

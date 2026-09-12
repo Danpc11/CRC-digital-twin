@@ -304,6 +304,50 @@ violación de riesgos proporcionales, el efecto tiempo-dependiente y el poder po
 tiempo en días, y dos cohortes con el panel anterior.
 
 
+**CMS1 dividido por MMR** (`cli.py cms-split`; misma muestra, 60 CMS1-dMMR / 37 CMS1-pMMR,
+17 eventos en total): ¿los CMS1-pMMR explican la heterogeneidad de CMS1 entre cohortes?
+HR vs CMS2 ajustado por estadio: CMS1-dMMR 0.58 (0.27–1.24), CMS1-pMMR 0.83 (0.40–1.72);
+dentro de CMS1, pMMR vs dMMR HR 1.48 (0.56–3.91), log-rank p=0.25; RFS 5 años 0.85 vs
+0.75. Dirección coherente pero **sin poder y con ambos subgrupos por debajo de CMS2**: la
+división por MMR **no explica** el HR≈2.1 de CMS1 en las externas. Los CMS1-pMMR de esta
+cohorte son BRAF-WT en su mayoría (26/31), no el fenotipo serrado MSS/BRAF-mut; BRAF como
+covariable no cambia nada. Se reporta la heterogeneidad tal cual.
+
+## Genes de referencia para RT-qPCR (preselección in silico, 2026-09-11)
+
+`cli.py reference-genes` sobre GSE39582 (Affymetrix, n=585) y TCGA (RNA-seq, n=577).
+Candidatos: los 5 de referencia de Oncotype DX Colon (Clark-Langone 2010) + 6 clásicos.
+Criterios: SD, η² de ANOVA por CMS y por estadio, M de geNorm, ρ tipo NormFinder.
+
+En Affymetrix solo entran al promedio los probes expresados (a ≤2 log2 del probe más alto
+del gen): promediar un probe de fondo (p. ej. `HPRT1` 1565446_at, media 2.4 vs 9.7 del probe
+real) reducía la SD del gen a la mitad y lo hacía ver estable — hallazgo de la revisión de
+código del 2026-09-11 que sacó a `HPRT1` de la recomendación.
+
+| Gen | Fuente | SD (GSE / TCGA) | η² CMS (GSE / TCGA) | η² estadio | Rango combinado |
+|---|---|---|---|---|---|
+| **RPLP0** | clásico | 0.19 / 0.59 | 0.09 / 0.05 | 0.035 | 3.6 |
+| **UBB** | Oncotype | 0.21 / 0.46 | 0.17 / 0.06 | 0.007 | 3.6 |
+| **TBP** | clásico | 0.36 / 0.33 | 0.07 / 0.04 | 0.004 | 3.8 |
+| **ACTB** | clásico | 0.19 / 0.52 | 0.12 / 0.10 | 0.008 | 4.8 |
+| VDAC2 | Oncotype | 0.37 / 0.48 | 0.14 / 0.11 | 0.011 | 5.6 |
+| PGK1 | Oncotype | 0.48 / 0.61 | 0.03 / 0.01 | 0.003 | 6.0 |
+| GPX1 | Oncotype | 0.51 / 0.59 | 0.04 / 0.01 | 0.017 | 6.4 |
+| GAPDH | clásico | 0.24 / 0.64 | **0.17 / 0.14** | 0.028 | 6.8 |
+| B2M | clásico | 0.27 / 0.79 | 0.07 / 0.11 | 0.002 | 7.8 |
+| HPRT1 | clásico | **0.54** / 0.63 | 0.05 / 0.04 | 0.001 | 8.3 |
+| ATP5E | Oncotype | 0.37 / 0.62 | **0.38 / 0.28** | 0.007 | 9.5 |
+
+**Recomendación**: `UBB`, `RPLP0`, `TBP`, `ACTB`, cuatro clases funcionales distintas
+(ubiquitina, ribosomal, transcripción basal, citoesqueleto). Si hace falta un quinto,
+`VDAC2` o `PGK1` (η² CMS bajo, SD mayor), no `HPRT1`. **Excluir** `ATP5E` (depende del
+subtipo pese a ser referencia de Oncotype), `GAPDH` (metabólico; Δ 0.62 log2 entre CMS en
+TCGA) y `B2M` (MHC-I; el peor en TCGA). Ninguno varía con el estadio. La concordancia fina
+de rangos entre plataformas es baja (Spearman 0.18): el conjunto es robusto, la posición
+exacta no. **Es preselección**: la elección final se confirma en FFPE por RT-qPCR
+(geNorm/NormFinder sobre Ct; MIQE).
+
+## Evidencia acumulada
 
 | Cohorte | Rol | n | valor p (log-rank) |
 |---|---|---|---|

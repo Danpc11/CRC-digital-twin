@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-223%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -27,7 +27,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (223 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (246 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -93,7 +93,8 @@ python3 cli.py test                  # suite de regresión
 ```
 
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
-`cox-diagnostics`, `cox-clinical`, `dynamics-diagnostics`, `modern-hopfield`, `prognosis`,
+`cox-diagnostics`, `cox-clinical`, `cms-split`, `reference-genes`, `dynamics-diagnostics`,
+`modern-hopfield`, `prognosis`,
 `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
 
@@ -353,6 +354,23 @@ Requiere que el `scored_*.tsv` traiga la covariable (GSE39582 la trae vía
 `build_gse39582_dataset.py`: `msi_status`, `kras_status`, `braf_status`). Hoy ninguna cohorte
 externa anota MMR, así que este análisis es in-sample sobre la cohorte de calibración; el
 resultado vigente está en `PROJECT_STATUS.md`.
+
+Dos análisis complementarios sobre los mismos datos: `cms-split` parte un subtipo por una
+covariable binaria y compara el pronóstico de los subgrupos (p. ej. CMS1 dMMR vs pMMR), y
+`reference-genes` preselecciona in silico genes de referencia para el ensayo RT-qPCR
+(estabilidad tipo geNorm/NormFinder a través de CMS, estadio y plataforma):
+
+```bash
+python3 cli.py cms-split --input results_gse39582/scored_cohort.tsv \
+  --split-cms CMS1_MSI_immune --by msi_status --describe braf_status kras_status \
+  --output results_cms1_mmr/
+
+python3 cli.py reference-genes \
+  --gse-expression data/raw_geo/gse39582_expression_probes.tsv \
+  --gse-annotation data/raw_geo/GPL570.txt --gse-labels data/gse39582_cms_labeled.tsv \
+  --tcga-expression data/raw_synapse/tcga_rnaseq/TCGACRC_expression-merged.tsv \
+  --tcga-labels data/tcga_rnaseq_cms_labeled.tsv --output results_reference_genes/
+```
 
 ### Agregar una cohorte nueva del CRCSC
 

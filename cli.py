@@ -14,6 +14,8 @@ USO:
     python3 cli.py cox-diagnostics --input scored.tsv [--input ...] --adjust-stage --output results/
     python3 cli.py cox-clinical --cohort NOMBRE scored.tsv --covariate msi_status=dMMR --output results/
     python3 cli.py cox-chemo --cohort GSE39582 scored.tsv --chemo-col adjuvant_chemo --chemo-yes Y --output results/
+    python3 cli.py cms-split --input scored.tsv --split-cms CMS1_MSI_immune --by msi_status --output results/
+    python3 cli.py reference-genes --gse-expression ... --tcga-expression ... --output results/
     python3 cli.py dynamics-diagnostics --patterns P.tsv --output results/
     python3 cli.py prognosis --patterns P.tsv
     python3 cli.py simulate-treatment --patterns P.tsv --treatment immunotherapy_antiPD1
@@ -149,7 +151,8 @@ def cmd_cox_clinical(args):
     if args.subgroup:
         argv += ["--subgroup", args.subgroup]
     argv += ["--group-col", args.group_col, "--reference", args.reference,
-             "--stage-col", args.stage_col, "--output", args.output]
+             "--stage-col", args.stage_col, "--duration-col", args.duration_col,
+             "--event-col", args.event_col, "--output", args.output]
     if args.keep_stage_iv:
         argv.append("--keep-stage-iv")
     _run_module("cox_clinical_adjustment.py", argv)
@@ -163,6 +166,32 @@ def cmd_cox_chemo(args):
              "--group-col", args.group_col, "--reference", args.reference,
              "--stage-col", args.stage_col, "--stages", args.stages, "--output", args.output]
     _run_module("cox_treatment_interaction.py", argv)
+def cmd_cms_split(args):
+    argv = ["--input", args.input, "--split-cms", args.split_cms, "--by", args.by,
+            "--group-col", args.group_col, "--reference", args.reference,
+            "--stage-col", args.stage_col, "--duration-col", args.duration_col,
+            "--event-col", args.event_col, "--output", args.output]
+    if args.describe:
+        argv += ["--describe"] + args.describe
+    if args.extra_covariate:
+        argv += ["--extra-covariate", args.extra_covariate]
+    if args.keep_stage_iv:
+        argv.append("--keep-stage-iv")
+    if args.keep_missing_by:
+        argv.append("--keep-missing-by")
+    _run_module("cms_subgroup_split.py", argv)
+
+
+def cmd_reference_genes(args):
+    argv = ["--output", args.output, "--probe-max-gap", str(args.probe_max_gap)]
+    for flag in ["gse_expression", "gse_annotation", "gse_labels", "gse_stage_col",
+                 "tcga_expression", "tcga_labels"]:
+        value = getattr(args, flag)
+        if value:
+            argv += ["--" + flag.replace("_", "-"), value]
+    if args.candidates:
+        argv += ["--candidates"] + args.candidates
+    _run_module("reference_gene_stability.py", argv)
 
 
 def cmd_dynamics_diagnostics(args):
@@ -326,10 +355,12 @@ def build_parser():
                    help="Indicador binario, ej. msi_status=dMMR (repetible)")
     s.add_argument("--subgroup", metavar="COLUMNA=NIVEL",
                    help="Repetir CMS+estadio solo dentro del subgrupo, ej. msi_status=pMMR")
-    s.add_argument("--group-col", choices=["predicted_cms", "modern_hopfield_cms", "cms_label"],
-                   default="predicted_cms")
+    s.add_argument("--group-col", default="predicted_cms",
+                   help="predicted_cms, modern_hopfield_cms o cms_label")
     s.add_argument("--reference", default="CMS2_canonical_WNT")
     s.add_argument("--stage-col", default="stage")
+    s.add_argument("--duration-col", default="relapse_free_months")
+    s.add_argument("--event-col", default="relapse_event")
     s.add_argument("--keep-stage-iv", action="store_true")
     s.add_argument("--output", default="results_cox_clinical")
     s.set_defaults(func=cmd_cox_clinical)
@@ -346,6 +377,37 @@ def build_parser():
     s.add_argument("--stages", default="2,3")
     s.add_argument("--output", default="results_cox_chemo")
     s.set_defaults(func=cmd_cox_chemo)
+    s = sub.add_parser("cms-split",
+                        help="Partir un CMS por una covariable binaria (p. ej. CMS1 por MMR) y comparar pronostico")
+    s.add_argument("--input", required=True, metavar="SCORED_TSV")
+    s.add_argument("--split-cms", default="CMS1_MSI_immune")
+    s.add_argument("--by", default="msi_status")
+    s.add_argument("--group-col", default="predicted_cms",
+                   help="predicted_cms, modern_hopfield_cms o cms_label")
+    s.add_argument("--reference", default="CMS2_canonical_WNT")
+    s.add_argument("--stage-col", default="stage")
+    s.add_argument("--duration-col", default="relapse_free_months")
+    s.add_argument("--event-col", default="relapse_event")
+    s.add_argument("--keep-stage-iv", action="store_true")
+    s.add_argument("--keep-missing-by", action="store_true",
+                   help="Conservar pacientes de otros subtipos sin valor en --by")
+    s.add_argument("--describe", nargs="*", default=[], metavar="COLUMNA")
+    s.add_argument("--extra-covariate", metavar="COLUMNA=NIVEL")
+    s.add_argument("--output", default="results_cms_split")
+    s.set_defaults(func=cmd_cms_split)
+
+    s = sub.add_parser("reference-genes",
+                        help="Preseleccion in silico de genes de referencia para RT-qPCR (geNorm/NormFinder)")
+    s.add_argument("--gse-expression", metavar="PROBES_TSV")
+    s.add_argument("--gse-annotation", metavar="GPL570_TXT")
+    s.add_argument("--gse-labels", metavar="LABELED_TSV")
+    s.add_argument("--gse-stage-col", default="stage")
+    s.add_argument("--tcga-expression", metavar="GENES_TSV")
+    s.add_argument("--tcga-labels", metavar="LABELED_TSV")
+    s.add_argument("--candidates", nargs="*", metavar="GEN")
+    s.add_argument("--probe-max-gap", type=float, default=2.0)
+    s.add_argument("--output", default="results_reference_genes")
+    s.set_defaults(func=cmd_reference_genes)
 
     s = sub.add_parser("dynamics-diagnostics",
                         help="Equilibrios y estabilidad reales de la dinamica no lineal (jacobiano, cuencas de atraccion)")
