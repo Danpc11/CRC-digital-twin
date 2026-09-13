@@ -61,7 +61,11 @@ from prognosis_demo import (
 from qpcr_bridge import classify_delta_ct, compute_delta_ct, fit_qpcr_bridge_from_known_cms
 from survival_validation import score_cohort
 from treatment_perturbation import TREATMENT_MECHANISMS, describe_treatment
-from treatment_simulation_demo import simulate_with_optional_treatment
+from treatment_simulation_demo import (
+    DEFAULT_TREATMENT_TO_FORCING_RATIO,
+    simulate_with_optional_treatment,
+    treatment_strength_from_ratio,
+)
 
 # --- sistema de color: identidad por subtipo, consistente con las figuras ---
 CMS_COLOR = {
@@ -234,13 +238,15 @@ def cached_trajectory(model_matrix, gene_order, driver_vector, n_genes, n_timepo
 def cached_treatment_sim(model_matrix, n_genes, gene_order, driver_vector, patterns, treatment,
                           treatment_onset_month, ras_braf_wildtype, n_timepoints,
                           recurrence_onset_month, dynamics_model, dynamics_beta,
-                          max_forcing_strength):
+                          max_forcing_strength,
+                          treatment_to_forcing_ratio=DEFAULT_TREATMENT_TO_FORCING_RATIO):
     return simulate_with_optional_treatment(
         model_matrix, n_genes, gene_order, driver_vector, patterns, treatment=treatment,
         treatment_onset_month=treatment_onset_month, ras_braf_wildtype=ras_braf_wildtype,
         n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month,
         dynamics_model=dynamics_model, beta=dynamics_beta,
-        max_forcing_strength=max_forcing_strength)
+        max_forcing_strength=max_forcing_strength,
+        treatment_to_forcing_ratio=treatment_to_forcing_ratio)
 
 
 @st.cache_data(show_spinner=False)
@@ -251,7 +257,8 @@ def cached_validate_modern_beta(patterns, beta):
 def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, patterns,
                              recurrence_onset_month=15, treatment_onset_month=18,
                              ras_braf_wildtype=None, dynamics_model="modern_hopfield",
-                             dynamics_beta=3.0, max_forcing_strength=5.0):
+                             dynamics_beta=3.0, max_forcing_strength=5.0,
+                             treatment_to_forcing_ratio=DEFAULT_TREATMENT_TO_FORCING_RATIO):
     """
     Corre los mecanismos de tratamiento disponibles contra el vector de
     UN paciente, devuelve un resumen ordenado de mayor a menor
@@ -264,7 +271,7 @@ def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, pa
     _, x_base = cached_treatment_sim(
         model_matrix, n_genes, gene_order, driver_vector, patterns, None,
         treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
-        dynamics_model, dynamics_beta, max_forcing_strength)
+        dynamics_model, dynamics_beta, max_forcing_strength, treatment_to_forcing_ratio)
     h_base = hazard_from_trajectory(x_base)[-1]
 
     results = []
@@ -272,11 +279,14 @@ def evaluate_all_treatments(model_matrix, n_genes, gene_order, driver_vector, pa
         _, x_tx = cached_treatment_sim(
             model_matrix, n_genes, gene_order, driver_vector, patterns, name,
             treatment_onset_month, ras_braf_wildtype, 10, recurrence_onset_month,
-            dynamics_model, dynamics_beta, max_forcing_strength)
+            dynamics_model, dynamics_beta, max_forcing_strength, treatment_to_forcing_ratio)
         h_tx = hazard_from_trajectory(x_tx)[-1]
         results.append({
             "treatment": name, "h_base": h_base, "h_tx": h_tx,
             "delta": h_base - h_tx, "aplica": abs(h_base - h_tx) > 0.01,
+            "ratio_tx_forzamiento": treatment_to_forcing_ratio,
+            "base_treatment_strength": treatment_strength_from_ratio(
+                max_forcing_strength, treatment_to_forcing_ratio),
         })
     return sorted(results, key=lambda r: -r["delta"])
 
@@ -433,7 +443,18 @@ with st.sidebar:
                  "CMS4) con el criterio mas estricto -- exito medido DESPUES de retirar el "
                  "forzamiento, no solo mientras esta activo. Magnitud experimental especifica "
                  "de esta calibracion; no es una dosis clinica.")
-        st.caption("Reposo estabilizado, transición suave y driver normalizado (V2).")
+        treatment_to_forcing_ratio = st.slider(
+            "Intensidad del tratamiento (relativa al driver)", 0.05, 2.0,
+            float(DEFAULT_TREATMENT_TO_FORCING_RATIO), 0.05,
+            key="treatment_to_forcing_ratio",
+            help="base_treatment_strength = este cociente × fuerza máxima del driver. "
+                 "Es el ÚNICO número que gobierna el signo y la magnitud del 'beneficio "
+                 "simulado' en Paciente e Intervención: con 0.1 (valor histórico) el "
+                 "tratamiento es 10× más débil que la recaída por construcción y casi "
+                 "ningún mecanismo mueve el riesgo. No es una dosis ni una eficacia real.")
+        st.caption(f"Reposo estabilizado, transición suave y driver normalizado (V2). "
+                   f"Tratamiento = {treatment_to_forcing_ratio:.2f} × driver "
+                   f"(= {treatment_strength_from_ratio(max_forcing_strength, treatment_to_forcing_ratio):.2f}).")
 
     st.divider()
     st.markdown(
@@ -966,13 +987,16 @@ with tab_paciente:
         st.caption(
             "Los números de abajo son una **intensidad simulada arbitraria**, no una "
             "estimación de eficacia clínica ni un porcentaje de beneficio real -- ver "
-            "el aviso completo más abajo."
+            f"el aviso completo más abajo. Dependen directamente del cociente "
+            f"tratamiento/driver = **{treatment_to_forcing_ratio:.2f}** fijado en la barra lateral: "
+            "cámbialo y el ranking cambia."
         )
         with st.spinner("Evaluando mecanismos de tratamiento..."):
             resultados_tx = evaluate_all_treatments(
                 dynamics_matrix, n_genes, cohort_genes_p, driver_p, patterns,
                 dynamics_model=dynamics_model, dynamics_beta=dynamics_beta,
-                max_forcing_strength=max_forcing_strength)
+                max_forcing_strength=max_forcing_strength,
+                treatment_to_forcing_ratio=treatment_to_forcing_ratio)
 
         aplican = [r for r in resultados_tx if r["aplica"]]
         if aplican:
@@ -1200,13 +1224,17 @@ with tab_tx:
         dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns,
         treatment=None, n_timepoints=10, recurrence_onset_month=15,
         dynamics_model=dynamics_model, beta=dynamics_beta,
-        max_forcing_strength=max_forcing_strength)
+        max_forcing_strength=max_forcing_strength,
+        treatment_to_forcing_ratio=treatment_to_forcing_ratio)
     t_checks, x_tx = simulate_with_optional_treatment(
         dynamics_matrix, n_genes, gene_order, tx_driver_vector, patterns, treatment=treatment,
         treatment_onset_month=tx_onset, ras_braf_wildtype=ras_map[ras],
         n_timepoints=10, recurrence_onset_month=15,
         dynamics_model=dynamics_model, beta=dynamics_beta,
-        max_forcing_strength=max_forcing_strength)
+        max_forcing_strength=max_forcing_strength,
+        treatment_to_forcing_ratio=treatment_to_forcing_ratio)
+    st.caption(f"Cociente tratamiento/driver = {treatment_to_forcing_ratio:.2f} "
+               f"(barra lateral). El área sombreada es función directa de este número.")
     h_base, h_tx = hazard_from_trajectory(x_base), hazard_from_trajectory(x_tx)
     delta = h_base[-1] - h_tx[-1]
 
