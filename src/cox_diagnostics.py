@@ -221,6 +221,15 @@ def check_heterogeneity_across_cohorts(
     prueba formal: si la interaccion es significativa, hay evidencia
     estadistica de heterogeneidad real, no solo diferencias visuales
     en la tabla.
+
+    CORRECCION 2026-09-12: el modelo de interaccion conserva TODAS las
+    covariables principales (las demas dummies CMS y el estadio, si
+    entran en covariate_cols) y solo hace interactuar con la cohorte la
+    covariable que se esta probando. Antes se metia solo la dummy bajo
+    prueba, de modo que "CMS4 x cohorte" se estimaba en un modelo que
+    comparaba CMS4 contra "todo lo demas" -- distinto del modelo
+    principal y con la referencia mal definida. Tambien se usa
+    chi2.sf en vez de 1 - cdf (precision en p pequenos).
     """
     per_cohort = {}
     for cohort, sub in df.groupby(cohort_col):
@@ -275,22 +284,27 @@ def check_heterogeneity_across_cohorts(
             }
             continue
 
-        inter_df = df[[duration_col, event_col, cov]].copy()
+        # Modelo principal completo (todas las covariables) + dummies de
+        # cohorte + interacciones SOLO para la covariable bajo prueba.
+        inter_df = df[[duration_col, event_col] + covariate_cols].copy()
         inter_df = pd.concat([inter_df, cohort_dummies], axis=1)
         for cdum in cohort_dummies.columns:
             inter_df[f"{cov}_x_{cdum}"] = df[cov] * cohort_dummies[cdum]
         inter_df = inter_df.dropna()
         try:
+            from scipy.stats import chi2
             cph_int = CoxPHFitter()
             cph_int.fit(inter_df, duration_col=duration_col, event_col=event_col)
             inter_cols = [c for c in inter_df.columns if c.startswith(f"{cov}_x_")]
-            # prueba de razon de verosimilitud: con vs. sin terminos de interaccion
+            # prueba de razon de verosimilitud: con vs. sin terminos de interaccion,
+            # ambos sobre exactamente las mismas filas
             cph_no_int = CoxPHFitter()
             cph_no_int.fit(inter_df.drop(columns=inter_cols), duration_col=duration_col, event_col=event_col)
-            lr_stat = 2 * (cph_int.log_likelihood_ - cph_no_int.log_likelihood_)
-            from scipy.stats import chi2
-            p_het = 1 - chi2.cdf(lr_stat, df=len(inter_cols))
-            interaction_tests[cov] = {"chi2": lr_stat, "df": len(inter_cols), "p_heterogeneidad": p_het}
+            lr_stat = float(2 * (cph_int.log_likelihood_ - cph_no_int.log_likelihood_))
+            p_het = float(chi2.sf(max(lr_stat, 0.0), df=len(inter_cols)))
+            interaction_tests[cov] = {"chi2": lr_stat, "df": len(inter_cols), "p_heterogeneidad": p_het,
+                                      "n": int(len(inter_df)),
+                                      "covariables_principales": ", ".join(covariate_cols)}
         except Exception as e:
             interaction_tests[cov] = {"error": str(e)}
 
