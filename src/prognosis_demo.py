@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
 from modern_hopfield import (
+    DEFAULT_NORMALIZE_DRIVER,
+    resolve_forcing_ramp,
     patterns_to_matrix,
     relax_after_forcing_withdrawal,
     simulate_longitudinal_patient_hopfield_v2,
@@ -136,8 +138,11 @@ def simulate_longitudinal_patient(
             beta=resolved_beta,
             max_forcing_strength=max_forcing_strength,
             smooth_transition=True,
-            forcing_ramp_duration_months=12.0,
-            normalize_driver=True,
+            # calendario unico compartido con compare_forcing_sweep_v1_v2 y
+            # find_minimum_forcing_strength (ver modern_hopfield.resolve_forcing_ramp)
+            forcing_ramp_duration_months=resolve_forcing_ramp(
+                n_timepoints, months_between_checks, recurrence_onset_month),
+            normalize_driver=DEFAULT_NORMALIZE_DRIVER,
         )
     if dynamics_model != "projection_legacy":
         raise ValueError("dynamics_model debe ser 'modern_hopfield' o 'projection_legacy'")
