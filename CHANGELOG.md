@@ -1,5 +1,40 @@
 # Historial de cambios
 
+## 2026-09-12 — segunda revisión: cinco errores de código
+
+### Corregido
+- **`src/treatment_simulation_demo.py`: el término de tratamiento se congelaba por intervalo.**
+  `apply_treatment_perturbation(x_current)` se evaluaba una vez al inicio de cada bloque de
+  3 meses y se pasaba constante a `solve_ivp`; como el tratamiento es amortiguamiento
+  `−efficacy·x`, congelado se volvía un empuje constante en dirección `−x(t₀)` que no frena en
+  el origen. Ahora la eficacia direccional se congela por control (propiedad del estado
+  clínico) pero el factor `−x` se evalúa vivo dentro del campo, en ambos motores.
+- **Cociente tratamiento/forzamiento explícito.** Antes `base_treatment_strength=0.5` frente a
+  `max_forcing_strength=5.0` estaban enterrados: el tratamiento era 10× más débil que la recaída
+  por construcción y el "beneficio simulado" reflejaba ese cociente, no al paciente. Nuevo
+  parámetro `treatment_to_forcing_ratio` (`treatment_strength_from_ratio`), slider en la barra
+  lateral de la app, cociente mostrado junto a cada resultado y en el CLI. El valor por defecto
+  (0.1) reproduce exactamente el comportamiento histórico.
+- **`src/modern_hopfield.py`: calendario único de forzamiento.** Había tres: `find_minimum_forcing_strength`
+  (driver sin normalizar, 0.15/mes), `compare_forcing_sweep_v1_v2` (rampa = último control − onset)
+  y la app (rampa fija 12 meses). Nuevas constantes `DEFAULT_*` y `resolve_forcing_ramp()`;
+  las tres rutas usan rampa nominal de 12 meses acotada al último control y driver normalizado.
+  **La tabla de umbrales V1/V2 de `PROJECT_STATUS.md` debe regenerarse** con
+  `compare_forcing_sweep_v1_v2` antes de volver a citarla.
+- **`src/cox_diagnostics.check_heterogeneity_across_cohorts`:** el test de interacción cohorte×CMS
+  metía solo la dummy bajo prueba (comparaba CMS4 contra "todo lo demás" con una referencia
+  distinta al modelo principal). Ahora conserva todas las covariables principales y solo hace
+  interactuar la covariable probada; `chi2.sf` en lugar de `1 − cdf`; reporta `n` y las
+  covariables del modelo.
+- **`src/build_external_cohort_generic.py`: validación de unidades de tiempo.** `check_duration_units`
+  aborta si la duración parece estar en días (mediana > 240) o años (máximo ≤ 15); `--allow-suspicious-units`
+  lo degrada a aviso. Antes una cohorte en días entraba al Cox agrupado como "meses".
+
+### Añadido
+- `tests/test_regressions_2026_09_12.py` (8 tests). `tests/test_app_functions.py` actualizado con
+  el nuevo import. Suite: 192 → 213.
+
+
 ## 2026-09-11 — ¿qué añade CMS sobre la clínica de rutina? Cox ajustado por MMR
 
 Pregunta de una revisión externa: el eje CMS1 se solapa con dMMR, que ya tiene
