@@ -31,7 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attractor_model import build_model_from_patterns, dynamics
 from calibration import load_calibrated_patterns
 from modern_hopfield import (
+    DEFAULT_MONTHS_BETWEEN_CHECKS,
+    DEFAULT_N_TIMEPOINTS,
+    DEFAULT_RECURRENCE_ONSET_MONTH,
     _scheduled_forcing_strength,
+    resolve_forcing_ramp,
     compute_stabilizing_k,
     modern_hopfield_baseline,
     modern_hopfield_field,
@@ -46,17 +50,64 @@ from treatment_perturbation import TREATMENT_MECHANISMS, apply_treatment_perturb
 
 WONG = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
 
+# Cociente tratamiento/forzamiento por defecto. Historicamente la app usaba
+# base_treatment_strength=0.5 con max_forcing_strength=5.0 (cociente 0.1):
+# el tratamiento era 10x mas debil que la recaida por construccion, y el
+# "beneficio simulado" reflejaba ese cociente arbitrario, no al paciente.
+# Ahora el cociente es un parametro explicito y visible (ver
+# treatment_strength_from_ratio y la barra lateral de la app).
+DEFAULT_TREATMENT_TO_FORCING_RATIO = 0.1
+
+
+def treatment_strength_from_ratio(max_forcing_strength: float, ratio: float) -> float:
+    """base_treatment_strength = ratio * max_forcing_strength.
+
+    Expresar la intensidad del tratamiento RELATIVA al forzamiento de
+    recaida hace explicito el unico numero que gobierna el signo y la
+    magnitud del beneficio simulado. ratio=1 significa que, en el
+    estado donde la eficacia direccional es 1, el tratamiento empuja
+    tanto como la recaida.
+    """
+    if max_forcing_strength <= 0 or ratio <= 0:
+        raise ValueError("max_forcing_strength y ratio deben ser > 0")
+    return float(ratio * max_forcing_strength)
+
 
 def simulate_with_optional_treatment(
     model_matrix, n_genes, gene_order, recurrence_pattern, patterns,
     treatment=None, treatment_onset_month=None, ras_braf_wildtype=None,
-    n_timepoints=10, months_between_checks=3, recurrence_onset_month=15,
-    beta=None, base_treatment_strength=0.5,
+    n_timepoints=DEFAULT_N_TIMEPOINTS,
+    months_between_checks=DEFAULT_MONTHS_BETWEEN_CHECKS,
+    recurrence_onset_month=DEFAULT_RECURRENCE_ONSET_MONTH,
+    beta=None, base_treatment_strength=None,
     dynamics_model="modern_hopfield", max_forcing_strength=5.0,
+    treatment_to_forcing_ratio=DEFAULT_TREATMENT_TO_FORCING_RATIO,
+    forcing_ramp_duration_months=None,
 ):
+    """Simula la trayectoria con o sin tratamiento.
+
+    CORRECCION 2026-09-12 (bug real): antes el termino de tratamiento se
+    evaluaba UNA vez con el estado al inicio de cada intervalo de 3
+    meses y se pasaba constante a solve_ivp. Como el tratamiento esta
+    definido como amortiguamiento -efficacy*x, congelarlo lo convertia
+    en un empuje constante en la direccion -x(t0): no frena al llegar al
+    origen y puede cruzarlo. Ahora la perturbacion se evalua dentro del
+    campo, con el estado instantaneo xx. La eficacia direccional
+    (correlacion con el patron relevante) se congela al inicio del
+    intervalo -- es una propiedad del "estado clinico" en ese control,
+    no algo que cambie de un dia a otro -- y solo el factor -x es vivo.
+
+    base_treatment_strength: si es None se deriva de
+    treatment_to_forcing_ratio * max_forcing_strength (ver
+    treatment_strength_from_ratio). Pasarlo explicitamente sigue
+    funcionando para reproducir resultados previos.
+    """
     if dynamics_model not in {"modern_hopfield", "projection_legacy"}:
         raise ValueError("dynamics_model debe ser 'modern_hopfield' o 'projection_legacy'")
     resolved_beta = (3.0 if dynamics_model == "modern_hopfield" else 2.0) if beta is None else float(beta)
+    if base_treatment_strength is None:
+        base_treatment_strength = treatment_strength_from_ratio(
+            max_forcing_strength, treatment_to_forcing_ratio)
     if dynamics_model == "modern_hopfield":
         X = validate_modern_pattern_matrix(
             model_matrix, n_genes, n_patterns=len(patterns))
@@ -65,6 +116,8 @@ def simulate_with_optional_treatment(
         stabilizing_k = compute_stabilizing_k(X, resolved_beta)
         baseline = modern_hopfield_baseline(X)
         driver_direction = normalized_driver_direction(recurrence_pattern)
+        ramp = resolve_forcing_ramp(n_timepoints, months_between_checks,
+                                    recurrence_onset_month, forcing_ramp_duration_months)
     else:
         W = model_matrix
     t_checks = np.arange(0, n_timepoints * months_between_checks, months_between_checks)
@@ -73,43 +126,50 @@ def simulate_with_optional_treatment(
 
     for i, t in enumerate(t_checks):
         I_relapse = np.zeros(n_genes)
+        forcing_progress = 0.0
         if t >= recurrence_onset_month:
             months_since_onset = t - recurrence_onset_month
             if dynamics_model == "modern_hopfield":
                 strength, forcing_progress = _scheduled_forcing_strength(
-                    months_since_onset, max_forcing_strength, 12.0)
+                    months_since_onset, max_forcing_strength, ramp)
                 I_relapse = strength * driver_direction
             else:
                 strength = min(0.15 * months_since_onset, 0.7)
                 forcing_progress = 1.0
                 I_relapse = strength * recurrence_pattern
 
-        I_total = I_relapse
-        if treatment is not None and treatment_onset_month is not None and t >= treatment_onset_month:
-            I_treatment = apply_treatment_perturbation(
+        treatment_active = (treatment is not None and treatment_onset_month is not None
+                            and t >= treatment_onset_month)
+        if treatment_active:
+            # Eficacia direccional congelada en este control; el factor -x
+            # se evalua vivo dentro del campo (ver docstring).
+            I_probe = apply_treatment_perturbation(
                 x_current, gene_order, treatment, patterns,
-                base_strength=base_treatment_strength, ras_braf_wildtype=ras_braf_wildtype,
-            )
-            I_total = I_relapse + I_treatment
+                base_strength=base_treatment_strength, ras_braf_wildtype=ras_braf_wildtype)
+            norm_x = float(np.linalg.norm(x_current))
+            damping = float(np.linalg.norm(I_probe)) / norm_x if norm_x > 1e-12 else 0.0
+            # I_probe = -damping * x_current por construccion (apply_treatment_perturbation
+            # devuelve -efficacy * x); recuperamos el escalar para aplicarlo a xx.
+            treatment_term = lambda xx: -damping * xx
+        else:
+            treatment_term = lambda xx: 0.0
 
         if dynamics_model == "modern_hopfield":
             if t < recurrence_onset_month:
-                field = lambda tt, xx: modern_hopfield_field_stabilized(
-                    xx, X, resolved_beta, stabilizing_k, baseline)
+                field = lambda tt, xx: (
+                    modern_hopfield_field_stabilized(xx, X, resolved_beta, stabilizing_k, baseline)
+                    + treatment_term(xx))
             else:
                 quiescent_weight = max(0.0, 1.0 - forcing_progress)
                 field = lambda tt, xx: (
-                    modern_hopfield_field(xx, X, resolved_beta) + I_total
+                    modern_hopfield_field(xx, X, resolved_beta) + I_relapse
                     - quiescent_weight * baseline
-                    - quiescent_weight * stabilizing_k * xx)
-            sol = solve_ivp(field, (0, months_between_checks), x_current,
-                            method="RK45", rtol=1e-8, atol=1e-10)
+                    - quiescent_weight * stabilizing_k * xx
+                    + treatment_term(xx))
         else:
-            sol = solve_ivp(
-                dynamics, (0, months_between_checks), x_current,
-                args=(W, I_total, resolved_beta, 0.0, None), method="RK45",
-                rtol=1e-8, atol=1e-10,
-            )
+            field = lambda tt, xx: dynamics(tt, xx, W, I_relapse, resolved_beta) + treatment_term(xx)
+        sol = solve_ivp(field, (0, months_between_checks), x_current,
+                        method="RK45", rtol=1e-8, atol=1e-10)
         x_current = sol.y[:, -1]
         x_series[:, i] = x_current
 
@@ -130,6 +190,11 @@ def main():
                         help="Fuerza maxima del driver normalizado Modern Hopfield; "
                              "es especifica de la calibracion, no una dosis clinica")
     parser.add_argument("--n-timepoints", type=int, default=10)
+    parser.add_argument("--treatment-to-forcing-ratio", type=float,
+                        default=DEFAULT_TREATMENT_TO_FORCING_RATIO,
+                        help="Intensidad del tratamiento RELATIVA a la fuerza maxima del "
+                             "driver. Es el numero que gobierna el beneficio simulado; "
+                             "0.1 reproduce el comportamiento historico (0.5 vs 5.0).")
     parser.add_argument("--treatment-onset-month", type=int, default=18,
                          help="Mes en que se inicia el tratamiento (ej. al detectarse la alerta)")
     parser.add_argument("--ras-braf-wildtype", choices=["true", "false", "unknown"], default="unknown")
@@ -172,8 +237,12 @@ def main():
         dynamics_model=args.dynamics_model, beta=args.beta,
         max_forcing_strength=args.max_forcing_strength,
         n_timepoints=args.n_timepoints,
+        treatment_to_forcing_ratio=args.treatment_to_forcing_ratio,
     )
     hazard_treated = hazard_from_trajectory(x_treated)
+    print(f"  Cociente tratamiento/forzamiento = {args.treatment_to_forcing_ratio:.2f} "
+          f"(base_treatment_strength = {args.treatment_to_forcing_ratio * args.max_forcing_strength:.2f}). "
+          "El beneficio simulado es funcion directa de este cociente.")
 
     print("\nComparacion de hazard ordinal (sin tratamiento vs. con tratamiento):")
     for t, h_b, h_t in zip(t_checks, hazard_baseline, hazard_treated):
