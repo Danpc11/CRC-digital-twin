@@ -147,6 +147,45 @@ def derive_survival_from_dates(
     return df
 
 
+# Rango plausible para RFS/DFS en MESES en cohortes de CRC (seguimiento
+# habitual 5-10 anios). Una mediana > 240 casi seguro son DIAS; una
+# mediana < 1.5 casi seguro son ANIOS. Sin esta comprobacion, una
+# cohorte en dias entraba al Cox agrupado como "meses" y solo se notaba
+# por HR raros (2026-09-12).
+DURATION_MONTHS_MEDIAN_MAX = 240.0
+DURATION_MAX_IF_YEARS = 15.0
+
+
+def check_duration_units(duration_months: pd.Series, strict: bool = True) -> str:
+    """Comprueba que la duracion tenga pinta de estar en meses.
+
+    Devuelve "meses", "dias?" o "anios?". Con strict=True lanza
+    ValueError si no parece meses; con strict=False solo avisa.
+    """
+    vals = pd.to_numeric(duration_months, errors="coerce").dropna()
+    if len(vals) == 0:
+        print("AVISO: no hay duraciones numericas para validar unidades.")
+        return "sin_datos"
+    med, mx = float(vals.median()), float(vals.max())
+    if med > DURATION_MONTHS_MEDIAN_MAX:
+        verdict, hint = "dias?", "divide entre 30.4375"
+    elif mx <= DURATION_MAX_IF_YEARS:
+        # un seguimiento cuyo MAXIMO no llega a 15 "meses" no es un estudio
+        # de RFS en CRC; casi seguro son anios
+        verdict, hint = "anios?", "multiplica por 12"
+    else:
+        verdict, hint = "meses", ""
+    print(f"Unidades de duracion: mediana={med:.1f}, max={mx:.1f} -> {verdict}")
+    if verdict != "meses":
+        msg = (f"La duracion no parece estar en MESES ({verdict}; {hint}). "
+               "Todo el pipeline (Cox agrupado, horizontes de calibracion a 36/60 meses) "
+               "asume meses. Corrige la columna o usa --allow-suspicious-units si ya lo verificaste.")
+        if strict:
+            raise ValueError(msg)
+        print("AVISO: " + msg)
+    return verdict
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gse", required=True, help="Ej. GSE13294")
@@ -159,6 +198,9 @@ def main():
     parser.add_argument("--stage-col", default=None,
                          help="Columna de estadio clinico (Dukes/TNM/AJCC). Necesaria para el "
                               "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
+    parser.add_argument("--allow-suspicious-units", action="store_true",
+                        help="No abortar si la duracion parece estar en dias o anios en vez "
+                             "de meses (ver check_duration_units). Usar solo si ya lo verificaste.")
     parser.add_argument("--event-map", default=None,
                          help="Mapeo texto->numero si event-col no es ya 0/1, formato 'valorA=1,valorB=0'")
     parser.add_argument("--derive-survival-from-dates", default=None,
@@ -320,6 +362,7 @@ def main():
     merged["relapse_event"] = merged["relapse_event"].replace(NA_TOKENS, pd.NA)
 
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
+    check_duration_units(merged["relapse_free_months"], strict=not args.allow_suspicious_units)
 
     if args.event_map:
         event_map = dict(pair.split("=") for pair in args.event_map.split(","))
