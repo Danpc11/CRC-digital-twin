@@ -480,6 +480,51 @@ def sweep_beta_hopfield(
 
 
 
+# ----------------------------------------------------------------------
+# CALENDARIO UNICO DE FORZAMIENTO (2026-09-12)
+# ----------------------------------------------------------------------
+# Antes habia tres calendarios distintos para "la misma fuerza":
+#   * find_minimum_forcing_strength: driver SIN normalizar, 0.15/mes
+#   * compare_forcing_sweep_v1_v2: driver normalizado, rampa = ultimo
+#     control - onset (dependia de n_timepoints)
+#   * app / prognosis_demo: driver normalizado, rampa fija de 12 meses
+# asi que la tabla de umbrales de PROJECT_STATUS.md no describia lo que
+# el usuario veia en la app. Todo pasa ahora por estas constantes y por
+# resolve_forcing_ramp(); cualquier funcion que reciba
+# forcing_ramp_duration_months=None usa este calendario.
+DEFAULT_RECURRENCE_ONSET_MONTH = 15
+DEFAULT_MONTHS_BETWEEN_CHECKS = 3
+DEFAULT_N_TIMEPOINTS = 10
+DEFAULT_FORCING_RAMP_MONTHS = 12.0
+DEFAULT_NORMALIZE_DRIVER = True
+
+
+def resolve_forcing_ramp(
+    n_timepoints: int, months_between_checks: int, recurrence_onset_month: float,
+    ramp_duration_months: float | None = None,
+    require_post_onset_check: bool = False,
+) -> float:
+    """Rampa efectiva: la nominal (12 meses por defecto), acotada para que
+    la fuerza maxima se alcance a mas tardar en el ultimo control. Con el
+    horizonte estandar (10 controles cada 3 meses, onset 15) ambas
+    coinciden: 27 - 15 = 12.
+
+    Si la recaida cae fuera de la ventana (ningun control posterior al
+    onset) el forzamiento nunca se aplica; se devuelve la rampa nominal
+    salvo que require_post_onset_check=True (barridos que necesitan
+    medir el efecto del forzamiento), en cuyo caso se lanza ValueError."""
+    nominal = DEFAULT_FORCING_RAMP_MONTHS if ramp_duration_months is None else float(ramp_duration_months)
+    if nominal <= 0:
+        raise ValueError("forcing_ramp_duration_months debe ser > 0")
+    last_check = (n_timepoints - 1) * months_between_checks
+    available = last_check - recurrence_onset_month
+    if available <= 0:
+        if require_post_onset_check:
+            raise ValueError("La simulacion debe incluir al menos un control posterior a la recaida")
+        return nominal
+    return float(min(nominal, available))
+
+
 def _scheduled_forcing_strength(
     months_since_onset: float, max_strength: float,
     ramp_duration_months: float | None = None,
@@ -568,7 +613,11 @@ def simulate_longitudinal_patient_hopfield(
 def find_minimum_forcing_strength(
     patterns: dict, target_label: str, beta: float = 3.0,
     strength_candidates=None, corr_threshold: float = 0.9,
-    recurrence_onset_month: int = 15, n_timepoints: int = 10,
+    recurrence_onset_month: int = DEFAULT_RECURRENCE_ONSET_MONTH,
+    n_timepoints: int = DEFAULT_N_TIMEPOINTS,
+    months_between_checks: int = DEFAULT_MONTHS_BETWEEN_CHECKS,
+    forcing_ramp_duration_months: float | None = None,
+    normalize_driver: bool = DEFAULT_NORMALIZE_DRIVER,
 ) -> dict:
     """
     Busca la fuerza de forzamiento MINIMA necesaria para que forzar
@@ -596,13 +645,18 @@ def find_minimum_forcing_strength(
     n_genes = X.shape[0]
     idx_target = labels.index(target_label)
     p_target = X[:, idx_target]
+    ramp = resolve_forcing_ramp(n_timepoints, months_between_checks,
+                                recurrence_onset_month, forcing_ramp_duration_months,
+                                require_post_onset_check=True)
 
     resultados = []
     umbral_minimo_encontrado = None
     for fuerza in strength_candidates:
         t, x = simulate_longitudinal_patient_hopfield(
             X, p_target, n_genes, beta=beta, max_forcing_strength=fuerza,
-            n_timepoints=n_timepoints, recurrence_onset_month=recurrence_onset_month)
+            n_timepoints=n_timepoints, months_between_checks=months_between_checks,
+            recurrence_onset_month=recurrence_onset_month,
+            forcing_ramp_duration_months=ramp, normalize_driver=normalize_driver)
         x_final = x[:, -1]
 
         if np.std(x_final) < 1e-12:
@@ -628,6 +682,8 @@ def find_minimum_forcing_strength(
         "patron_objetivo": target_label,
         "umbral_minimo_encontrado": umbral_minimo_encontrado,
         "detalle": resultados,
+        "calendario": {"rampa_meses": ramp, "driver_normalizado": normalize_driver,
+                       "onset_mes": recurrence_onset_month},
     }
 
 
@@ -830,9 +886,15 @@ def compare_forcing_sweep_v1_v2(
     corr_threshold: float = 0.9, recurrence_onset_month: int = 15,
     n_timepoints: int = 10, months_between_checks: int = 3,
     smooth_transition: bool = True, withdrawal_time: float = 30.0,
-    normalize_driver: bool = True, residual_threshold: float = 1e-6,
+    normalize_driver: bool = DEFAULT_NORMALIZE_DRIVER, residual_threshold: float = 1e-6,
+    forcing_ramp_duration_months: float | None = None,
 ) -> "pd.DataFrame":
     """Barrido apples-to-apples de fuerza sin y con estabilizacion.
+
+    El calendario de forzamiento es el mismo que usa la app
+    (resolve_forcing_ramp: rampa nominal de 12 meses acotada al ultimo
+    control), asi que los umbrales que salen de aqui describen lo que
+    el usuario ve.
 
     V1 es la dinamica Modern Hopfield sin reposo estabilizado. V2 usa
     correccion basal, k calibrado y transicion opcionalmente suave.
@@ -849,10 +911,9 @@ def compare_forcing_sweep_v1_v2(
 
     X, labels = patterns_to_matrix(patterns)
     k = compute_stabilizing_k(X, beta)
-    last_check_month = (n_timepoints - 1) * months_between_checks
-    ramp_duration = last_check_month - recurrence_onset_month
-    if ramp_duration <= 0:
-        raise ValueError("La simulacion debe incluir al menos un control posterior a la recaida")
+    ramp_duration = resolve_forcing_ramp(n_timepoints, months_between_checks,
+                                         recurrence_onset_month, forcing_ramp_duration_months,
+                                         require_post_onset_check=True)
     baseline_diag = diagnose_pre_recurrence_residual(
         patterns, beta=beta, duration_months=recurrence_onset_month,
         months_between_checks=months_between_checks, stabilizing_k=k)
