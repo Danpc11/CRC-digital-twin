@@ -36,7 +36,11 @@ from modern_hopfield import patterns_to_matrix
 from prognosis import hazard_from_trajectory, detect_recurrence_signal
 from prognosis_demo import EVIDENCE_STRENGTH, simulate_longitudinal_patient, classify_current_state
 from treatment_perturbation import TREATMENT_MECHANISMS, describe_treatment
-from treatment_simulation_demo import simulate_with_optional_treatment
+from treatment_simulation_demo import (
+    DEFAULT_TREATMENT_TO_FORCING_RATIO,
+    simulate_with_optional_treatment,
+    treatment_strength_from_ratio,
+)
 from synthetic_data import generate_synthetic_cohort
 
 CMS_COLOR = {"CMS1_MSI_immune": "#0072B2", "CMS2_canonical_WNT": "#E69F00",
