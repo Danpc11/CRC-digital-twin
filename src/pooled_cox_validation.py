@@ -25,14 +25,18 @@ import argparse
 from pathlib import Path
 import sys
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter, KaplanMeierFitter
+from lifelines.exceptions import ConvergenceWarning
 from lifelines.utils import concordance_index
 from scipy.stats import chi2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clinical_covariates import STAGE_REFERENCE, expand_stage_categorical, prepare_covariates
+from clinical_covariates import (STAGE_REFERENCE, collapse_sparse_stage_levels,
+                                 expand_stage_categorical, prepare_covariates)
 
 DEFAULT_CMS_REFERENCE = "CMS2_canonical_WNT"
 
@@ -43,6 +47,7 @@ def build_cox_frame(
     include_cms: bool = True, cms_levels: list[str] | None = None,
     group_col: str = "predicted_cms",
     stage_categorical: bool = True,
+    verbose_stage: bool = False,
 ) -> pd.DataFrame:
     """Construye exactamente la misma muestra para modelos Cox anidados.
 
@@ -56,6 +61,11 @@ def build_cox_frame(
     work = data
     if stage_categorical and "stage_harmonized" in clinical_covariates:
         work, stage_cols = expand_stage_categorical(data)
+        # niveles de estadio sin eventos suficientes -> fusionar con la
+        # referencia, o el Cox sufre separacion completa (ver docstring
+        # de collapse_sparse_stage_levels)
+        stage_cols = collapse_sparse_stage_levels(
+            work, stage_cols, event_col, verbose=verbose_stage)
         clinical_covariates = [c for c in clinical_covariates if c != "stage_harmonized"] + stage_cols
     base_cols = [duration_col, event_col, "cohort"] + clinical_covariates
     base = work[base_cols].reset_index(drop=True).copy()
@@ -145,6 +155,10 @@ def bootstrap_cindex_increment(
     rng = np.random.default_rng(seed)
     levels = sorted(data[group_col].dropna().unique())
     rows = []
+    # Los avisos de convergencia de lifelines por remuestreo (cientos de
+    # lineas identicas) ocultan la salida util. Los remuestreos singulares
+    # ya se cuentan aparte via delta NaN, que es la senal relevante.
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
     for iteration in range(iterations):
         pieces = []
         for _, cohort_df in data.groupby("cohort", sort=False):
@@ -428,7 +442,8 @@ def main():
 
                 stage_only_df = build_cox_frame(
                     adj_data, args.duration_col, args.event_col, reference,
-                    ["stage_harmonized"], include_cms=False, group_col=args.group_col)
+                    ["stage_harmonized"], include_cms=False, group_col=args.group_col,
+                    verbose_stage=True)
                 adj_df_for_c = build_cox_frame(
                     adj_data, args.duration_col, args.event_col, reference,
                     ["stage_harmonized"], include_cms=True, cms_levels=cms_levels,
