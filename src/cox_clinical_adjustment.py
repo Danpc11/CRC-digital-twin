@@ -188,7 +188,8 @@ def fit_cox(
     """Ajusta un Cox con las covariables dadas; estratifica por cohorte solo si hay >1."""
     cox_df = build_cox_frame(
         data, duration_col, event_col, reference, covariate_cols,
-        include_cms=include_cms, cms_levels=cms_levels, group_col=group_col)
+        include_cms=include_cms, cms_levels=cms_levels, group_col=group_col,
+        verbose_stage=True)
     strata = ["cohort"] if cox_df["cohort"].nunique() > 1 else None
     fit_df = cox_df if strata else cox_df.drop(columns=["cohort"])
     cph = CoxPHFitter().fit(fit_df, "duration", "event", strata=strata)
