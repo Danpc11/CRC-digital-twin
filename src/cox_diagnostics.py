@@ -480,6 +480,8 @@ def main():
             df = df.dropna(subset=["stage_harmonized"])
             # estadio como indicadores (ref. estadio II), NO como numero 1-2-3
             df, stage_cols = expand_stage_categorical(df)
+            from clinical_covariates import collapse_sparse_stage_levels
+            stage_cols = collapse_sparse_stage_levels(df, stage_cols, args.event_col)
             covariate_cols = covariate_cols + stage_cols
             print(f"Estadio armonizado incluido como categorico {stage_cols} -- "
                   f"n tras excluir sin estadio: {len(df)}")
