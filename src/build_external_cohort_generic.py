@@ -216,6 +216,14 @@ def convert_duration_units(duration: pd.Series, units: str) -> pd.Series:
 EVENT_RATE_MAX_PLAUSIBLE = 0.60
 
 
+def _looks_numeric(value: str) -> bool:
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def check_event_coding(event: pd.Series, duration: pd.Series, strict: bool = True) -> dict:
     """
     Detecta una columna de evento invertida (indicador de CENSURA leido
@@ -479,18 +487,33 @@ def main():
     merged["relapse_free_months"] = convert_duration_units(
         merged["relapse_free_months"], args.duration_units)
     check_duration_units(merged["relapse_free_months"], strict=not args.allow_suspicious_units)
-    check_event_coding(merged["relapse_event"], merged["relapse_free_months"],
-                       strict=not args.allow_suspicious_event_coding)
 
+    # --event-map va ANTES de check_event_coding: el validador debe juzgar la
+    # columna FINAL (ya recodificada), no la cruda. Al revés abortaba sin
+    # llegar nunca a aplicar el mapa, y "--event-map 0=1,1=0" no tenia efecto.
     if args.event_map:
         event_map = dict(pair.split("=") for pair in args.event_map.split(","))
         event_map = {k: int(v) for k, v in event_map.items()}
-        unmapped = set(merged["relapse_event"].dropna().unique()) - set(event_map.keys())
+        raw_event = merged["relapse_event"]
+        # Las claves del mapa llegan como texto ("0", "1", "yes"); si la columna
+        # ya es numerica, comparar texto contra numero no casa con nada.
+        keys_numeric = all(_looks_numeric(k) for k in event_map)
+        if keys_numeric and pd.api.types.is_numeric_dtype(raw_event):
+            event_map = {float(k): v for k, v in event_map.items()}
+            present = set(pd.to_numeric(raw_event, errors="coerce").dropna().unique())
+        else:
+            raw_event = raw_event.astype("string").str.strip()
+            present = set(raw_event.dropna().unique())
+        unmapped = present - set(event_map.keys())
         if unmapped:
             raise ValueError(f"Valores no cubiertos por --event-map: {unmapped}. Mapeo actual: {event_map}")
-        merged["relapse_event"] = merged["relapse_event"].map(event_map)
+        merged["relapse_event"] = raw_event.map(event_map)
+        print(f"Evento recodificado con --event-map: {args.event_map}")
     else:
         merged["relapse_event"] = pd.to_numeric(merged["relapse_event"], errors="coerce")
+
+    check_event_coding(merged["relapse_event"], merged["relapse_free_months"],
+                       strict=not args.allow_suspicious_event_coding)
 
     merged.index.name = "sample_id"
     merged = merged.reset_index()
