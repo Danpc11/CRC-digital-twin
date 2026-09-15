@@ -475,11 +475,14 @@ def main():
                   "(ver build_external_cohort_generic.py).")
         else:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from clinical_covariates import prepare_covariates
+            from clinical_covariates import expand_stage_categorical, prepare_covariates
             df = prepare_covariates(df, stage_col="stage", cohort_col="cohort")
             df = df.dropna(subset=["stage_harmonized"])
-            covariate_cols = covariate_cols + ["stage_harmonized"]
-            print(f"Estadio armonizado incluido -- n tras excluir sin estadio: {len(df)}")
+            # estadio como indicadores (ref. estadio II), NO como numero 1-2-3
+            df, stage_cols = expand_stage_categorical(df)
+            covariate_cols = covariate_cols + stage_cols
+            print(f"Estadio armonizado incluido como categorico {stage_cols} -- "
+                  f"n tras excluir sin estadio: {len(df)}")
 
     print(f"Referencia: {reference} | covariables: {covariate_cols} | n={len(df)}\n")
     run_full_diagnostics(df, args.duration_col, args.event_col, covariate_cols,
