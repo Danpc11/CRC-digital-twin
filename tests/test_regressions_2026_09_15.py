@@ -267,3 +267,19 @@ def test_build_cox_frame_drops_separated_stage_level():
     assert "stage_III" in frame.columns
     cph = CoxPHFitter().fit(frame, "duration", "event", strata=["cohort"])
     assert np.isfinite(cph.params_).all()
+
+
+def test_none_level_excluded_from_cox_levels():
+    """'none' no es un subtipo: es ausencia de etiqueta del consorcio
+    (GSE17537 entero, mas los no-consenso). Entraba al Cox con cms_label
+    como una quinta clase (cms_none HR=2.60) y desplazaba los demas."""
+    from pooled_cox_validation import drop_unlabeled
+    df = _synthetic_survival(n=300, seed=8)
+    df["stage_harmonized"] = df["stage"].astype(int)
+    df.loc[df.index[:60], "predicted_cms"] = "none"
+    limpio = drop_unlabeled(df, "predicted_cms", verbose=False)
+    assert len(limpio) == 240 and "none" not in set(limpio["predicted_cms"])
+    frame = build_cox_frame(df, "relapse_free_months", "relapse_event",
+                            DEFAULT_CMS_REFERENCE, ["stage_harmonized"])
+    assert "cms_none" not in frame.columns
+    assert len(frame) <= 240
