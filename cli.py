@@ -13,6 +13,7 @@ USO:
     python3 cli.py pooled-cox --cohort NOMBRE ruta.tsv [--cohort ...] --output results/
     python3 cli.py cox-diagnostics --input scored.tsv [--input ...] --adjust-stage --output results/
     python3 cli.py cox-clinical --cohort NOMBRE scored.tsv --covariate msi_status=dMMR --output results/
+    python3 cli.py cox-chemo --cohort GSE39582 scored.tsv --chemo-col adjuvant_chemo --chemo-yes Y --output results/
     python3 cli.py dynamics-diagnostics --patterns P.tsv --output results/
     python3 cli.py prognosis --patterns P.tsv
     python3 cli.py simulate-treatment --patterns P.tsv --treatment immunotherapy_antiPD1
@@ -152,6 +153,16 @@ def cmd_cox_clinical(args):
     if args.keep_stage_iv:
         argv.append("--keep-stage-iv")
     _run_module("cox_clinical_adjustment.py", argv)
+
+
+def cmd_cox_chemo(args):
+    argv = []
+    for name, path in args.cohort:
+        argv += ["--cohort", name, path]
+    argv += ["--chemo-col", args.chemo_col, "--chemo-yes", args.chemo_yes,
+             "--group-col", args.group_col, "--reference", args.reference,
+             "--stage-col", args.stage_col, "--stages", args.stages, "--output", args.output]
+    _run_module("cox_treatment_interaction.py", argv)
 
 
 def cmd_dynamics_diagnostics(args):
@@ -322,6 +333,19 @@ def build_parser():
     s.add_argument("--keep-stage-iv", action="store_true")
     s.add_argument("--output", default="results_cox_clinical")
     s.set_defaults(func=cmd_cox_clinical)
+
+    s = sub.add_parser("cox-chemo",
+                        help="Interaccion CMS x quimioterapia adyuvante (pregunta PREDICTIVA, observacional)")
+    s.add_argument("--cohort", action="append", nargs=2, metavar=("NOMBRE", "SCORED_TSV"), required=True)
+    s.add_argument("--chemo-col", default="adjuvant_chemo")
+    s.add_argument("--chemo-yes", default="Y")
+    s.add_argument("--group-col", choices=["predicted_cms", "modern_hopfield_cms", "cms_label"],
+                   default="predicted_cms")
+    s.add_argument("--reference", default="CMS2_canonical_WNT")
+    s.add_argument("--stage-col", default="stage")
+    s.add_argument("--stages", default="2,3")
+    s.add_argument("--output", default="results_cox_chemo")
+    s.set_defaults(func=cmd_cox_chemo)
 
     s = sub.add_parser("dynamics-diagnostics",
                         help="Equilibrios y estabilidad reales de la dinamica no lineal (jacobiano, cuencas de atraccion)")
