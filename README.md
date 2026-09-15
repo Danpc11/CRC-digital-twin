@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-213%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-223%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -27,7 +27,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (213 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (223 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -124,6 +124,13 @@ python3 cli.py modern-hopfield \
 
 La salida incluye el residuo del campo en el origen, dirección del desplazamiento basal,
 detalle V1/V2 por CMS y los primeros candidatos que alcanzan el criterio de recuperación.
+
+### Pronóstico vs. predicción
+
+El Cox agrupado responde una pregunta **pronóstica** (qué subtipo recae más). La pregunta
+**predictiva** ("¿le sirve la quimioterapia adyuvante a este subtipo?") requiere la interacción
+CMS × quimio: `python3 cli.py cox-chemo --cohort GSE39582 results_gse39582/scored_cohort.tsv`.
+Es un análisis observacional con confusión por indicación: genera hipótesis, no recomendaciones.
 
 ### Interfaz web
 
