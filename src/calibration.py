@@ -89,7 +89,7 @@ def infer_gene_columns(df: pd.DataFrame, non_gene_cols: set[str] | None = None) 
         "overall_survival_months", "death_event",
         # covariables clinicas
         "stage", "stage_harmonized", "age", "sex", "gender",
-        "tumor_location", "adjuvant_chemo",
+        "tumor_location", "adjuvant_chemo", "adjuvant_chemo_type",
         # estatus molecular (no expresion)
         "kras_status", "braf_status", "msi_status",
         # salidas del propio pipeline
