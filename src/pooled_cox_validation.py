@@ -40,6 +40,23 @@ from clinical_covariates import (STAGE_REFERENCE, collapse_sparse_stage_levels,
 
 DEFAULT_CMS_REFERENCE = "CMS2_canonical_WNT"
 
+# "none" NO es un subtipo: es "el consorcio no le asigno etiqueta" (no
+# consenso, o cohorte que el consorcio nunca etiqueto -- GSE17537 entero).
+# Con --group-col cms_label entraba al Cox como si fuera una quinta clase
+# (cms_none HR=2.60), mezclando pacientes de todos los subtipos reales y
+# desplazando los coeficientes de los demas. Se excluye siempre.
+NON_SUBTYPE_LEVELS = {"none", "NOLBL", "", "nan"}
+
+
+def drop_unlabeled(data: pd.DataFrame, group_col: str, verbose: bool = True) -> pd.DataFrame:
+    """Quita las filas sin subtipo asignable antes de modelar."""
+    mask = data[group_col].astype("string").str.strip().isin(NON_SUBTYPE_LEVELS)
+    n = int(mask.sum())
+    if n and verbose:
+        print(f"Excluidos {n} pacientes sin subtipo asignado en '{group_col}' "
+              f"(nivel 'none'): no es un subtipo, es ausencia de etiqueta.")
+    return data[~mask].copy()
+
 
 def build_cox_frame(
     data: pd.DataFrame, duration_col: str, event_col: str,
@@ -58,9 +75,9 @@ def build_cox_frame(
     analisis de sensibilidad frente a la version anterior).
     """
     clinical_covariates = list(clinical_covariates or [])
-    work = data
+    work = drop_unlabeled(data, group_col, verbose=False) if include_cms else data
     if stage_categorical and "stage_harmonized" in clinical_covariates:
-        work, stage_cols = expand_stage_categorical(data)
+        work, stage_cols = expand_stage_categorical(work)
         # niveles de estadio sin eventos suficientes -> fusionar con la
         # referencia, o el Cox sufre separacion completa (ver docstring
         # de collapse_sparse_stage_levels)
@@ -71,7 +88,9 @@ def build_cox_frame(
     base = work[base_cols].reset_index(drop=True).copy()
     base = base.rename(columns={duration_col: "duration", event_col: "event"})
     if include_cms:
-        levels = cms_levels or sorted(work[group_col].dropna().unique())
+        levels = cms_levels or sorted(
+            l for l in work[group_col].dropna().unique()
+            if str(l).strip() not in NON_SUBTYPE_LEVELS)
         if reference not in levels:
             raise ValueError(f"La referencia '{reference}' no aparece en {group_col}")
         groups = pd.Categorical(work[group_col], categories=levels)
@@ -374,7 +393,10 @@ def main():
     print(f"\nSubtipo de referencia (hazard ratio = 1.0 para este grupo): {reference}")
     print(f"Estadio: indicadores categoricos con estadio {STAGE_REFERENCE} (II) de referencia.")
 
-    cms_levels = sorted(pooled[args.group_col].dropna().unique())
+    pooled = drop_unlabeled(pooled, args.group_col)
+    cms_levels = sorted(
+        l for l in pooled[args.group_col].dropna().unique()
+        if str(l).strip() not in NON_SUBTYPE_LEVELS)
 
     def fit_cox(
         data: pd.DataFrame, covariates: list, label: str,
