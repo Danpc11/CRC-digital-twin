@@ -193,6 +193,26 @@ def ensure_log2_scale(expr: pd.DataFrame, strict: bool = True) -> tuple[pd.DataF
     return expr, "log2"
 
 
+DURATION_UNIT_FACTORS = {"months": 1.0, "days": 1.0 / 30.4375, "years": 12.0}
+
+
+def convert_duration_units(duration: pd.Series, units: str) -> pd.Series:
+    """
+    Convierte la duracion a MESES desde la unidad declarada.
+
+    Existe porque GSE33113 anota "time to meta or recurrence" en DIAS:
+    sin convertir, una mediana de 1179 dias entraba al pipeline como
+    1179 "meses" y los horizontes de calibracion a 36/60 meses (y el
+    Cox agrupado junto a cohortes en meses) quedaban sin sentido.
+    """
+    if units not in DURATION_UNIT_FACTORS:
+        raise ValueError(f"--duration-units debe ser uno de {sorted(DURATION_UNIT_FACTORS)}")
+    factor = DURATION_UNIT_FACTORS[units]
+    if units != "months":
+        print(f"Convirtiendo duracion de {units} a meses (factor {factor:.6g}).")
+    return pd.to_numeric(duration, errors="coerce") * factor
+
+
 def check_duration_units(duration_months: pd.Series, strict: bool = True) -> str:
     """Comprueba que la duracion tenga pinta de estar en meses.
 
@@ -238,6 +258,9 @@ def main():
     parser.add_argument("--stage-col", default=None,
                          help="Columna de estadio clinico (Dukes/TNM/AJCC). Necesaria para el "
                               "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
+    parser.add_argument("--duration-units", default="months",
+                        choices=["months", "days", "years"],
+                        help="Unidad de --duration-col en el fenotipo original. GSE33113 usa days.")
     parser.add_argument("--no-auto-log2", action="store_true",
                         help="No transformar a log2 aunque la expresion parezca lineal")
     parser.add_argument("--allow-suspicious-units", action="store_true",
@@ -408,6 +431,8 @@ def main():
     merged["relapse_event"] = merged["relapse_event"].replace(NA_TOKENS, pd.NA)
 
     merged["relapse_free_months"] = pd.to_numeric(merged["relapse_free_months"], errors="coerce")
+    merged["relapse_free_months"] = convert_duration_units(
+        merged["relapse_free_months"], args.duration_units)
     check_duration_units(merged["relapse_free_months"], strict=not args.allow_suspicious_units)
 
     if args.event_map:
