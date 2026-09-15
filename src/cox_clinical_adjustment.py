@@ -62,7 +62,7 @@ from lifelines import CoxPHFitter
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clinical_covariates import harmonize_stage
 from cox_diagnostics import check_proportional_hazards
-from pooled_cox_validation import build_cox_frame, nested_model_increment
+from pooled_cox_validation import build_cox_frame, nested_model_increment, stratified_c_index
 
 
 def parse_level_spec(spec: str) -> tuple[str, str]:
@@ -136,13 +136,46 @@ def crosstab_group_by_covariate(df: pd.DataFrame, group_col: str, covariate_col:
     return pd.crosstab(df[group_col], cov, margins=True)
 
 
-def _summary_table(cph: CoxPHFitter, label: str, n: int, events: int) -> pd.DataFrame:
+MIN_N_PER_LEVEL = 10
+MIN_EVENTS_PER_LEVEL = 5
+
+
+def level_counts(data: pd.DataFrame, group_col: str, event_col: str) -> pd.DataFrame:
+    """n y eventos por nivel de CMS en la muestra que entra al modelo."""
+    g = data.groupby(group_col, observed=True)[event_col]
+    return pd.DataFrame({"n": g.size(), "eventos": g.sum().astype(int)})
+
+
+def sparse_level_warnings(data: pd.DataFrame, group_col: str, event_col: str,
+                          label: str = "") -> list[str]:
+    """
+    Avisa cuando un nivel de CMS tiene pocas observaciones o pocos eventos:
+    el HR de ese nivel es inestable (IC95% de varios ordenes de magnitud,
+    p. ej. CMS1 dentro de pMMR con ~15 pacientes) y no debe interpretarse.
+    Devuelve la lista de mensajes (vacia si todo esta bien).
+    """
+    msgs = []
+    for level, row in level_counts(data, group_col, event_col).iterrows():
+        if row["n"] < MIN_N_PER_LEVEL or row["eventos"] < MIN_EVENTS_PER_LEVEL:
+            msgs.append(
+                f"[{label}] nivel {level}: n={int(row['n'])}, eventos={int(row['eventos'])} "
+                f"(<{MIN_N_PER_LEVEL} obs o <{MIN_EVENTS_PER_LEVEL} eventos) -- HR INESTABLE, "
+                "no interpretar; considerar agrupar niveles o un Cox penalizado.")
+    return msgs
+
+
+def _summary_table(cph: CoxPHFitter, label: str, n: int, events: int,
+                   cox_df: pd.DataFrame | None = None) -> pd.DataFrame:
     s = cph.summary[["exp(coef)", "exp(coef) lower 95%", "exp(coef) upper 95%", "p"]].copy()
     s.columns = ["HR", "IC95_inf", "IC95_sup", "p"]
     s.insert(0, "modelo", label)
     s["n"] = n
     s["eventos"] = events
     s["c_index"] = cph.concordance_index_
+    if cox_df is not None and "cohort" in cox_df.columns and cox_df["cohort"].nunique() > 1:
+        s["c_index_estratificado"] = stratified_c_index(cph, cox_df)
+    # marca de inestabilidad: IC95 que abarca mas de 2 ordenes de magnitud
+    s["hr_inestable"] = (s["IC95_sup"] / s["IC95_inf"]) > 100
     return s
 
 
@@ -177,14 +210,20 @@ def fit_nested_clinical_models(
         "C_estadio_clinica": (["stage_harmonized"] + indicator_cols, False),
         "D_cms_estadio_clinica": (["stage_harmonized"] + indicator_cols, True),
     }
+    print(f"\nn y eventos por nivel de {group_col} (muestra de los modelos A-D):")
+    print(level_counts(data, group_col, event_col).to_string())
+    for msg in sparse_level_warnings(data, group_col, event_col, "A-D"):
+        print("AVISO: " + msg)
     models, tables = {}, []
     for label, (covs, with_cms) in spec.items():
         cph, cox_df = fit_cox(data, covs, reference, with_cms, group_col,
                               duration_col, event_col, cms_levels)
         models[label] = (cph, cox_df)
-        tables.append(_summary_table(cph, label, n, events))
+        tables.append(_summary_table(cph, label, n, events, cox_df))
     increment = nested_model_increment(models["C_estadio_clinica"][0],
-                                       models["D_cms_estadio_clinica"][0])
+                                       models["D_cms_estadio_clinica"][0],
+                                       models["C_estadio_clinica"][1],
+                                       models["D_cms_estadio_clinica"][1])
     # nested_model_increment nombra las columnas pensando en estadio;
     # aqui la linea base es estadio + clinica -- renombrar para no confundir.
     increment = {
@@ -193,6 +232,9 @@ def fit_nested_clinical_models(
         "c_index_estadio_clinica": increment["c_index_stage_only"],
         "c_index_mas_cms": increment["c_index_stage_plus_cms"],
         "delta_c_index": increment["delta_c_index"],
+        "c_index_estratificado_estadio_clinica": increment.get("c_index_stratified_stage_only"),
+        "c_index_estratificado_mas_cms": increment.get("c_index_stratified_stage_plus_cms"),
+        "delta_c_index_estratificado": increment.get("delta_c_index_stratified"),
         "n": n, "eventos": events,
     }
     return {"models": models, "summary": pd.concat(tables), "increment": increment}
@@ -212,10 +254,15 @@ def fit_subgroup_model(
         print(f"AVISO: subgrupo {subgroup_col}={subgroup_level} muy chico "
               f"(n={len(sub)}, eventos={int(sub[event_col].sum())}); se omite el modelo E.")
         return None
+    label = f"E_cms_estadio_solo_{subgroup_col}={subgroup_level}"
+    counts = level_counts(sub, group_col, event_col)
+    print(f"\n[{label}] n y eventos por nivel de {group_col}:")
+    print(counts.to_string())
+    for msg in sparse_level_warnings(sub, group_col, event_col, label):
+        print("AVISO: " + msg)
     cph, cox_df = fit_cox(sub, ["stage_harmonized"], reference, True, group_col,
                           duration_col, event_col)
-    label = f"E_cms_estadio_solo_{subgroup_col}={subgroup_level}"
-    return cph, _summary_table(cph, label, len(sub), int(sub[event_col].sum()))
+    return cph, _summary_table(cph, label, len(sub), int(sub[event_col].sum()), cox_df)
 
 
 def main():
