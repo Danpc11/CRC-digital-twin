@@ -52,6 +52,13 @@ CLINICAL_COLS = {
     "characteristics__mmr.status": "msi_status",
     "characteristics__kras.mutation": "kras_status",
     "characteristics__braf.mutation": "braf_status",
+    # Quimioterapia adyuvante (Y/N) y tipo (5FU, FOLFOX, FUFOL...). Es la
+    # variable que permite pasar de PRONOSTICO (CMS4 recae mas) a
+    # PREDICCION (¿la quimio le sirve mas o menos a CMS4?) mediante la
+    # interaccion CMS x quimio -- ver cox_treatment_interaction.py.
+    # GSE39582 la anota; antes se descartaba.
+    "characteristics__chemotherapy.adjuvant": "adjuvant_chemo",
+    "characteristics__chemotherapy.adjuvant.type": "adjuvant_chemo_type",
 }
 
 
