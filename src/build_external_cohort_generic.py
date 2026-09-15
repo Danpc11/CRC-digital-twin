@@ -35,6 +35,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -156,6 +157,42 @@ DURATION_MONTHS_MEDIAN_MAX = 240.0
 DURATION_MAX_IF_YEARS = 15.0
 
 
+EXPR_LOG2_MEDIAN_MAX = 50.0
+EXPR_LOG2_MAX_MAX = 100.0
+
+
+def ensure_log2_scale(expr: pd.DataFrame, strict: bool = True) -> tuple[pd.DataFrame, str]:
+    """
+    Comprueba que la matriz de expresion (probes x muestras) este en
+    escala log2 y, si parece lineal, la transforma con log2(x+1).
+
+    Criterio: expresion log2 de microarreglo tiene mediana ~5-9 y maximo
+    ~14-16. Mediana > 50 o maximo > 100 son valores de escala LINEAL
+    (MAS5, RMA sin log). El z-score por gen amortigua la diferencia de
+    ESCALA pero no la de FORMA de la distribucion: en lineal, los genes
+    muy expresados dominan y la correlacion con los centroides cambia.
+    Devuelve (matriz, "log2" | "lineal->log2").
+    """
+    vals = expr.to_numpy(dtype=float)
+    finite = vals[np.isfinite(vals)]
+    if finite.size == 0:
+        print("AVISO: matriz de expresion vacia; no se puede validar la escala.")
+        return expr, "sin_datos"
+    med, mx, mn = float(np.median(finite)), float(finite.max()), float(finite.min())
+    print(f"Escala de expresion: mediana={med:.2f}, min={mn:.2f}, max={mx:.2f}")
+    if med > EXPR_LOG2_MEDIAN_MAX or mx > EXPR_LOG2_MAX_MAX:
+        msg = ("La expresion parece estar en escala LINEAL (no log2). Los centroides "
+               "calibrados y las estadisticas de referencia estan en log2.")
+        if strict:
+            print("AVISO: " + msg + " Se aplica log2(x+1).")
+            if mn < 0:
+                raise ValueError("Valores negativos con escala aparentemente lineal: revisa la matriz.")
+            return np.log2(expr.astype(float) + 1.0), "lineal->log2"
+        print("AVISO: " + msg + " NO se transforma (--no-auto-log2).")
+        return expr, "lineal_sin_transformar"
+    return expr, "log2"
+
+
 def check_duration_units(duration_months: pd.Series, strict: bool = True) -> str:
     """Comprueba que la duracion tenga pinta de estar en meses.
 
@@ -195,9 +232,14 @@ def main():
                          help="Valor de la columna 'dataset' en cms_labels_public_all.txt (default: gse en minusculas)")
     parser.add_argument("--duration-col", default=None)
     parser.add_argument("--event-col", default=None)
+    parser.add_argument("--chemo-col", default=None,
+                        help="Columna de quimioterapia adyuvante (p. ej. AdjCTX en GSE14333). "
+                             "Se guarda como adjuvant_chemo para cox_treatment_interaction.py.")
     parser.add_argument("--stage-col", default=None,
                          help="Columna de estadio clinico (Dukes/TNM/AJCC). Necesaria para el "
                               "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
+    parser.add_argument("--no-auto-log2", action="store_true",
+                        help="No transformar a log2 aunque la expresion parezca lineal")
     parser.add_argument("--allow-suspicious-units", action="store_true",
                         help="No abortar si la duracion parece estar en dias o anios en vez "
                              "de meses (ver check_duration_units). Usar solo si ya lo verificaste.")
@@ -220,6 +262,7 @@ def main():
 
     from parse_geo_series_matrix import parse_series_matrix
     pheno, expr = parse_series_matrix(matrix_path)
+    expr, expr_scale = ensure_log2_scale(expr, strict=not args.no_auto_log2)
 
     if args.derive_survival_from_dates:
         start_col, event_date_col, censor_date_col = [
@@ -261,13 +304,14 @@ def main():
 
     def keep_cols():
         cols = [args.duration_col, args.event_col]
-        if args.stage_col:
-            if args.stage_col in pheno.columns:
-                cols.append(args.stage_col)
-            else:
-                raise ValueError(
-                    f"--stage-col '{args.stage_col}' no existe en el fenotipo. "
-                    f"Corre con --diagnose para ver las columnas disponibles.")
+        for flag, col in (("--stage-col", args.stage_col), ("--chemo-col", args.chemo_col)):
+            if col:
+                if col in pheno.columns:
+                    cols.append(col)
+                else:
+                    raise ValueError(
+                        f"{flag} '{col}' no existe en el fenotipo. "
+                        f"Corre con --diagnose para ver las columnas disponibles.")
         return cols
 
     print("\nCargando anotacion de plataforma...")
@@ -351,6 +395,8 @@ def main():
                   args.event_col: "relapse_event"}
     if args.stage_col:
         rename_map[args.stage_col] = "stage"
+    if args.chemo_col:
+        rename_map[args.chemo_col] = "adjuvant_chemo"
     merged = merged.rename(columns=rename_map)
 
     # GEO a veces codifica valores faltantes como texto literal ("NA",
