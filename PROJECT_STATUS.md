@@ -51,43 +51,259 @@ reportar ese resultado tal cual salga.
 - La asimetría de umbrales V1 (CMS2 "inalcanzable") se puede diagnosticar con
   `src/pattern_norm_diagnostic.py` antes de atribuirla a biología.
 
-## ¿Qué añade CMS sobre la clínica de rutina? (MMR) — 2026-09-11
+## ¿Qué añade CMS sobre la clínica de rutina? (MMR) — recalculado 2026-09-15
 
-Objeción razonable de una revisión externa: CMS1 ≈ dMMR/MSI-H, que ya tiene prueba clínica
-estándar (IHC de MMR). Lo defendible del panel es lo que aporte *más allá* de estadio + MMR,
-es decir CMS4 (mesenquimal, sin prueba de rutina) y CMS3. GSE39582 anota MMR (`msi_status`),
-así que se corrió `cli.py cox-clinical` (RFS, estadio I-III, n=449, 132 eventos, subtipo
-**predicho** con el panel v0.2.0; salidas en `results_cox_clinical_gse39582/`):
+Objeción razonable: CMS1 ≈ dMMR/MSI-H, que ya tiene prueba clínica estándar (IHC de MMR). Lo
+defendible del panel es lo que aporte *más allá* de estadio + MMR. GSE39582 anota MMR
+(`msi_status`); `cli.py cox-clinical` con estadio categórico (RFS, estadio I-III, n=449,
+132 eventos, subtipo **predicho**; salidas en `results_cox_clinical/`):
 
 | Modelo | HR CMS4 (IC95%) | p | HR CMS3 | HR CMS1 | HR dMMR | C |
 |---|---|---|---|---|---|---|
 | A. CMS solo | 2.02 (1.30–3.13) | 0.0017 | 1.70 | 0.74 | — | 0.597 |
-| B. CMS + estadio | 1.74 (1.12–2.71) | 0.014 | 1.55 | 0.69 | — | 0.648 |
-| C. estadio + MMR (sin CMS) | — | — | — | — | 0.49 (p=0.03) | 0.620 |
-| **D. CMS + estadio + MMR** | **1.77 (1.13–2.75)** | **0.012** | 1.55 (p=0.06) | 0.84 (n.s.) | 0.69 (n.s.) | 0.649 |
-| E. CMS + estadio, **solo pMMR** (n=380, 122 ev.) | **1.76 (1.13–2.76)** | **0.013** | 1.51 (p=0.08) | 0.82 | — | 0.636 |
+| B. CMS + estadio | 1.76 (1.13–2.75) | 0.012 | 1.56 | 0.70 | — | 0.648 |
+| C. estadio + MMR (sin CMS) | — | — | — | — | 0.50 (p=0.035) | 0.622 |
+| **D. CMS + estadio + MMR** | **1.78 (1.14–2.78)** | **0.011** | 1.57 (p=0.056) | 0.83 (n.s.) | 0.71 (n.s.) | 0.649 |
+| E. CMS + estadio, **solo pMMR** (n=380, 122 ev.) | **1.77 (1.13–2.76)** | **0.012** | 1.52 (p=0.077) | 0.82 | — | 0.636 |
 
-- Solapamiento: 64/75 dMMR caen en CMS1 predicho (85%); CMS2-4 predichos son pMMR en >95%.
-- **CMS4 conserva su HR tras ajustar por estadio y MMR, y dentro de los pMMR** (log-rank
-  CMS4 vs resto en pMMR: p=0.005). Aporte conjunto de CMS sobre estadio+MMR: LRT χ²=9.9,
-  3 df, p=0.019; ΔC-index +0.03. Schoenfeld sin violaciones.
-- CMS1 en GSE39582 tiene HR<1 (RFS, estadios I-III): coherente con el buen pronóstico de
-  MSI en etapa temprana; su señal la absorbe dMMR. Esto contrasta con el HR≈2.1 de CMS1 en
-  el Cox agrupado de las 5 externas — heterogeneidad real entre cohortes, no reconciliada.
-- **Límite**: in-sample (GSE39582 es la cohorte de calibración). Ninguna de las 5 externas
-  anota MMR; TCGA tiene MSI pero no RFS curado. Replicarlo fuera de muestra requiere una
-  cohorte nueva con MMR + RFS (GSE38832 y GSE13294 son candidatas; verificar anotación).
+Estadio entra como indicadores (`stage_I` HR=0.13, `stage_III` HR=1.69): el ajuste lineal
+previo estaba mal especificado, el salto II→III no equivale al I→II.
 
-## ⚠️ 2026-09-15: cifras de Cox ajustado pendientes de recálculo
+- **CMS4 conserva su HR tras ajustar por estadio y MMR, y dentro de los pMMR.** Aporte
+  conjunto de CMS sobre estadio+MMR: LRT χ²=10.2, 3 gl, p=0.017; ΔC-index +0.027. Schoenfeld
+  limpio en todo el modelo D (nada viola PH con Holm).
+- CMS3 es consistente en dirección y magnitud en los tres modelos (1.52–1.70) pero no alcanza
+  significancia; reportar como tendencia.
+- **CMS1 no aporta nada tras ajustar** (HR 0.83, p=0.59), y dMMR pasa de 0.50 significativo a
+  0.71 n.s. al meter CMS: colinealidad esperable. Lectura: el eje CMS1 del panel no añade
+  sobre IHC de MMR. Contrasta con el HR≈2.1 de CMS1 en las cohortes externas — heterogeneidad
+  real, posiblemente por endpoint (DFS incluye mortalidad no oncológica, y los dMMR tienden a
+  ser pacientes mayores).
+- **Solapamiento**: 64/121 CMS1 predichos son dMMR, **45/121 son pMMR (37%)**. El eje CMS1 del
+  panel no es sustituto de MMR; recomendar inmunoterapia por CMS1 predicho sin IHC sería un
+  error clínico.
+- **Límite**: in-sample (GSE39582 es la cohorte de calibración). Ninguna de las externas anota
+  MMR; TCGA tiene MSI pero no RFS curado.
 
-Hasta esta fecha el estadio entraba al Cox como número (1-2-3) y el C-index reportado mezclaba
-estratos. Ambos se corrigieron (ver `CHANGELOG.md`). **Todos los HR "ajustados por estadio", los
-ΔC-index y sus IC bootstrap de este documento deben recalcularse** con `cli.py pooled-cox` y
-`cli.py cox-clinical` actuales antes de volver a citarse. La referencia del Cox agrupado ahora es
-siempre CMS2. Además existe `cli.py cox-chemo` (interacción CMS × quimio adyuvante): es el único
-análisis del proyecto que se acerca a la pregunta "¿necesita quimio?", y es observacional.
+## Rerun completo del 2026-09-15
 
-## Evidencia acumulada
+Todas las cifras de validación externa se recalcularon desde cero tras detectar tres
+problemas de preparación de datos (ver "Hallazgos de preparación de datos" más abajo).
+**Las cifras vigentes son las de la sección siguiente**; lo que aparece después, en
+"Evidencia acumulada (histórico)", corresponde a corridas anteriores y se conserva solo
+como registro de lo que cambió y por qué.
+
+## Resultados de validación externa (vigentes — rerun 2026-09-15)
+
+### Análisis principal: 4 cohortes con etiqueta CMS oficial
+
+Subtipo **predicho** por el panel de 10 genes, Cox estratificado por cohorte, estadio como
+indicadores categóricos, referencia CMS2. Restringido a los pacientes con etiqueta del
+consorcio, para que la comparación contra la etiqueta oficial sea sobre la misma muestra.
+GSE14333 + GSE17536 + GSE33113 + GSE37892; **n=428, 95 eventos**
+(`results_pooled_cox_mismamuestra/`).
+
+| Covariable | HR | IC95% | p |
+|---|---|---|---|
+| estadio III (vs I+II) | 3.83 | 2.33–6.29 | <0.001 |
+| CMS1 | **2.06** | 1.17–3.62 | 0.012 |
+| CMS3 | 1.27 | 0.61–2.61 | 0.52 |
+| CMS4 | **2.03** | 1.19–3.47 | 0.010 |
+
+- Aporte incremental de CMS sobre estadio: LRT χ²=9.58, 3 gl, **p=0.022**.
+- **C-index estratificado** 0.649 → 0.697, **ΔC=+0.048 (IC95% bootstrap +0.021 a +0.087)**,
+  500/500 remuestreos válidos. Citar el estratificado, no el agrupado: en un Cox con
+  `strata=['cohort']` el C-index de lifelines compara pares de cohortes distintas, cuyas
+  funciones basales difieren por construcción.
+- **Leave-one-cohort-out**: ΔC estratificado +0.045 a +0.065 en las cuatro particiones; el
+  aporte de CMS no depende de ninguna cohorte individual. HR de CMS1 1.79–2.15 y de CMS4
+  1.76–2.39 en todas ellas.
+- Estadio I se fusiona con II (41 pacientes, 1 evento): con el evento correctamente
+  codificado casi nadie recae en estadio I y su indicador produce separación completa. El
+  contraste reportado es **III vs I+II**.
+
+**Interpretación**: CMS1 y CMS4 duplican el riesgo de recurrencia frente a CMS2, de forma
+independiente del estadio. CMS3 no tiene efecto pronóstico distinguible.
+
+### Contraste contra la etiqueta oficial del consorcio (misma muestra)
+
+`--group-col cms_label` sobre los mismos 428 pacientes (`results_pooled_cox_oficial/`). Es
+el control que separa "el panel no transfiere" de "CMS no predice en estas cohortes":
+
+| | panel predicho | etiqueta oficial |
+|---|---|---|
+| CMS1 | 2.06 (1.17–3.62) p=0.012 | 2.25 (1.27–3.98) p=0.006 |
+| CMS3 | 1.27 (0.61–2.61) p=0.52 | 0.87 (0.37–2.03) p=0.75 |
+| CMS4 | 2.03 (1.19–3.47) p=0.010 | 2.36 (1.41–3.94) p=0.001 |
+| ΔC estratificado | +0.048 [+0.021, +0.087] | +0.075 [+0.039, +0.109] |
+
+Los tres HR concuerdan en dirección y magnitud, con la atenuación esperable por error de
+clasificación (κ≈0.6–0.8). **El panel recupera aproximadamente dos tercios del aporte
+pronóstico de la clasificación CMS completa** (0.048 / 0.075). La ausencia de efecto de CMS3
+se reproduce en ambos, y coincide con la literatura (CMS3 tiene pronóstico intermedio y no
+se separa consistentemente de CMS2), así que es evidencia de que el panel funciona, no de
+que falle.
+
+### Análisis de sensibilidad
+
+| Análisis | n / eventos | LRT p | ΔC estratificado |
+|---|---|---|---|
+| Principal (4 cohortes etiquetadas) | 428 / 95 | 0.022 | +0.048 [+0.021, +0.087] |
+| 5 cohortes, incluye no etiquetados | 518 / 117 | 0.016 | +0.039 [+0.024, +0.075] |
+| Solo cohortes con RFS real (GSE14333+33113+37892) | ~330 / 82 | 0.078 | +0.060 [+0.026, +0.097] |
+
+- En el análisis de 5 cohortes, CMS3 sube a HR=2.04 (p=0.02). **Es un artefacto de
+  población, no de clasificación**: los 108 pacientes sin etiqueta del consorcio
+  (no-consenso, más GSE17537 entera) son tumores ambiguos y de peor pronóstico, y parte de
+  ellos cae en el grupo CMS3 predicho. Al igualar la muestra el HR baja a 1.27. La matriz de
+  confusión descarta la hipótesis alternativa: el grupo CMS3 predicho se contamina con CMS2
+  (8/27 en GSE14333, 6/36 en GSE37892), que es la referencia de buen pronóstico y por tanto
+  atenuaría el HR, no lo inflaría.
+- En solo-RFS el LRT queda en p=0.078 por pérdida de eventos, pero el ΔC es el mayor de los
+  tres (+0.060) y CMS3/CMS4 siguen significativos individualmente. El endpoint mixto
+  DFS/RFS no explica el hallazgo.
+
+### Diagnósticos del modelo
+
+Todos limpios (`results_cox_diagnostics/`):
+
+- **Riesgos proporcionales**: ninguna covariable viola el supuesto, ni individualmente ni
+  con corrección de Holm; omnibus de Fisher p=0.87.
+- **Efecto tiempo-dependiente**: modelo por tramos a 36 meses sin diferencia early/late en
+  ningún subtipo (p=0.57, 0.95, 0.48).
+- **Heterogeneidad entre cohortes**: p=0.43 (CMS1), 0.39 (CMS3), 0.46 (CMS4). Efecto
+  homogéneo. El término de estadio no es estimable porque GSE33113 es de estadio único.
+- **Observaciones influyentes**: magnitud máxima de delta-beta 0.063; ningún paciente
+  individual mueve el modelo.
+
+**Esto invalida dos afirmaciones que este documento sostenía antes**: la violación del
+supuesto de riesgos proporcionales por CMS4 y su supuesto efecto temporalmente restringido
+eran artefactos del estadio modelado como variable lineal y del indicador de evento
+invertido en GSE14333.
+
+### Concordancia de clasificación
+
+| Cohorte | n etiquetados | cobertura | accuracy (aceptadas) | accuracy (abstención = error) | κ |
+|---|---|---|---|---|---|
+| GSE39582 (calibración) | 519 | 1.00 | 0.805 | — | **0.728** |
+| GSE17536 | 156 | 0.86 | 0.866 | 0.744 | 0.812 |
+| GSE33113 | 85 | 0.86 | 0.808 | 0.694 | 0.735 |
+| GSE14333 | 135 | 0.79 | 0.755 | 0.593 | 0.673 |
+| GSE37892 | 118 | 0.80 | 0.702 | 0.559 | 0.590 |
+
+GSE17537 no tiene etiqueta oficial (el consorcio solo etiquetó GSE17536 de ese estudio), así
+que no aporta concordancia y queda fuera del análisis principal.
+
+**Error de clasificación dominante: CMS4 oficial → CMS1 predicho** (7/24 en GSE14333, 10/32
+en GSE37892, ~30%). Explicación probable: de los 10 genes, `GNLY` y `USP18` marcan infiltrado
+inmune, y CMS4 también está infiltrado (estroma inflamado, no citotóxico); con 10 genes no
+hay resolución para separar ambos patrones. Es lo que atenúa los dos HR hacia un valor común
+(~2.0) cuando los oficiales son 2.25 y 2.36. Clínicamente importa poco para estratificar
+riesgo (ambos son alto riesgo), pero **sí impide usar CMS1 predicho como sustituto de MMR**:
+el criterio para inmunoterapia debe seguir siendo IHC de MMR. Trabajo futuro: un marcador
+estromal específico (`THBS2`, `INHBA`) desambiguaría.
+
+### `cms_margin`: calibrado, pero no se usa para abstener
+
+El margen entre la primera y la segunda correlación está bien calibrado como medida de
+confianza y transfiere entre cohortes. En GSE39582, exigir margen ≥0.2 sube la accuracy de
+0.805 a 0.860 (cobertura 0.87) y ≥0.4 la sube a 0.909 (cobertura 0.74); el comportamiento es
+monótono en las cuatro cohortes externas, con el codo en 0.2–0.3.
+
+**Decisión: no se aplica abstención por margen.** El análisis del tipo de error muestra que
+el margen no discrimina los errores relevantes clínicamente: de los 16 errores de GSE37892
+que cruzan la frontera riesgo-alto/riesgo-bajo, 9 tienen margen ≥0.34, incluido un CMS2
+clasificado como CMS1 con margen 0.85. Los errores que un umbral sí eliminaría son
+confusiones entre subtipos del mismo grupo de riesgo (CMS1↔CMS4, CMS2↔CMS3), que mejorarían
+la concordancia nominal sin cambiar ninguna decisión, a costa de 13–19% de cobertura. El
+margen mide ambigüedad geométrica del perfil, no distancia en riesgo.
+
+Uso recomendado: reportarlo junto a la etiqueta como aviso de confianza baja (sin ocultar el
+resultado), y evaluarlo como covariable propia en el Cox — los no-consenso del consorcio
+sugieren que la ambigüedad del perfil puede tener valor pronóstico por sí misma.
+
+### Hallazgos de preparación de datos (invalidaron las cifras anteriores)
+
+Los tres los detectaron validadores nuevos añadidos en esta revisión; ninguno era visible
+antes y todos afectaban a los resultados publicados en versiones previas de este documento:
+
+1. **GSE14333: indicador de evento invertido.** La columna `DFS_Cens` codifica 1 = censurado;
+   se leía como evento. Producía 99 recaídas en 126 pacientes (79%) y aportaba el 52% de los
+   eventos del Cox agrupado con el 24% de los pacientes, aplastando la señal de todo el
+   análisis. Señal diagnóstica: los supuestos eventos tenían seguimiento medio de 46.0 meses
+   frente a 21.8 de los censurados — imposible, una recaída ocurre antes del fin de
+   seguimiento. Detectado por `check_event_coding()`.
+2. **GSE33113: escala lineal y tiempo en días.** Expresión con mediana 24.8 y máximo 15 972
+   (los centroides están en log2), y tiempo a recurrencia en días (mediana 1179) leído como
+   meses. Este documento señalaba esta cohorte como la que "permitió la conclusión" sobre
+   CMS4. Detectados por `ensure_log2_scale()` y `check_duration_units()`.
+3. **GSE33113 y GSE37892 construidas con el panel anterior** (`FABP1`, `SI`) en lugar de
+   `GALNT8`/`AGR2`. Sus resultados históricos no correspondían al panel vigente.
+
+Con los tres corregidos, el número de eventos del análisis de 5 cohortes pasó de 189 a 117,
+y **la señal se volvió más clara, no menos**: se eliminaron 72 eventos falsos que eran ruido.
+
+### Limitaciones que siguen en pie
+
+- **Las cinco cohortes participaron en la selección del panel** (cambio `FABP1→GALNT8`,
+  `SI→AGR2` del 2026-09-09). Esto es validación retrospectiva de desarrollo, **no
+  confirmatoria**. No existe todavía ninguna cohorte intocada.
+- **Endpoint mixto**: GSE17536 y GSE17537 aportan DFS (incluye muerte por cualquier causa);
+  GSE14333, GSE33113 y GSE37892 aportan RFS. El análisis solo-RFS mantiene el hallazgo, pero
+  debe declararse.
+- **Sin corrección por multiplicidad** en el conjunto de análisis exploratorios.
+- **κ in-sample** en GSE39582 (0.728): falta validación cruzada de los centroides para
+  cuantificar el optimismo.
+- **Calibración absoluta no evaluable**: un Cox estratificado no transfiere riesgo basal a
+  una cohorte nueva. Las cifras de `cox_apparent_calibration.tsv` son aparentes, dentro del
+  estrato de ajuste, y no deben reportarse como calibración externa.
+
+### Redacción sugerida del resultado
+
+> Un panel de 10 genes compatible con RT-qPCR reproduce la clasificación CMS con κ=0.73 en la
+> cohorte de calibración y κ=0.59–0.81 en cuatro cohortes externas. El subtipo predicho aporta
+> información pronóstica independiente del estadio (n=428, 95 eventos; CMS1 HR=2.06 [1.17–3.62]
+> y CMS4 HR=2.03 [1.19–3.47] frente a CMS2; ΔC-index estratificado +0.048 [IC95% +0.021 a
+> +0.087]; supuesto de riesgos proporcionales satisfecho, efecto homogéneo entre cohortes,
+> estable en validación leave-one-cohort-out). La comparación con la etiqueta del consorcio
+> sobre la misma muestra (ΔC +0.075) indica que el panel recupera aproximadamente dos tercios
+> del valor pronóstico de la clasificación completa. CMS3 no muestra efecto pronóstico
+> independiente, ni con el panel ni con la etiqueta oficial.
+
+## ¿Necesitará quimioterapia? — pregunta abierta
+
+El análisis de arriba es **pronóstico** (quién recae más), no **predictivo** (a quién le sirve
+el tratamiento). Son cosas distintas y no se deduce una de la otra: que CMS4 recaiga más no
+implica que la quimioterapia le sirva más ni menos.
+
+`cli.py cox-chemo` (nuevo en esta revisión) prueba la interacción CMS × quimioterapia
+adyuvante en GSE39582 (estadio II–III, n=460, 139 eventos, 202 tratados):
+
+- **LRT de la interacción: χ²=2.76, 3 gl, p=0.43.** Añadiendo GSE14333: p=0.75.
+- HR de quimio dentro de cada CMS: todos los IC95% abarcan el 1.
+- El término CMS4×quimio tiene IC 0.25–1.44: compatible con un beneficio cuádruple y con un
+  perjuicio del 40%. **El diseño no puede distinguir**, no es que el resultado sea negativo.
+
+Dos razones de fondo, ambas irreparables con estos datos: (1) la quimio se indica por estadio,
+edad y comorbilidad, así que hay confusión por indicación —el HR marginal de quimio sale 1.24,
+absurdo como efecto causal—; (2) con 139 eventos no hay potencia para interacciones (regla
+práctica: ~4× los eventos del efecto principal).
+
+**Qué haría falta**: datos de ensayo aleatorizado estratificado por CMS (el precedente es Song
+et al. 2016, JAMA Oncol, sobre NSABP C-07), o cohortes con respuesta medida bajo tratamiento
+(GSE104645, GSE72970, GSE5851 son candidatas públicas con expresión + respuesta + PFS). Hasta
+entonces, las pestañas Paciente e Intervención de la app son **simulación mecanística
+generadora de hipótesis**, no recomendación clínica, y así deben presentarse.
+
+## Evidencia acumulada (histórico — corridas anteriores al rerun del 2026-09-15)
+
+⚠️ **Las cifras de esta sección NO son vigentes.** Se conservan para documentar qué cambió
+tras corregir la preparación de datos. Los HR de CMS4 de 1.77–2.50, el p=0.000532, la
+violación de riesgos proporcionales, el efecto tiempo-dependiente y el poder post-hoc del
+76% pertenecen a corridas con GSE14333 mal codificada, GSE33113 en escala lineal y con el
+tiempo en días, y dos cohortes con el panel anterior.
+
+
 
 | Cohorte | Rol | n | valor p (log-rank) |
 |---|---|---|---|
@@ -149,8 +365,7 @@ de este análisis, coincide con lo ya descrito fuera de este proyecto.
   (era 58% con 3 cohortes) y CMS1 75% (era subpotenciado). CMS3 sigue en 45%, sin evidencia
   suficiente para concluir ausencia de efecto.
 
-Concordancia de clasificación (GSE39582 vs. etiqueta oficial del consorcio): kappa=0.679
-("buena"), 77.5% accuracy.
+Concordancia de clasificación (GSE39582 vs. etiqueta oficial del consorcio): kappa=0.728 ("buena"), 80.5% accuracy (cifra vigente; ver sección de resultados).
 
 ## Validación entre plataformas (RNA-seq, TCGA-COAD/READ)
 
@@ -296,29 +511,34 @@ sigue siendo exploración in silico, no una herramienta de decisión clínica.
 
 ## Próximos pasos
 
-1. **Quinta cohorte externa integrada (GSE37892, 130 pacientes estadio II/III, Marisa et al.
-   2013) — resultado verificado con `power_analysis.py` sobre las 5 cohortes combinadas
-   (n=545, 137 eventos):**
+En orden de prioridad, tras el rerun del 2026-09-15:
 
-   | Grupo | Antes (4 cohortes) | Con GSE37892 (5 cohortes) | ¿Cierra 80%? |
-   |---|---|---|---|
-   | CMS1_MSI_immune | 74.7% | **85.4%** | ✅ Sí |
-   | CMS3_metabolic | 63.6% | **77.5%** | Casi — faltan solo ~3 eventos (necesita 58, tiene 55) |
-   | CMS4_mesenchymal | 98.4% | 99.8% | Ya estaba sobrado |
-
-   **Salvedad honesta**: GSE37892 por sí sola NO separa el endpoint significativamente
-   (log-rank p=0.145 con el modelo, p=0.189 con la etiqueta oficial del consorcio) — esto
-   no contradice su aporte positivo al modelo combinado (para eso se agrupan cohortes,
-   ninguna necesita ser significativa por separado), pero debe quedar registrado tal cual,
-   no oculto detrás del resultado agregado. Además, el endpoint en esta cohorte es
-   específicamente *metástasis a distancia* (derivado de fechas de cirugía/metástasis/
-   último contacto), no "recaída" en sentido amplio como en las otras 4 — tratado como
-   equivalente en el pool por ahora, sin verificación adicional de que sean intercambiables.
-
-   Concordance del modelo crudo con las 5 cohortes: 0.587 (antes 0.577 con 4 — estable).
-
-   **Pendiente real, más pequeño de lo que parecía**: CMS3 necesita ~3 eventos más para
-   cruzar 80% — una sexta cohorte, aunque sea chica, probablemente bastaría. No es la
-   brecha grande (~18-19 eventos) que se estimaba antes de sumar GSE37892.
-2. Obtener estatus RAS/BRAF real (qPCR alelo-específico/HRM) para reemplazar el proxy débil
-   por ARN en el criterio de activación de `anti_egfr`
+1. **Cohorte confirmatoria intocada.** Es lo único que convierte la validación de desarrollo
+   en confirmatoria. Congelar el panel por escrito (este archivo + tag de git), conseguir una
+   cohorte del CRCSC con etiqueta CMS oficial y RFS que no haya intervenido en ninguna
+   decisión (candidatas: GSE38832, GSE29621, GSE13294 — verificar anotación de RFS y estadio),
+   y correr `validate-external` + `pooled-cox` **una sola vez** sobre ella, reportando el
+   resultado tal cual salga.
+2. **κ con validación cruzada** (5-fold: centroides en 4/5, clasificar 1/5) para cuantificar
+   el optimismo del 0.728 in-sample. Es código sencillo sobre `run_pipeline.py`.
+3. **Retirar el poder post-hoc** de `power_analysis.py` y de este documento: calcular poder
+   con el HR observado es función 1:1 del p-valor y no aporta información (Hoenig & Heisey
+   2001). Conservar solo el HR mínimo detectable con los eventos disponibles.
+4. **Partición en `feature_selection.py`**: AUC → top-300 → Random Forest corre hoy sobre
+   todas las muestras sin holdout ni validación cruzada anidada. No rescata el panel actual,
+   pero es requisito para cualquier iteración futura.
+5. **Sensibilidad a la etiqueta de referencia**: repetir la concordancia con `CMS_network`
+   (solo consenso) en lugar de `CMS_final_network_plus_RFclassifier_in_nonconsensus_samples`.
+   Si κ sube, parte del "error" era ruido de etiqueta.
+6. **Desambiguar CMS4 vs CMS1**: evaluar añadir un marcador estromal específico (`THBS2`,
+   `INHBA`) contra el error dominante de clasificación (~30% de CMS4 → CMS1). Cualquier cambio
+   de panel debe decidirse sobre GSE39582 y evaluarse en la cohorte confirmatoria, nunca sobre
+   las cinco actuales.
+7. **`cms_margin` como covariable** en el Cox, para probar si la ambigüedad del perfil tiene
+   valor pronóstico propia (lo sugieren los no-consenso).
+8. **Regenerar la tabla V1/V2** del motor dinámico con el calendario de forzamiento unificado
+   (`compare_forcing_sweep_v1_v2`) y reescribirla según el diagnóstico de normas: la asimetría
+   de umbrales seguía el orden exacto de las normas de los centroides (2.71/2.49/1.51/1.30
+   frente a cuencas de 43%/32%/15%/10%), y con normas igualadas + V2 los cuatro subtipos son
+   alcanzables al forzamiento mínimo. Es un artefacto de parametrización, no un hallazgo
+   biológico sobre CMS2.
