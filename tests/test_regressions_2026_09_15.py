@@ -235,3 +235,35 @@ def test_event_map_applies_to_numeric_column_before_validation():
     invertida = pd.Series(censurado.astype(float))
     corregida = invertida.map({0.0: 1, 1.0: 0})
     assert check_event_coding(corregida, pd.Series(dur), strict=True)["sospechoso"] is False
+
+
+def test_collapse_sparse_stage_levels_merges_level_without_events():
+    """Con el evento bien codificado casi nadie recae en estadio I: stage_I
+    determina la ausencia de evento (separacion completa) y lifelines avisa
+    ConvergenceWarning con norm(delta) alto en cada ajuste."""
+    from clinical_covariates import collapse_sparse_stage_levels, expand_stage_categorical
+    df = pd.DataFrame({
+        "stage_harmonized": [1] * 40 + [2] * 60 + [3] * 60,
+        "relapse_event": [0] * 39 + [1] + [0] * 40 + [1] * 20 + [0] * 35 + [1] * 25,
+    })
+    work, cols = expand_stage_categorical(df)
+    assert cols == ["stage_I", "stage_III"]
+    keep = collapse_sparse_stage_levels(work, cols, "relapse_event")
+    assert keep == ["stage_III"]          # stage_I tiene 1 solo evento
+    # con eventos suficientes en ambos niveles, no se descarta nada
+    df2 = df.copy()
+    df2.loc[:9, "relapse_event"] = 1
+    work2, cols2 = expand_stage_categorical(df2)
+    assert collapse_sparse_stage_levels(work2, cols2, "relapse_event") == cols2
+
+
+def test_build_cox_frame_drops_separated_stage_level():
+    df = _synthetic_survival(n=400, seed=6)
+    df["stage_harmonized"] = df["stage"].astype(int)
+    df.loc[df["stage"] == "1", "relapse_event"] = 0     # estadio I sin eventos
+    frame = build_cox_frame(df, "relapse_free_months", "relapse_event",
+                            DEFAULT_CMS_REFERENCE, ["stage_harmonized"])
+    assert "stage_I" not in frame.columns
+    assert "stage_III" in frame.columns
+    cph = CoxPHFitter().fit(frame, "duration", "event", strata=["cohort"])
+    assert np.isfinite(cph.params_).all()
