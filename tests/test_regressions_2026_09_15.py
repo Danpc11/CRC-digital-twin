@@ -159,3 +159,79 @@ def test_interaction_module_runs_and_detects_planted_interaction():
     hr_cms1 = within.set_index("cms").loc["CMS1_MSI_immune", "HR_quimio"]
     hr_cms2 = within.set_index("cms").loc["CMS2_canonical_WNT", "HR_quimio"]
     assert hr_cms1 < hr_cms2
+
+
+def test_convert_duration_units_days_to_months():
+    """GSE33113 anota el tiempo a recurrencia en DIAS; sin convertir entraba
+    al Cox como 'meses' (mediana 1179)."""
+    from build_external_cohort_generic import check_duration_units, convert_duration_units
+    dias = pd.Series([1179.5, 3599.0, 365.0])
+    meses = convert_duration_units(dias, "days")
+    assert abs(meses.iloc[0] - 38.75) < 0.1
+    assert abs(meses.iloc[2] - 12.0) < 0.1
+    assert check_duration_units(meses, strict=True) == "meses"
+    with pytest.raises(ValueError):
+        check_duration_units(dias, strict=True)
+    assert convert_duration_units(pd.Series([3.0]), "years").iloc[0] == 36.0
+    with pytest.raises(ValueError):
+        convert_duration_units(dias, "weeks")
+
+
+def test_align_to_model_fills_absent_stage_levels():
+    """GSE33113 es todo estadio II y GSE37892 no tiene estadio I: el frame de
+    prueba no genera esas dummies y el LOCO fallaba con KeyError."""
+    from pooled_cox_validation import align_to_model
+    df = _synthetic_survival(n=300, seed=4)
+    df["stage_harmonized"] = df["stage"].astype(int)
+    train = build_cox_frame(df, "relapse_free_months", "relapse_event",
+                            DEFAULT_CMS_REFERENCE, ["stage_harmonized"])
+    model = CoxPHFitter().fit(train, "duration", "event", strata=["cohort"])
+    homogenea = df[df["stage"] == "2"]           # sin estadio I ni III
+    test = build_cox_frame(homogenea, "relapse_free_months", "relapse_event",
+                           DEFAULT_CMS_REFERENCE, ["stage_harmonized"])
+    assert "stage_III" not in test.columns
+    alineado = align_to_model(test, model)
+    lp = alineado[model.params_.index] @ model.params_   # no debe lanzar
+    assert len(lp) == len(test)
+    assert (alineado["stage_III"] == 0).all()
+
+
+def test_check_event_coding_detects_inverted_column():
+    """GSE14333: 'DFS_Cens' con 1=censurado leido como evento -> 79% de
+    'eventos' y seguimiento mas largo en los supuestos eventos."""
+    from build_external_cohort_generic import check_event_coding
+    rng = np.random.default_rng(2)
+    n = 200
+    censurado = rng.random(n) < 0.75
+    dur = np.where(censurado, rng.uniform(60, 120, n), rng.uniform(5, 40, n))
+    invertido = pd.Series(censurado.astype(float))      # 1 = censurado (mal)
+    correcto = pd.Series((~censurado).astype(float))
+    with pytest.raises(ValueError, match="INVERTIDA"):
+        check_event_coding(invertido, pd.Series(dur), strict=True)
+    res = check_event_coding(invertido, pd.Series(dur), strict=False)
+    assert res["sospechoso"] is True
+    assert check_event_coding(correcto, pd.Series(dur), strict=True)["sospechoso"] is False
+
+
+def test_event_map_applies_to_numeric_column_before_validation():
+    """Regresion: check_event_coding corria ANTES de --event-map, asi que
+    abortaba sobre la columna cruda y el mapa 0=1,1=0 nunca se aplicaba.
+    Ademas las claves del mapa son texto y la columna de GSE14333 es
+    numerica, asi que el .map() no casaba con nada."""
+    from build_external_cohort_generic import _looks_numeric, check_event_coding
+    assert _looks_numeric("0") and _looks_numeric("1") and not _looks_numeric("yes")
+
+    # columna numerica con claves de texto: el mapeo debe funcionar igual
+    cens = pd.Series([1.0, 1.0, 0.0, 1.0, 0.0])
+    event_map = {float(k): v for k, v in {"0": 1, "1": 0}.items()}
+    recodificado = cens.map(event_map)
+    assert recodificado.tolist() == [0, 0, 1, 0, 1]
+
+    # y tras recodificar, el validador debe aceptar la columna
+    rng = np.random.default_rng(9)
+    n = 200
+    censurado = rng.random(n) < 0.75
+    dur = np.where(censurado, rng.uniform(60, 120, n), rng.uniform(5, 40, n))
+    invertida = pd.Series(censurado.astype(float))
+    corregida = invertida.map({0.0: 1, 1.0: 0})
+    assert check_event_coding(corregida, pd.Series(dur), strict=True)["sospechoso"] is False
