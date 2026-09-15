@@ -40,18 +40,25 @@ import warnings
 import numpy as np
 
 
-def hazard_from_trajectory(x_series: np.ndarray) -> np.ndarray:
+def state_norm_from_trajectory(x_series: np.ndarray) -> np.ndarray:
     """
     x_series: array (n_genes, n_timepoints) -- una medicion por
     timepoint de seguimiento post-quirurgico.
 
-    Devuelve un score de riesgo ORDINAL por timepoint (no calibrado a
-    probabilidad), proporcional a la distancia del vector de estado al
-    origen (estado "sin enfermedad residual").
+    Devuelve la NORMA del vector de estado (z-score) por timepoint. Es una
+    distancia al tumor promedio de la cohorte de calibracion, NO un hazard
+    ni una probabilidad de recurrencia: el nombre anterior
+    (hazard_from_trajectory) invitaba a leerla como riesgo. Se conserva
+    como alias por compatibilidad.
     """
     if x_series.ndim != 2:
         raise ValueError("x_series debe ser un array 2D (n_genes, n_timepoints)")
     return np.linalg.norm(x_series, axis=0)
+
+
+def hazard_from_trajectory(x_series: np.ndarray) -> np.ndarray:
+    """Alias historico de state_norm_from_trajectory. Ver esa funcion."""
+    return state_norm_from_trajectory(x_series)
 
 
 MIN_BASELINE_FOR_SIGMA = 3  # con menos puntos, sigma basal no es estimable
