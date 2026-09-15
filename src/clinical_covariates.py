@@ -114,6 +114,41 @@ def harmonize_stage(values: pd.Series, cohort_name: str = "", verbose: bool = Tr
     return mapped
 
 
+STAGE_REFERENCE = 2           # estadio II como referencia (el mas frecuente en RFS I-III)
+STAGE_DUMMY_COLS = {1: "stage_I", 3: "stage_III", 4: "stage_IV"}
+
+
+def expand_stage_categorical(
+    df: pd.DataFrame,
+    stage_col: str = "stage_harmonized",
+    reference: int = STAGE_REFERENCE,
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Convierte el estadio armonizado (1-4) en indicadores 0/1 con estadio
+    `reference` como categoria de referencia. Devuelve (df_con_dummies,
+    nombres_de_columnas_dummy) -- solo las de niveles PRESENTES en el df
+    (si estadio IV se excluyo, no aparece stage_IV).
+
+    POR QUE: meter stage_harmonized como numero (1,2,3) en el Cox asume
+    que el salto I->II multiplica el riesgo igual que II->III, y en CRC
+    el salto a III es mucho mayor. Un solo coeficiente "por estadio" es
+    un modelo mal especificado; el ajuste por estadio deja de ser un
+    ajuste real y la afirmacion "CMS conserva su HR tras ajustar por
+    estadio" queda sin sustento. Con indicadores, cada estadio tiene su
+    propio HR frente a la referencia. Los NaN se conservan como NaN en
+    todas las dummies para que dropna() los excluya.
+    """
+    out = df.copy()
+    st = pd.to_numeric(out[stage_col], errors="coerce")
+    cols = []
+    for level, name in STAGE_DUMMY_COLS.items():
+        if level == reference or not (st == level).any():
+            continue
+        out[name] = np.where(st.isna(), np.nan, (st == level).astype(float))
+        cols.append(name)
+    return out, cols
+
+
 def prepare_covariates(
     df: pd.DataFrame,
     stage_col: str = "stage",
