@@ -1,5 +1,49 @@
 # Historial de cambios
 
+## 2026-09-15 — tercera revisión: escala, estadio categórico, C-index estratificado, interacción con quimio
+
+### Corregido
+- **`src/clinical_covariates.py` / `pooled_cox_validation.py` / `cox_diagnostics.py` / `cox_clinical_adjustment.py`:
+  el estadio entraba al Cox como número (1-2-3).** Eso asume que I→II multiplica el riesgo igual
+  que II→III, falso en CRC. Nueva `expand_stage_categorical()` (indicadores `stage_I`, `stage_III`
+  [, `stage_IV`] con estadio II de referencia); `build_cox_frame(stage_categorical=True)` la aplica
+  por defecto en todos los modelos (incl. LOCO y bootstrap); `stage_categorical=False` queda solo
+  para sensibilidad. **Los HR "ajustados por estadio" de `PROJECT_STATUS.md` deben recalcularse.**
+- **C-index de modelos estratificados.** `cph.concordance_index_` compara pares de cohortes distintas,
+  cuyas funciones basales difieren por construcción del modelo estratificado. Nuevas
+  `stratified_c_index()` / `stratified_c_index_from_lp()` (concordancia dentro de cada estrato,
+  promediada por pares). `nested_model_increment(..., reduced_df, full_df)` y el bootstrap reportan
+  ambos; el reporte marca el agrupado como "mezcla estratos" y pide citar el estratificado.
+- **Referencia del Cox agrupado fija en CMS2** (`DEFAULT_CMS_REFERENCE`). Antes era "la más
+  frecuente": dos cohortes con distinta composición daban tablas no comparables (todos los HR <1 en
+  una, >1 en otra). Si CMS2 no existe en los datos avisa y cae a la más frecuente.
+- **`cox_clinical_adjustment`: HR extremos en celdas vacías sin aviso.** Nueva tabla n/eventos por
+  nivel de CMS (modelos A-D y subgrupo E), `sparse_level_warnings()` (n<10 o eventos<5) y columna
+  `hr_inestable` (IC95 que abarca >2 órdenes de magnitud) en las tablas de salida.
+- **`build_external_cohort_generic.py`: sin detección de escala de expresión.** Nueva
+  `ensure_log2_scale()`: si la matriz parece lineal (mediana>50 o máximo>100) aplica `log2(x+1)` con
+  aviso; `--no-auto-log2` lo desactiva. Los centroides y `_ref_mean/_ref_std` están en log2.
+- **`prognosis.hazard_from_trajectory` → `state_norm_from_trajectory`** (alias conservado). Es ‖x‖,
+  no un hazard. Etiquetas de la app: "‖x‖ (distancia al tumor promedio)" en lugar de "Riesgo".
+
+### Añadido
+- **`src/cox_treatment_interaction.py` + `cli.py cox-chemo`**: interacción CMS × quimioterapia
+  adyuvante (M0 efectos principales vs M1 con interacción, LRT, HR de quimio dentro de cada CMS,
+  n/eventos por celda). Es la pregunta *predictiva* ("¿le sirve la quimio a este subtipo?") que el
+  pipeline no respondía. Advertencias explícitas: observacional, confusión por indicación, potencia
+  baja para interacciones, genera hipótesis; la evidencia real viene de ensayos (Song 2016 / C-07).
+- `build_gse39582_dataset.py` arrastra `adjuvant_chemo` (`chemotherapy.adjuvant`) y
+  `adjuvant_chemo_type`; `build_external_cohort_generic.py --chemo-col` (p. ej. `AdjCTX` en GSE14333).
+  `infer_gene_columns` excluye `adjuvant_chemo_type`.
+- `tests/test_regressions_2026_09_15.py` (10 tests). Suite: 213 → 223.
+
+### Pendiente (requiere datos reales)
+- Recalcular con estadio categórico y C-index estratificado todas las cifras de `PROJECT_STATUS.md`.
+- Correr `cox-chemo` sobre GSE39582 (+GSE14333 con `--chemo-col AdjCTX`) tras reconstruir los TSV.
+- Siguen abiertos: κ con validación cruzada, poder post-hoc, `feature_selection` sin partición,
+  sensibilidad a `CMS_network`, cohorte de validación intocada, tabla V1/V2.
+
+
 ## 2026-09-12 — segunda revisión: cinco errores de código
 
 ### Corregido
