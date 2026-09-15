@@ -176,6 +176,24 @@ def bootstrap_cindex_increment(
     return pd.DataFrame(rows)
 
 
+def align_to_model(frame: pd.DataFrame, model: CoxPHFitter) -> pd.DataFrame:
+    """
+    Alinea un frame de PRUEBA a las columnas que el modelo espera.
+
+    Necesario desde que el estadio entra como indicadores: una cohorte de
+    estadio homogeneo (GSE33113 es todo estadio II; GSE37892 no tiene
+    estadio I) no genera esas dummies por si sola, y el predictor lineal
+    fallaba con "['stage_I'] not in index". Un nivel ausente en la cohorte
+    de prueba significa "ningun paciente esta en ese estadio", es decir
+    columna de ceros -- no un error.
+    """
+    out = frame.copy()
+    for col in model.params_.index:
+        if col not in out.columns:
+            out[col] = 0.0
+    return out
+
+
 def leave_one_cohort_out_validation(
     data: pd.DataFrame, duration_col: str, event_col: str, reference: str,
     group_col: str = "predicted_cms",
@@ -209,12 +227,16 @@ def leave_one_cohort_out_validation(
                 train_full, "duration", "event", strata=["cohort"])
             row.update(nested_model_increment(stage_model, full_model, train_stage, train_full))
 
-            test_stage = build_cox_frame(
-                test, duration_col, event_col, reference, ["stage_harmonized"],
-                include_cms=False, group_col=group_col)
-            test_full = build_cox_frame(
-                test, duration_col, event_col, reference, ["stage_harmonized"],
-                include_cms=True, cms_levels=levels, group_col=group_col)
+            test_stage = align_to_model(
+                build_cox_frame(test, duration_col, event_col, reference,
+                                ["stage_harmonized"], include_cms=False,
+                                group_col=group_col),
+                stage_model)
+            test_full = align_to_model(
+                build_cox_frame(test, duration_col, event_col, reference,
+                                ["stage_harmonized"], include_cms=True,
+                                cms_levels=levels, group_col=group_col),
+                full_model)
             stage_lp = test_stage[stage_model.params_.index] @ stage_model.params_
             full_lp = test_full[full_model.params_.index] @ full_model.params_
             row["c_index_test_stage_only"] = concordance_index(
