@@ -32,7 +32,9 @@ from lifelines.utils import concordance_index
 from scipy.stats import chi2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clinical_covariates import prepare_covariates
+from clinical_covariates import STAGE_REFERENCE, expand_stage_categorical, prepare_covariates
+
+DEFAULT_CMS_REFERENCE = "CMS2_canonical_WNT"
 
 
 def build_cox_frame(
@@ -40,30 +42,77 @@ def build_cox_frame(
     reference: str, clinical_covariates: list[str] | None = None,
     include_cms: bool = True, cms_levels: list[str] | None = None,
     group_col: str = "predicted_cms",
+    stage_categorical: bool = True,
 ) -> pd.DataFrame:
-    """Construye exactamente la misma muestra para modelos Cox anidados."""
-    clinical_covariates = clinical_covariates or []
+    """Construye exactamente la misma muestra para modelos Cox anidados.
+
+    Si 'stage_harmonized' esta entre las covariables y stage_categorical=True
+    (default), se sustituye por indicadores stage_I / stage_III (/stage_IV)
+    con estadio II de referencia -- ver expand_stage_categorical. Con
+    stage_categorical=False se conserva el estadio como numero (solo para
+    analisis de sensibilidad frente a la version anterior).
+    """
+    clinical_covariates = list(clinical_covariates or [])
+    work = data
+    if stage_categorical and "stage_harmonized" in clinical_covariates:
+        work, stage_cols = expand_stage_categorical(data)
+        clinical_covariates = [c for c in clinical_covariates if c != "stage_harmonized"] + stage_cols
     base_cols = [duration_col, event_col, "cohort"] + clinical_covariates
-    base = data[base_cols].reset_index(drop=True).copy()
+    base = work[base_cols].reset_index(drop=True).copy()
     base = base.rename(columns={duration_col: "duration", event_col: "event"})
     if include_cms:
-        levels = cms_levels or sorted(data[group_col].dropna().unique())
+        levels = cms_levels or sorted(work[group_col].dropna().unique())
         if reference not in levels:
             raise ValueError(f"La referencia '{reference}' no aparece en {group_col}")
-        groups = pd.Categorical(data[group_col], categories=levels)
+        groups = pd.Categorical(work[group_col], categories=levels)
         dummies = pd.get_dummies(groups, prefix="cms", dtype=float)
         dummies = dummies.drop(columns=[f"cms_{reference}"], errors="ignore")
         base = pd.concat([base, dummies.reset_index(drop=True)], axis=1)
     return base.dropna()
 
 
-def nested_model_increment(reduced: CoxPHFitter, full: CoxPHFitter) -> dict:
-    """Prueba LRT del aporte conjunto de las covariables añadidas."""
+def stratified_c_index_from_lp(lp: pd.Series, cox_df: pd.DataFrame, strata_col: str = "cohort") -> float:
+    """Concordancia dentro de cada estrato, promediada por pares (n_i choose 2)."""
+    num = den = 0.0
+    for _, idx in cox_df.groupby(strata_col).groups.items():
+        sub = cox_df.loc[idx]
+        if len(sub) < 2 or sub["event"].sum() == 0:
+            continue
+        c = concordance_index(sub["duration"], -lp.loc[idx], sub["event"])
+        w = len(sub) * (len(sub) - 1) / 2.0
+        num += c * w
+        den += w
+    return float(num / den) if den > 0 else float("nan")
+
+
+def stratified_c_index(cph: CoxPHFitter, cox_df: pd.DataFrame, strata_col: str = "cohort") -> float:
+    """
+    C-index correcto para un Cox ESTRATIFICADO: concordancia calculada
+    dentro de cada estrato y promediada ponderando por el numero de
+    pares comparables. `cph.concordance_index_` de lifelines compara
+    tambien pares de pacientes de cohortes distintas, cuyas funciones
+    basales son diferentes por construccion del modelo, asi que mezcla
+    discriminacion con diferencias entre cohortes.
+    """
+    lp = cph.predict_log_partial_hazard(cox_df)
+    return stratified_c_index_from_lp(lp, cox_df, strata_col)
+
+
+def nested_model_increment(
+    reduced: CoxPHFitter, full: CoxPHFitter,
+    reduced_df: pd.DataFrame | None = None, full_df: pd.DataFrame | None = None,
+) -> dict:
+    """Prueba LRT del aporte conjunto de las covariables añadidas.
+
+    Si se pasan los dataframes de ajuste, ademas del C-index agrupado de
+    lifelines (que mezcla estratos) reporta el C-index ESTRATIFICADO, que
+    es el que debe citarse para un modelo con strata=['cohort'].
+    """
     df_added = len(full.params_) - len(reduced.params_)
     if df_added <= 0:
         raise ValueError("El modelo completo debe contener mas parametros que el reducido")
     statistic = max(0.0, 2.0 * (full.log_likelihood_ - reduced.log_likelihood_))
-    return {
+    out = {
         "lr_chi2": float(statistic), "df": int(df_added),
         "p_incremental": float(chi2.sf(statistic, df_added)),
         "c_index_stage_only": float(reduced.concordance_index_),
@@ -72,6 +121,15 @@ def nested_model_increment(reduced: CoxPHFitter, full: CoxPHFitter) -> dict:
         "aic_partial_stage_only": float(reduced.AIC_partial_),
         "aic_partial_stage_plus_cms": float(full.AIC_partial_),
     }
+    if reduced_df is not None and full_df is not None:
+        c_r = stratified_c_index(reduced, reduced_df)
+        c_f = stratified_c_index(full, full_df)
+        out.update({
+            "c_index_stratified_stage_only": c_r,
+            "c_index_stratified_stage_plus_cms": c_f,
+            "delta_c_index_stratified": c_f - c_r,
+        })
+    return out
 
 
 def bootstrap_cindex_increment(
@@ -83,7 +141,7 @@ def bootstrap_cindex_increment(
     if iterations < 0:
         raise ValueError("bootstrap_iterations debe ser >= 0")
     if iterations == 0:
-        return pd.DataFrame(columns=["iteration", "delta_c_index"])
+        return pd.DataFrame(columns=["iteration", "delta_c_index", "delta_c_index_stratified"])
     rng = np.random.default_rng(seed)
     levels = sorted(data[group_col].dropna().unique())
     rows = []
@@ -108,10 +166,13 @@ def bootstrap_cindex_increment(
             rows.append({
                 "iteration": iteration,
                 "delta_c_index": full_model.concordance_index_ - stage_model.concordance_index_,
+                "delta_c_index_stratified": (stratified_c_index(full_model, full_df)
+                                             - stratified_c_index(stage_model, stage_df)),
             })
         except Exception:
             # Algunos remuestreos con muy pocos eventos pueden ser singulares.
-            rows.append({"iteration": iteration, "delta_c_index": np.nan})
+            rows.append({"iteration": iteration, "delta_c_index": np.nan,
+                         "delta_c_index_stratified": np.nan})
     return pd.DataFrame(rows)
 
 
@@ -146,7 +207,7 @@ def leave_one_cohort_out_validation(
                 train_stage, "duration", "event", strata=["cohort"])
             full_model = CoxPHFitter().fit(
                 train_full, "duration", "event", strata=["cohort"])
-            row.update(nested_model_increment(stage_model, full_model))
+            row.update(nested_model_increment(stage_model, full_model, train_stage, train_full))
 
             test_stage = build_cox_frame(
                 test, duration_col, event_col, reference, ["stage_harmonized"],
@@ -263,8 +324,19 @@ def main():
             "no aporta nada sobre un log-rank simple en ese caso, pero se corre igual."
         )
 
-    reference = args.reference or pooled[args.group_col].value_counts().idxmax()
+    # Referencia FIJA (CMS2) por defecto. Antes se elegia "la mas frecuente":
+    # dos cohortes con distinta composicion daban tablas con referencias
+    # distintas (todos los HR <1 en una, >1 en otra) y no comparables.
+    if args.reference:
+        reference = args.reference
+    elif DEFAULT_CMS_REFERENCE in set(pooled[args.group_col].dropna()):
+        reference = DEFAULT_CMS_REFERENCE
+    else:
+        reference = pooled[args.group_col].value_counts().idxmax()
+        print(f"AVISO: {DEFAULT_CMS_REFERENCE} no aparece en {args.group_col}; "
+              f"se usa la mas frecuente ({reference}) como referencia.")
     print(f"\nSubtipo de referencia (hazard ratio = 1.0 para este grupo): {reference}")
+    print(f"Estadio: indicadores categoricos con estadio {STAGE_REFERENCE} (II) de referencia.")
 
     cms_levels = sorted(pooled[args.group_col].dropna().unique())
 
@@ -332,7 +404,15 @@ def main():
                     "MODELO AJUSTADO -- subtipo CMS + estadio")
                 cph_adj.summary.to_csv(out_dir / "cox_summary_adjusted.tsv", sep="\t")
 
-                incremental = nested_model_increment(cph_stage_only, cph_adj)
+                stage_only_df = build_cox_frame(
+                    adj_data, args.duration_col, args.event_col, reference,
+                    ["stage_harmonized"], include_cms=False, group_col=args.group_col)
+                adj_df_for_c = build_cox_frame(
+                    adj_data, args.duration_col, args.event_col, reference,
+                    ["stage_harmonized"], include_cms=True, cms_levels=cms_levels,
+                    group_col=args.group_col)
+                incremental = nested_model_increment(
+                    cph_stage_only, cph_adj, stage_only_df, adj_df_for_c)
                 print(f"\n{'=' * 78}\nAPORTE INCREMENTAL DE CMS SOBRE ESTADIO\n{'=' * 78}")
                 print(
                     f"LRT estadio vs. estadio+CMS: chi2={incremental['lr_chi2']:.3f}, "
@@ -340,21 +420,26 @@ def main():
                 print(
                     f"C-index: estadio={incremental['c_index_stage_only']:.3f}, "
                     f"estadio+CMS={incremental['c_index_stage_plus_cms']:.3f}, "
-                    f"delta={incremental['delta_c_index']:+.3f}")
+                    f"delta={incremental['delta_c_index']:+.3f}  [agrupado, mezcla estratos]")
+                print(
+                    f"C-index ESTRATIFICADO (citar este): "
+                    f"estadio={incremental['c_index_stratified_stage_only']:.3f}, "
+                    f"estadio+CMS={incremental['c_index_stratified_stage_plus_cms']:.3f}, "
+                    f"delta={incremental['delta_c_index_stratified']:+.3f}")
 
                 boot = bootstrap_cindex_increment(
                     adj_data, args.duration_col, args.event_col, reference,
                     iterations=args.bootstrap_iterations, seed=args.bootstrap_seed,
                     group_col=args.group_col)
-                valid_delta = boot["delta_c_index"].dropna()
+                valid_delta = boot["delta_c_index_stratified"].dropna()
                 incremental["bootstrap_iterations_requested"] = args.bootstrap_iterations
                 incremental["bootstrap_iterations_valid"] = len(valid_delta)
                 if len(valid_delta):
                     low, high = np.quantile(valid_delta, [0.025, 0.975])
-                    incremental["delta_c_index_bootstrap_low95"] = float(low)
-                    incremental["delta_c_index_bootstrap_high95"] = float(high)
+                    incremental["delta_c_index_stratified_bootstrap_low95"] = float(low)
+                    incremental["delta_c_index_stratified_bootstrap_high95"] = float(high)
                     print(
-                        f"IC95% bootstrap del delta C-index: [{low:+.3f}, {high:+.3f}] "
+                        f"IC95% bootstrap del delta C-index estratificado: [{low:+.3f}, {high:+.3f}] "
                         f"({len(valid_delta)}/{args.bootstrap_iterations} remuestreos validos)")
                 pd.DataFrame([incremental]).to_csv(
                     out_dir / "cox_incremental_value.tsv", sep="\t", index=False)
