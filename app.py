@@ -313,7 +313,7 @@ def build_patient_pdf(sample_id, predicted_cms, confidence, evidence, t_checks, 
     if alert:
         ax.axvline(t_checks[alert_idx], color="#B03A2E", linestyle=":", linewidth=1.5)
     ax.set_xlabel("Meses desde la cirugía")
-    ax.set_ylabel("Riesgo (ordinal)")
+    ax.set_ylabel("‖x‖ (distancia al tumor promedio)")
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     fig.tight_layout()
@@ -351,7 +351,7 @@ def build_patient_pdf(sample_id, predicted_cms, confidence, evidence, t_checks, 
     story.append(Paragraph(
         "Los valores de intensidad NO son una estimación de eficacia clínica ni un "
         "porcentaje de beneficio -- ver aviso al final.", caution_style))
-    table_data = [["Mecanismo", "Riesgo ordinal sin tx", "Riesgo ordinal con tx",
+    table_data = [["Mecanismo", "‖x‖ final sin tx", "‖x‖ final con tx",
                     "Intensidad simulada (arbitraria)", "Dirección"]]
     for r in treatment_results:
         table_data.append([
@@ -946,14 +946,14 @@ with tab_paciente:
 
         st.divider()
 
-        st.markdown('<div class="eyebrow">Riesgo simulado en el tiempo (escenario what-if con recaída inyectada en el mes 15)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="eyebrow">Norma del estado ‖x‖ en el tiempo — no es un riesgo ni una probabilidad (escenario what-if con recaída inyectada en el mes 15)</div>', unsafe_allow_html=True)
         fig_p, ax_p = plt.subplots(figsize=(8, 3))
         ax_p.plot(t_p, hazard_p, color=CMS_COLOR.get(pred_p, "#D55E00"), marker="o",
                   markersize=4, linewidth=2)
         if alert_p:
             ax_p.axvline(t_p[idx_p], color="#B03A2E", linestyle=":", linewidth=1.6)
         ax_p.set_xlabel("Meses desde la cirugía", fontsize=9)
-        ax_p.set_ylabel("Riesgo (ordinal)", fontsize=9)
+        ax_p.set_ylabel("‖x‖ (distancia al tumor promedio)", fontsize=9)
         ax_p.tick_params(labelsize=8)
         for s in ("top", "right"):
             ax_p.spines[s].set_visible(False)
@@ -1124,7 +1124,7 @@ with tab_traj:
         if alert:
             ax2.axvline(t_checks[alert_idx], color="#B03A2E", linestyle=":", linewidth=1.6)
         ax2.set_xlabel("Meses desde la cirugía", fontsize=9)
-        ax2.set_ylabel("Riesgo (ordinal)", fontsize=9)
+        ax2.set_ylabel("‖x‖ (distancia al tumor promedio)", fontsize=9)
         ax2.tick_params(labelsize=8)
         for s in ("top", "right"):
             ax2.spines[s].set_visible(False)
@@ -1251,7 +1251,7 @@ with tab_tx:
         ax.axvline(tx_onset, color=CMS_COLOR.get(tx_color_key, "#0072B2"),
                    linestyle=":", linewidth=1.4)
         ax.set_xlabel("Meses desde la cirugía", fontsize=9)
-        ax.set_ylabel("Riesgo (ordinal)", fontsize=9)
+        ax.set_ylabel("‖x‖ (distancia al tumor promedio)", fontsize=9)
         ax.legend(fontsize=8, frameon=False)
         ax.tick_params(labelsize=8)
         for s in ("top", "right"):
@@ -1260,9 +1260,9 @@ with tab_tx:
         st.pyplot(fig)
 
     with right:
-        st.markdown(readout("Riesgo ordinal final · sin tratamiento", f"{h_base[-1]:.2f}",
+        st.markdown(readout("‖x‖ final · sin tratamiento", f"{h_base[-1]:.2f}",
                              accent="#8A8F98"), unsafe_allow_html=True)
-        st.markdown(readout("Riesgo ordinal final · con tratamiento", f"{h_tx[-1]:.2f}",
+        st.markdown(readout("‖x‖ final · con tratamiento", f"{h_tx[-1]:.2f}",
                              accent=CMS_COLOR.get(tx_color_key, "#0072B2")), unsafe_allow_html=True)
         st.markdown(
             f'<div class="eyebrow" style="margin-top:.6rem">Intensidad simulada arbitraria '
