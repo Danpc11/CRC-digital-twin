@@ -213,6 +213,49 @@ def convert_duration_units(duration: pd.Series, units: str) -> pd.Series:
     return pd.to_numeric(duration, errors="coerce") * factor
 
 
+EVENT_RATE_MAX_PLAUSIBLE = 0.60
+
+
+def check_event_coding(event: pd.Series, duration: pd.Series, strict: bool = True) -> dict:
+    """
+    Detecta una columna de evento invertida (indicador de CENSURA leido
+    como evento).
+
+    Dos senales, ambas vistas con GSE14333 (columna 'DFS_Cens', donde 1
+    = censurado): (1) una tasa de "evento" implausible para RFS en
+    estadio I-III (>60%; lo normal es 20-35%), y (2) los supuestos
+    eventos con tiempos de seguimiento MAS LARGOS que los censurados,
+    cuando por definicion una recidiva ocurre antes del fin de
+    seguimiento. La combinacion de ambas es casi diagnostica.
+    """
+    ev = pd.to_numeric(event, errors="coerce")
+    dur = pd.to_numeric(duration, errors="coerce")
+    ok = ev.notna() & dur.notna()
+    ev, dur = ev[ok], dur[ok]
+    if len(ev) == 0 or ev.nunique() < 2:
+        return {"event_rate": float("nan"), "sospechoso": False}
+    rate = float(ev.mean())
+    t_event, t_cens = float(dur[ev == 1].mean()), float(dur[ev == 0].mean())
+    print(f"Codificacion de evento: tasa={rate:.1%}; tiempo medio con evento={t_event:.1f} "
+          f"meses vs sin evento={t_cens:.1f} meses")
+    alta = rate > EVENT_RATE_MAX_PLAUSIBLE
+    invertido = t_event > t_cens
+    res = {"event_rate": rate, "tiempo_medio_evento": t_event,
+           "tiempo_medio_censurado": t_cens, "sospechoso": bool(alta and invertido)}
+    if alta and invertido:
+        msg = (f"La columna de evento parece INVERTIDA: tasa de eventos {rate:.1%} "
+               f"(>{EVENT_RATE_MAX_PLAUSIBLE:.0%}) y los 'eventos' tienen seguimiento mas "
+               "largo que los censurados. Columnas llamadas '*_Cens' suelen codificar "
+               "1=censurado. Reconstruye con --event-map \"0=1,1=0\" o usa "
+               "--allow-suspicious-event-coding si ya lo verificaste.")
+        if strict:
+            raise ValueError(msg)
+        print("AVISO: " + msg)
+    elif alta:
+        print(f"AVISO: tasa de eventos {rate:.1%}, alta para RFS en estadio I-III. Verifica.")
+    return res
+
+
 def check_duration_units(duration_months: pd.Series, strict: bool = True) -> str:
     """Comprueba que la duracion tenga pinta de estar en meses.
 
@@ -258,6 +301,8 @@ def main():
     parser.add_argument("--stage-col", default=None,
                          help="Columna de estadio clinico (Dukes/TNM/AJCC). Necesaria para el "
                               "modelo de Cox ajustado (pooled_cox_validation.py --adjust-stage).")
+    parser.add_argument("--allow-suspicious-event-coding", action="store_true",
+                        help="Degradar a aviso la deteccion de columna de evento invertida")
     parser.add_argument("--duration-units", default="months",
                         choices=["months", "days", "years"],
                         help="Unidad de --duration-col en el fenotipo original. GSE33113 usa days.")
@@ -434,6 +479,8 @@ def main():
     merged["relapse_free_months"] = convert_duration_units(
         merged["relapse_free_months"], args.duration_units)
     check_duration_units(merged["relapse_free_months"], strict=not args.allow_suspicious_units)
+    check_event_coding(merged["relapse_event"], merged["relapse_free_months"],
+                       strict=not args.allow_suspicious_event_coding)
 
     if args.event_map:
         event_map = dict(pair.split("=") for pair in args.event_map.split(","))
