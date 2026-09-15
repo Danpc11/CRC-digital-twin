@@ -149,6 +149,46 @@ def expand_stage_categorical(
     return out, cols
 
 
+MIN_EVENTS_PER_STAGE_LEVEL = 5
+
+
+def collapse_sparse_stage_levels(
+    df: pd.DataFrame, stage_cols: list[str], event_col: str,
+    min_events: int = MIN_EVENTS_PER_STAGE_LEVEL, verbose: bool = True,
+) -> list[str]:
+    """
+    Descarta las dummies de estadio con muy pocos eventos, devolviendo la
+    lista de columnas que SI deben entrar al modelo.
+
+    POR QUE: con el evento bien codificado, casi ningun paciente en
+    estadio I recae. Entonces stage_I determina practicamente la ausencia
+    de evento ("complete separation"): su coeficiente tiende a -infinito,
+    la verosimilitud no tiene maximo unico y lifelines avisa
+    ConvergenceWarning con norm(delta) alto en cada ajuste. El estimador
+    de ese nivel no es interpretable y desestabiliza el resto del modelo.
+
+    Descartar la dummy equivale a fusionar ese estadio con la categoria
+    de referencia (estadio II). Clinicamente es razonable: I y II son
+    ambos enfermedad sin afectacion ganglionar, y la mayoria de los
+    estudios de RFS los agrupan. Se imprime siempre que ocurre, para que
+    quede en el reporte que el modelo compara "I+II vs III".
+    """
+    keep, dropped = [], []
+    for col in stage_cols:
+        mask = pd.to_numeric(df[col], errors="coerce") == 1
+        n_events = int(pd.to_numeric(df.loc[mask, event_col], errors="coerce").fillna(0).sum())
+        if n_events < min_events:
+            dropped.append((col, int(mask.sum()), n_events))
+        else:
+            keep.append(col)
+    if dropped and verbose:
+        for col, n, ev in dropped:
+            print(f"AVISO: '{col}' tiene n={n} con solo {ev} eventos (<{min_events}); "
+                  "se fusiona con la categoria de referencia (estadio II) para evitar "
+                  "separacion completa. El modelo compara estadio I+II vs III.")
+    return keep
+
+
 def prepare_covariates(
     df: pd.DataFrame,
     stage_col: str = "stage",
