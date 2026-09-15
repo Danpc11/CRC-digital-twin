@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-**Última actualización:** 2026-09-11. Historial detallado en `CHANGELOG.md`.
+**Última actualización:** 2026-09-15. Historial detallado en `CHANGELOG.md`.
 
 ## Panel actual
 
@@ -77,6 +77,15 @@ así que se corrió `cli.py cox-clinical` (RFS, estadio I-III, n=449, 132 evento
 - **Límite**: in-sample (GSE39582 es la cohorte de calibración). Ninguna de las 5 externas
   anota MMR; TCGA tiene MSI pero no RFS curado. Replicarlo fuera de muestra requiere una
   cohorte nueva con MMR + RFS (GSE38832 y GSE13294 son candidatas; verificar anotación).
+
+## ⚠️ 2026-09-15: cifras de Cox ajustado pendientes de recálculo
+
+Hasta esta fecha el estadio entraba al Cox como número (1-2-3) y el C-index reportado mezclaba
+estratos. Ambos se corrigieron (ver `CHANGELOG.md`). **Todos los HR "ajustados por estadio", los
+ΔC-index y sus IC bootstrap de este documento deben recalcularse** con `cli.py pooled-cox` y
+`cli.py cox-clinical` actuales antes de volver a citarse. La referencia del Cox agrupado ahora es
+siempre CMS2. Además existe `cli.py cox-chemo` (interacción CMS × quimio adyuvante): es el único
+análisis del proyecto que se acerca a la pregunta "¿necesita quimio?", y es observacional.
 
 ## Evidencia acumulada
 
