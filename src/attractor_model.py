@@ -58,7 +58,12 @@ from scipy.integrate import solve_ivp
 # Actualizado 2026-09-09: FABP1->GALNT8, SI->AGR2 (aprobado por Daniel,
 # ver network_analysis/CLAUDE.md, seccion "Seleccion data-driven de un
 # panel mas predictivo" para la justificacion completa).
-GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
+# Actualizado 2026-09-18: TGFB1->EFEMP2 (fibulina-4, marcador estromal;
+# aprobado por Daniel). Motivo: el error dominante era CMS4 oficial ->
+# CMS1 predicho, porque VIM se expresa tambien en leucocitos y TGFB1 casi
+# no separa CMS4 de CMS1 (AUC 0.58). EFEMP2 es producto de fibroblasto y
+# fue el mejor de 8 variantes probadas (ver PROJECT_STATUS.md).
+GENES = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "EFEMP2"]
 N = len(GENES)
 
 CMS_LABELS = ["CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_mesenchymal"]
@@ -70,7 +75,7 @@ CMS_LABELS = ["CMS1_MSI_immune", "CMS2_canonical_WNT", "CMS3_metabolic", "CMS4_m
 #   CMS1: MLH1 BAJO (silenciamiento -> MSI), GNLY/USP18 altos (inmune)
 #   CMS2: MYC/AXIN2 altos (WNT)
 #   CMS3: GALNT8/CPS1/AGR2 altos (metabolico)
-#   CMS4: VIM/TGFB1 altos (mesenquimal)
+#   CMS4: VIM/EFEMP2 altos (mesenquimal/estromal)
 CMS_PATTERNS = {
     "CMS1_MSI_immune":    np.array([-0.9,  0.9,  0.9, -0.6, -0.5, -0.4, -0.4, -0.4, -0.6, -0.4]),
     "CMS2_canonical_WNT": np.array([-0.5, -0.4, -0.4,  0.9,  0.9, -0.4, -0.3, -0.3, -0.5, -0.4]),

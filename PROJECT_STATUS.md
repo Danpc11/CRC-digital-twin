@@ -6,12 +6,15 @@
 
 10 genes, todos medibles mediante qPCR con transcripción inversa (RT-qPCR): `MLH1`, `GNLY`,
 `USP18` (CMS1) · `MYC`, `AXIN2` (CMS2) ·
-`GALNT8`, `CPS1`, `AGR2` (CMS3) · `VIM`, `TGFB1` (CMS4). Congelado — no agregar genes sin
+`GALNT8`, `CPS1`, `AGR2` (CMS3) · `VIM`, `EFEMP2` (CMS4). Congelado — no agregar genes sin
 justificación cuantitativa nueva (cada gen tiene costo real en un ensayo RT-qPCR).
 Actualizado 2026-09-09: `FABP1`→`GALNT8`, `SI`→`AGR2` (aprobado por Daniel, basado en
 selección data-driven + validación externa en 5 cohortes — ver
 `network_analysis/CLAUDE.md`, sección "Cambio ejecutado en el panel real de dt +
 validación externa completa"). `MYC`→`TP53RK`/`SLC5A6` se evaluó pero no se aprobó.
+**Actualizado 2026-09-18: `TGFB1`→`EFEMP2`** (fibulina-4, marcador estromal; aprobado por
+Daniel) para corregir el error dominante CMS4 oficial → CMS1 predicho. Ver la sección
+siguiente; las cifras de validación vigentes son las de ese cambio.
 CMS corresponde a los subtipos moleculares consensuados de cáncer colorrectal (*Consensus
 Molecular Subtypes*).
 
@@ -51,7 +54,110 @@ reportar ese resultado tal cual salga.
 - La asimetría de umbrales V1 (CMS2 "inalcanzable") se puede diagnosticar con
   `src/pattern_norm_diagnostic.py` antes de atribuirla a biología.
 
-## ¿Qué añade CMS sobre la clínica de rutina? (MMR) — recalculado 2026-09-15
+## Cambio de panel `TGFB1`→`EFEMP2` y validación vigente (2026-09-18)
+
+**Motivación.** El error dominante del panel v0.2.0 en las cohortes externas era CMS4 oficial →
+CMS1 predicho (~30% en GSE14333/GSE37892 en el rerun del 15; 11.9% agregado sobre las cohortes
+reconstruidas). Los dos genes de CMS4 no separaban ese contraste: `TGFB1` tiene AUC CMS4-vs-CMS1
+0.58 (GSE39582) / 0.57 (TCGA) y `VIM` sigue al infiltrado leucocitario (r con `PTPRC` 0.60–0.62).
+Se evaluaron 30 genes estromales por AUC CMS4-vs-CMS1 en ambas cohortes y baja correlación con
+`PTPRC`; los 4 mejores (`MXRA8`, `EFEMP2`, `BNC2`, `GLI3`) se probaron como gen 11 y como
+sustituto de `TGFB1` (8 variantes, mismas 6 cohortes reconstruidas, mismo protocolo). Todas
+redujeron la fuga a la mitad; sustituir ganó a añadir en todas las métricas de supervivencia;
+`EFEMP2` sustituyendo a `TGFB1` fue el mejor (κ externo, fuga, HR CMS4, LRT, ΔC). Literatura
+(Yao 2012 *J Proteome Res*; Yuen 2013 *PLoS One*) y factibilidad RT-qPCR (Primer-BLAST limpio en
+371–731 de NM_016938.5; TaqMan Hs00973815_m1, Inventoried) cerradas antes de proponerlo.
+Detalle en `network_analysis/CLAUDE.md` y en el dossier del Drive (`respaldo_v0.2.0/efemp2_mxra8/`).
+
+**Cambio en código**: `build_*_dataset.py`, `build_external_cohort_generic.py`, `synthetic_data.py`,
+`attractor_model.py`, `feature_selection.py`, `error_analysis.py`, `treatment_perturbation.py`
+(`target_genes` de quimio), `format_to_schema.py` (Entrez 30008), `app.py` (pestaña Método),
+`figures/_common.py`. Las 6 cohortes se reconstruyeron con los builders actuales (validadores de
+escala, unidades y evento activos). Suite: 246/246.
+
+### Calibración (GSE39582, in-sample)
+
+| | panel v0.2.0 (`TGFB1`) | **panel v0.3 (`EFEMP2`)** |
+|---|---|---|
+| κ vs etiqueta oficial (n=519) | 0.728 | **0.754** |
+| accuracy | 80.5% | **82.5%** |
+| concordancia CMS1 / CMS2 / CMS3 / CMS4 | 90.1 / 76.3 / 91.3 / 75.6% | 89.0 / 76.7 / 91.3 / **83.5%** |
+| CMS4 oficial → CMS1 predicho | 9 | **5** |
+| log-rank RFS (subtipo predicho, n=557) | 1.84e-05 | **1.11e-05** |
+
+### Concordancia externa (etiqueta oficial, cobertura 1.0)
+
+| Cohorte | n | κ v0.2.0 | **κ v0.3** | CMS4→CMS1 v0.3 | conc. CMS4 v0.3 |
+|---|---|---|---|---|---|
+| GSE14333 | 135 | 0.635 | **0.706** | 1/35 | 88.6% |
+| GSE17536 | 156 | 0.731 | **0.758** | 2/40 | 82.5% |
+| GSE33113 | 85 | 0.683 | **0.833** | 2/21 | 85.7% |
+| GSE37892 | 118 | 0.662 | **0.675** | 3/39 | 87.2% |
+| **media / total** | 494 | 0.678 | **0.743** | **8/135 = 5.9%** (antes 16/135 = 11.9%) | |
+
+Los κ de v0.2.0 de esta tabla son sobre las mismas cohortes reconstruidas y sin abstención, por
+eso difieren de la tabla del 15 (que reportaba cobertura <1). GSE17537 sigue sin etiqueta oficial.
+
+### Análisis principal: 4 cohortes etiquetadas, misma muestra (`results_pooled_cox_mismamuestra/`)
+
+Subtipo predicho, Cox estratificado por cohorte, estadio categórico (III vs I+II), referencia
+CMS2, pacientes con etiqueta del consorcio. **n=428, 95 eventos** (idéntico al del 15).
+
+| Covariable | HR v0.3 | IC95% | p | (v0.2.0) |
+|---|---|---|---|---|
+| estadio III (vs I+II) | 3.68 | 2.24–6.05 | <0.001 | 3.83 |
+| CMS1 | **2.26** | 1.27–4.04 | 0.006 | 2.06 |
+| CMS3 | 1.20 | 0.56–2.57 | 0.64 | 1.27 |
+| CMS4 | **2.32** | 1.35–3.98 | 0.002 | 2.03 |
+
+- Aporte incremental de CMS sobre estadio: LRT χ²=13.1, 3 gl, **p=0.0043** (antes 0.022).
+- **C-index estratificado** 0.649 → 0.709, **ΔC=+0.060 (IC95% bootstrap +0.030 a +0.096)**,
+  500/500 remuestreos (antes +0.048 [+0.021, +0.087]).
+- **Leave-one-cohort-out**: ΔC +0.017 a +0.066 en las cuatro particiones (antes +0.045 a +0.065);
+  HR CMS1 2.01–2.43, HR CMS4 1.80–2.87.
+- Contraste con la **etiqueta oficial** sobre los mismos 428 (`results_pooled_cox_oficial/`):
+  CMS1 2.25 (1.27–3.98), CMS3 0.87, CMS4 2.36 (1.41–3.94); ΔC estratificado **+0.075** [+0.039,
+  +0.109]. **El panel recupera ahora 0.060/0.075 = 80% del aporte pronóstico de la clasificación
+  completa** (antes dos tercios), y sus HR de CMS1/CMS4 (2.26/2.32) son ya indistinguibles de los
+  oficiales (2.25/2.36).
+
+### Sensibilidad
+
+| Análisis | n / eventos | LRT p | ΔC estratificado | HR CMS4 |
+|---|---|---|---|---|
+| Principal (4 etiquetadas) | 428 / 95 | 0.0043 | +0.060 [+0.030, +0.096] | 2.32 |
+| 5 cohortes, incluye no etiquetados | 518 / 117 | 0.0057 | +0.053 [+0.030, +0.087] | 2.33 |
+| Solo RFS real (GSE14333+33113+37892, etiquetados) | 308 / 70 | 0.028 | +0.079 [+0.040, +0.127] | 2.48 |
+
+En 5 cohortes CMS3 vuelve a subir (HR 1.80, p=0.07) por los no etiquetados, igual que en el
+rerun del 15; en la muestra igualada baja a 1.20.
+
+### Diagnósticos (`results_cox_diagnostics/`, 4 etiquetadas)
+
+Riesgos proporcionales: ninguna covariable viola el supuesto (Holm), omnibus de Fisher p=0.84.
+Efecto tiempo-dependiente a 36 meses: sin diferencia early/late (p=0.26, 0.48, 0.54).
+Heterogeneidad entre cohortes: p=0.40 (CMS1), 0.65 (CMS3), 0.12 (CMS4). Delta-beta máximo 0.073.
+
+### MMR con el panel v0.3 (`results_cox_clinical/`, GSE39582, n=449, 132 eventos)
+
+| Modelo | HR CMS4 (IC95%) | p | HR CMS1 | HR dMMR |
+|---|---|---|---|---|
+| A. CMS solo | 2.18 (1.42–3.35) | <0.001 | 0.83 | — |
+| D. CMS + estadio + MMR | **1.96 (1.27–3.02)** | **0.002** | 1.05 (n.s.) | 0.57 (n.s.) |
+| E. solo pMMR (n=380) | **1.95 (1.26–3.01)** | **0.003** | 0.95 | — |
+
+LRT de CMS sobre estadio+MMR χ²=10.4, p=0.016; ΔC +0.032. Conclusión idéntica a la del 15: CMS4
+aporta más allá de estadio y MMR; CMS1 no. CMS1 partido por MMR (`results_cms1_mmr/`): dMMR HR
+0.67, pMMR peor (RFS 5 años 0.73 vs 0.83) pero sin poder (18 eventos), como antes.
+
+### Límites
+
+Es la tercera vez que las 5 cohortes externas intervienen en una decisión de panel y se probaron
+8 variantes: el ganador tiene optimismo de selección. La confirmación exige una cohorte del CRCSC
+con etiqueta y RFS **no tocada** (candidatas: GSE38832, GSE29621, GSE13294). El panel queda
+congelado en v0.3 hasta entonces.
+
+## ¿Qué añade CMS sobre la clínica de rutina? (MMR) — panel v0.2.0, recalculado 2026-09-15 (histórico; cifras v0.3 arriba)
 
 Objeción razonable: CMS1 ≈ dMMR/MSI-H, que ya tiene prueba clínica estándar (IHC de MMR). Lo
 defendible del panel es lo que aporte *más allá* de estadio + MMR. GSE39582 anota MMR
@@ -85,15 +191,16 @@ previo estaba mal especificado, el salto II→III no equivale al I→II.
 - **Límite**: in-sample (GSE39582 es la cohorte de calibración). Ninguna de las externas anota
   MMR; TCGA tiene MSI pero no RFS curado.
 
-## Rerun completo del 2026-09-15
+## Rerun completo del 2026-09-15 (panel v0.2.0 — histórico desde el 2026-09-18)
 
 Todas las cifras de validación externa se recalcularon desde cero tras detectar tres
 problemas de preparación de datos (ver "Hallazgos de preparación de datos" más abajo).
-**Las cifras vigentes son las de la sección siguiente**; lo que aparece después, en
-"Evidencia acumulada (histórico)", corresponde a corridas anteriores y se conserva solo
-como registro de lo que cambió y por qué.
+**Desde el 2026-09-18 las cifras vigentes son las del cambio `TGFB1`→`EFEMP2` (sección
+anterior)**; esta sección se conserva como referencia del panel v0.2.0 sobre los mismos datos
+corregidos, y lo que aparece después en "Evidencia acumulada (histórico)" corresponde a
+corridas anteriores a las correcciones de datos.
 
-## Resultados de validación externa (vigentes — rerun 2026-09-15)
+## Resultados de validación externa del panel v0.2.0 (rerun 2026-09-15 — histórico)
 
 ### Análisis principal: 4 cohortes con etiqueta CMS oficial
 
@@ -574,10 +681,10 @@ En orden de prioridad, tras el rerun del 2026-09-15:
 5. **Sensibilidad a la etiqueta de referencia**: repetir la concordancia con `CMS_network`
    (solo consenso) en lugar de `CMS_final_network_plus_RFclassifier_in_nonconsensus_samples`.
    Si κ sube, parte del "error" era ruido de etiqueta.
-6. **Desambiguar CMS4 vs CMS1**: evaluar añadir un marcador estromal específico (`THBS2`,
-   `INHBA`) contra el error dominante de clasificación (~30% de CMS4 → CMS1). Cualquier cambio
-   de panel debe decidirse sobre GSE39582 y evaluarse en la cohorte confirmatoria, nunca sobre
-   las cinco actuales.
+6. ~~**Desambiguar CMS4 vs CMS1**~~ — **hecho (2026-09-18)**: `TGFB1`→`EFEMP2` tras probar 8
+   variantes (`THBS2`/`INHBA` quedaron por debajo de `MXRA8`/`EFEMP2`/`BNC2`/`GLI3` en AUC
+   CMS4-vs-CMS1). La fuga CMS4→CMS1 externa bajó de 11.9% a 5.9%. Pendiente: evaluar en la
+   cohorte confirmatoria.
 7. **`cms_margin` como covariable** en el Cox, para probar si la ambigüedad del perfil tiene
    valor pronóstico propia (lo sugieren los no-consenso).
 8. **Regenerar la tabla V1/V2** del motor dinámico con el calendario de forzamiento unificado

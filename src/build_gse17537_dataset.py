@@ -29,7 +29,7 @@ RAW_GEO = Path(__file__).resolve().parents[1] / "data" / "raw_geo"
 RAW_SYNAPSE = Path(__file__).resolve().parents[1] / "data" / "raw_synapse"
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "gse17537_cms_labeled.tsv"
 
-TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "TGFB1"]
+TARGET_SYMBOLS = ["MLH1", "GNLY", "USP18", "MYC", "AXIN2", "GALNT8", "CPS1", "AGR2", "VIM", "EFEMP2"]
 
 CMS_RENAME = {
     "CMS1": "CMS1_MSI_immune",

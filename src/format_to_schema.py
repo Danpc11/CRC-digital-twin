@@ -38,7 +38,7 @@ ENTREZ_TO_SYMBOL = {
     "1373": "CPS1",
     "10551": "AGR2",  # actualizado 2026-09-09 (reemplaza SI)
     "7431": "VIM",
-    "7040": "TGFB1",
+    "30008": "EFEMP2",  # actualizado 2026-09-18 (reemplaza TGFB1, Entrez 7040); verificado via NCBI Gene (alias FBLN4)
 }
 
 # Alternativas si el marcador principal no esta en el panel de 5973 genes

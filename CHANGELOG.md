@@ -1,5 +1,34 @@
 # Historial de cambios
 
+## 2026-09-18 — Cambio de panel CMS4: `TGFB1`→`EFEMP2` (aprobado por Daniel)
+
+- **Motivación**: el error dominante en las externas era CMS4 oficial → CMS1 predicho. `TGFB1`
+  casi no separa CMS4 de CMS1 (AUC 0.58/0.57 en GSE39582/TCGA) y `VIM` sigue al infiltrado
+  leucocitario (r con `PTPRC` 0.60–0.62). `EFEMP2` (fibulina-4, producto de fibroblasto) fue el
+  mejor de 8 variantes (4 genes estromales × añadir/sustituir): AUC CMS4-vs-CMS1 0.89/0.93,
+  r con `PTPRC` 0.40/0.37. Sustituir ganó a añadir en todas las métricas de supervivencia.
+- **Código** (mismos lugares que el cambio del 2026-09-09): `build_gse39582_dataset.py`,
+  `build_gse17536_dataset.py`, `build_gse17537_dataset.py`, `build_external_cohort_generic.py`,
+  `synthetic_data.py`, `attractor_model.py` (GENES, patrones cualitativos, comentarios),
+  `build_tcga_rnaseq_dataset.py`, `feature_selection.py` (`CURRENT_PANEL`), `error_analysis.py`,
+  `treatment_perturbation.py` (`target_genes` de quimio), `format_to_schema.py` (Entrez 30008,
+  verificado en NCBI Gene), `app.py` (pestaña Método), `figures/_common.py`, `MODEL.md`,
+  `README.md`, `PROJECT_STATUS.md`.
+- **Validación** (6 cohortes reconstruidas con los builders actuales; protocolo del 2026-09-15):
+  κ GSE39582 0.728→**0.754**, concordancia CMS4 75.6→**83.5%**; κ externo medio 0.678→**0.743**;
+  fuga CMS4→CMS1 externa 16/135→**8/135 (5.9%)**. Cox principal (4 etiquetadas, n=428, 95
+  eventos, estadio categórico): CMS1 HR **2.26** (1.27–4.04), CMS4 **2.32** (1.35–3.98), CMS3
+  1.20 n.s.; LRT incremental **p=0.0043** (antes 0.022); ΔC estratificado **+0.060** [+0.030,
+  +0.096] (antes +0.048); LOCO +0.017 a +0.066. Frente a la etiqueta oficial (ΔC +0.075) el panel
+  recupera el **80%** del aporte pronóstico (antes dos tercios). Diagnósticos limpios (PH omnibus
+  p=0.84; heterogeneidad p≥0.12). MMR: CMS4 HR 1.96 (1.27–3.02) tras estadio+MMR y 1.95 en pMMR.
+- **Factibilidad RT-qPCR** de `EFEMP2`: una sola variante RefSeq (NM_016938.5); homología con
+  `FBLN5` en 732–1243 evitada diseñando en 371–731; Primer-BLAST sin blancos no intencionales;
+  TaqMan Hs00973815_m1 (Inventoried, Best Coverage, 75 nt). Detalle en el dossier del Drive.
+- **Límite**: tercera decisión de panel tomada con las mismas 5 externas y 8 variantes probadas
+  (optimismo de selección). Confirmar en cohorte intocada antes de cualquier uso.
+- Suite: 246/246 (sin tests nuevos; el cambio es de datos, no de lógica).
+
 ## 2026-09-15 — tercera revisión: escala, estadio categórico, C-index estratificado, interacción con quimio
 
 ### Corregido

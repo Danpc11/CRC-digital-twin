@@ -93,7 +93,7 @@ TREATMENT_MECHANISMS = {
         ),
     },
     "cytotoxic_chemo": {
-        "target_genes": ["VIM", "TGFB1"],
+        "target_genes": ["VIM", "EFEMP2"],
         "criterio": "reduced_efficacy_cms4",
         "evidence": (
             "CMS4 muestra HR>1 en el Cox agrupado (cifra vigente en PROJECT_STATUS.md), con "
