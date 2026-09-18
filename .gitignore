@@ -43,3 +43,6 @@ Thumbs.db
 
 # --- Secretos / config local ---
 .env
+
+# --- figures/: los scripts se versionan; las salidas (PDF/PNG/pies) viven en el Drive (premio_Roche/figuras) ---
+figures/out/
