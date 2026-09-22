@@ -33,7 +33,7 @@ from matplotlib.cm import ScalarMappable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (CMS_COLORS, CMS_ORDER, GRAY, GRAY_LIGHT, GRAY_DARK, INK, FONT_MIN, DIVERGING_CMAP,
                      UP_COLOR, DOWN_COLOR, mm, panel_label, add_axes_mm, save_figure, setup_style,
-                     base_parser, resolve_paths)
+                     base_parser, resolve_paths, require_path, MRA_CANDIDATES)
 
 FIG_W, FIG_H = 180.0, 110.0
 HALLMARK_ES = {
@@ -267,9 +267,10 @@ def main(argv=None):
     paths = resolve_paths(args)
     setup_style()
 
+    mra = require_path(paths["mra"], "crc_mra_results", MRA_CANDIDATES)
     targets, target_axes = load_targets(paths["predictive_panel"])
-    Z, blocks, top = load_regulators(paths["mra"], target_axes)
-    H, counts = load_hallmarks(paths["mra"])
+    Z, blocks, top = load_regulators(mra, target_axes)
+    H, counts = load_hallmarks(mra)
 
     fig = plt.figure(figsize=(mm(FIG_W), mm(FIG_H)))
     norm, cmap = draw_heatmap_blocks(fig, Z, blocks, targets, args.sat)

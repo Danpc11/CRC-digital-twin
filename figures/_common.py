@@ -156,6 +156,21 @@ def first_existing(candidates, what: str) -> Path:
     raise FileNotFoundError(f"No encuentro {what}; probé: " + "; ".join(str(c) for c in candidates))
 
 
+def first_existing_optional(candidates):
+    """Como first_existing pero devuelve None en vez de reventar.
+
+    resolve_paths() se llama igual para las cuatro figuras, pero cada una
+    consume insumos distintos: solo fig3 lee crc_mra_results y ninguna lee
+    respaldo_v0.2.0. Exigirlos a todas hacía que fig2 abortara en una
+    máquina sin el Drive montado por un directorio que no iba a abrir.
+    Quien de verdad necesite uno debe comprobar que no es None.
+    """
+    for c in candidates:
+        if Path(c).exists():
+            return Path(c)
+    return None
+
+
 def base_parser(description: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=description)
     p.add_argument("--outdir", type=Path, default=None,
@@ -173,13 +188,19 @@ def resolve_paths(args) -> dict:
     out = {}
     out["outdir"] = args.outdir or (OUTDIR_CANDIDATES[0] if OUTDIR_CANDIDATES[0].parent.exists() else OUTDIR_CANDIDATES[1])
     out["repo"] = Path(args.repo_root)
-    out["respaldo"] = args.respaldo or first_existing(RESPALDO_CANDIDATES, "respaldo_v0.2.0")
-    out["mra"] = args.mra_dir or first_existing(MRA_CANDIDATES, "crc_mra_results")
-    try:
-        out["predictive_panel"] = args.predictive_panel or first_existing(PREDICTIVE_PANEL_CANDIDATES, "predictive_panel")
-    except FileNotFoundError:
-        out["predictive_panel"] = None
+    out["respaldo"] = args.respaldo or first_existing_optional(RESPALDO_CANDIDATES)
+    out["mra"] = args.mra_dir or first_existing_optional(MRA_CANDIDATES)
+    out["predictive_panel"] = args.predictive_panel or first_existing_optional(PREDICTIVE_PANEL_CANDIDATES)
     return out
+
+
+def require_path(path, what: str, candidates) -> Path:
+    """Falla con el mensaje útil justo donde el insumo hace falta de verdad."""
+    if path is None:
+        raise FileNotFoundError(
+            f"No encuentro {what}; probé: " + "; ".join(str(c) for c in candidates)
+            + f". Pásalo explícitamente si está en otro sitio.")
+    return Path(path)
 
 
 def fmt_p(p: float) -> str:
