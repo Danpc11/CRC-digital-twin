@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+import warnings
 from pathlib import Path
 
 import matplotlib
+from matplotlib import font_manager
 import matplotlib.pyplot as plt
 
 # --------------------------------------------------------------------------------------
@@ -62,11 +65,62 @@ REPLACED_GENES = {"FABP1": "CMS3", "SI": "CMS3", "TGFB1": "CMS4"}  # panel previ
 FONT_MIN = 7.0
 FONT_PANEL = 10.0
 
+# Orden de preferencia. Liberation Sans es clon metrico de Arial (mismos
+# anchos de avance), asi que una figura compuesta con ella conserva la
+# maqueta en mm; DejaVu Sans NO lo es -- es mas ancha y desborda las cajas
+# dimensionadas para 7 pt.
+FONT_STACK = ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"]
+ARIAL_METRIC = {"Arial", "Helvetica", "Liberation Sans"}
+
+# Sitios donde suele quedar Liberation Sans en un servidor sin fuentes de
+# sistema: entornos conda (llega como dependencia de paquetes de R), fuentes
+# del sistema, y el directorio del usuario.
+FONT_SEARCH_ROOTS = [
+    Path(sys.prefix) / "fonts",
+    Path(sys.prefix).parent.parent / "pkgs",
+    Path("/usr/share/fonts"),
+    Path.home() / ".fonts",
+    Path.home() / ".local/share/fonts",
+]
+
+
+def ensure_metric_font() -> str | None:
+    """Registra Liberation Sans si esta en disco y devuelve la fuente en uso.
+
+    matplotlib solo ve las fuentes de su propio cache, asi que en fx-hd caia
+    en silencio a DejaVu Sans aunque Liberation Sans estuviera instalada
+    dentro de un paquete de conda. El resultado eran figuras con otra
+    tipografia y otras metricas que las hechas en la Mac, sin ningun aviso.
+    """
+    disponibles = {f.name for f in font_manager.fontManager.ttflist}
+    if disponibles & ARIAL_METRIC:
+        return next(f for f in FONT_STACK if f in disponibles)
+
+    for root in FONT_SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        for ttf in root.glob("**/LiberationSans-*.ttf"):
+            font_manager.fontManager.addfont(str(ttf))
+        if {f.name for f in font_manager.fontManager.ttflist} & ARIAL_METRIC:
+            break
+
+    disponibles = {f.name for f in font_manager.fontManager.ttflist}
+    elegida = next((f for f in FONT_STACK if f in disponibles), None)
+    if elegida not in ARIAL_METRIC:
+        warnings.warn(
+            f"Ninguna fuente con metrica de Arial disponible; se usara {elegida!r}. "
+            "La figura NO sera comparable con las hechas en una maquina con Arial: "
+            "cambian los anchos de texto y la maqueta en mm. Instala Liberation Sans "
+            "antes de generar figuras para el manuscrito.",
+            stacklevel=2)
+    return elegida
+
 
 def setup_style() -> None:
+    ensure_metric_font()
     matplotlib.rcParams.update({
         "font.family": "sans-serif",
-        "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+        "font.sans-serif": FONT_STACK,
         "font.size": FONT_MIN,
         "axes.labelsize": FONT_MIN,
         "axes.titlesize": FONT_MIN,

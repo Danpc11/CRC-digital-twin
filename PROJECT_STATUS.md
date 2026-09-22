@@ -102,10 +102,34 @@ real del anticonservadurismo. Conservar la copia de GSE14333 en vez de la de GSE
 paciente duplicado entre dos series no se duplica dentro de una; el barrido intra-serie tampoco
 encontró nada.
 
-**Salvedad sobre la selección del panel.** El cambio `TGFB1`→`EFEMP2` se decidió entre 8 variantes
-en parte con métricas de supervivencia agrupadas que incluían estos 26 duplicados. La comparación
-fue relativa y sobre la misma muestra para las 8, así que el orden difícilmente cambia, pero no se
-ha vuelto a correr deduplicado. Pendiente si se quiere cerrar del todo.
+**Selección del panel, repetida deduplicada (2026-09-22).** El cambio `TGFB1`→`EFEMP2` se decidió
+entre 8 variantes con métricas de supervivencia agrupadas que incluían los duplicados, así que se
+volvió a correr el barrido completo —mismo protocolo del 2026-09-15, mismas 6 cohortes, más
+`--duplicates`—. El baseline v0.2.0 se reconstruyó desde los TSV v0.3 (`TGFB1` ← `EFEMP2`) y se
+verificó por round-trip exacto: volver a poner `EFEMP2` reproduce los datos del repo con diferencia
+0.000e+00 en todas las columnas, y da κ=0.754.
+
+**`EFEMP2` sustituyendo a `TGFB1` sigue ganando.** Deduplicado (n=513 pacientes, antes 545 muestras):
+
+| variante | κ externo | fuga CMS4→CMS1 | HR CMS4 | LRT p | ΔC estrat. |
+|---|---|---|---|---|---|
+| **EFEMP2_replace** | **0.743** | **5.9%** | **2.48** | 0.0033 | 0.0567 |
+| MXRA8_replace | 0.724 | 7.4% | 2.31 | 0.0069 | 0.0555 |
+| BNC2_replace | 0.722 | 7.4% | 2.34 | **0.0028** | **0.0569** |
+| GLI3_replace | 0.721 | 8.1% | 2.16 | 0.0086 | 0.0492 |
+| baseline (`TGFB1`) | 0.678 | 11.9% | 1.94 | 0.0169 | 0.0439 |
+
+Se mantienen las dos conclusiones del 15: sustituir gana a añadir en las cuatro parejas, y `EFEMP2`
+es el mejor sustituto. Cambian dos posiciones y ninguna importa: `BNC2_replace` pasa a primero en
+LRT (0.0028 vs 0.0033) y en ΔC (0.0569 vs 0.0567) — empates en la cuarta cifra decimal—, mientras
+`EFEMP2_replace` conserva con holgura el primer puesto en κ externo (0.743 frente a 0.724 del
+siguiente) y en HR CMS4, que son los criterios que motivaron el cambio. La decisión no dependía de
+los duplicados.
+
+**Control del barrido**: las métricas de concordancia (κ de calibración, κ externo medio, fuga,
+log-rank de GSE39582) salen **idénticas bit a bit** entre la corrida original y la deduplicada en
+las 9 variantes (máx |diferencia| = 0.00e+00). Es la comprobación empírica de que la duplicación
+entre dos series no afecta nada calculado dentro de una sola.
 
 **Dato colateral que vale por sí mismo**: entre las 26 parejas de la muestra analítica —dos
 hibridaciones independientes del mismo tumor— el panel v0.3 da **la misma llamada CMS en 25/26
@@ -757,9 +781,8 @@ En orden de prioridad, tras el rerun del 2026-09-15:
    cohorte confirmatoria.
 7. **`cms_margin` como covariable** en el Cox, para probar si la ambigüedad del perfil tiene
    valor pronóstico propia (lo sugieren los no-consenso).
-7b. **Repetir las 8 variantes de panel deduplicadas.** El cambio `TGFB1`→`EFEMP2` se eligió con
-   métricas agrupadas que incluían los 26 duplicados. Es una corrida barata y cierra la única
-   decisión del proyecto que todavía se tomó sobre muestras, no sobre pacientes.
+7b. ~~**Repetir las 8 variantes de panel deduplicadas**~~ — **hecho (2026-09-22)**: `EFEMP2`
+   sustituyendo a `TGFB1` sigue siendo la mejor variante; ver la sección de pacientes duplicados.
 8. **Regenerar la tabla V1/V2** del motor dinámico con el calendario de forzamiento unificado
    (`compare_forcing_sweep_v1_v2`) y reescribirla según el diagnóstico de normas: la asimetría
    de umbrales seguía el orden exacto de las normas de los centroides (2.71/2.49/1.51/1.30

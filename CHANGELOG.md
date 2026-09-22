@@ -38,7 +38,18 @@
   barras de tres campos, uno por paciente, ya colapsada por el consorcio.
 - **Dato colateral**: el panel v0.3 da la misma llamada CMS en 25/26 parejas (96.2%) — dos
   hibridaciones independientes del mismo tumor. Cota interna de reproducibilidad del clasificador.
-- **Pendiente**: repetir deduplicadas las 8 variantes de panel con las que se eligió `EFEMP2`.
+- **Las 8 variantes de panel, repetidas deduplicadas**: mismo protocolo del 15 más `--duplicates`,
+  con el baseline v0.2.0 reconstruido desde los TSV v0.3 y verificado por round-trip exacto
+  (diferencia 0.000e+00 en todas las columnas; κ=0.754). `EFEMP2` sustituyendo a `TGFB1` sigue
+  ganando: κ externo 0.743 (siguiente 0.724), fuga CMS4→CMS1 5.9%, HR CMS4 2.48. `BNC2_replace`
+  pasa a primero en LRT (0.0028 vs 0.0033) y ΔC (0.0569 vs 0.0567), empates en la cuarta decimal.
+  Control: las métricas de concordancia salen idénticas (máx |dif| 0.00e+00) en las 9 variantes,
+  la comprobación empírica de que un duplicado entre dos series no afecta lo que se calcula dentro
+  de una sola.
+- **Figuras**: `figures/_common.py` registra Liberation Sans (clon métrico de Arial) si está en
+  disco y **avisa** cuando no hay ninguna fuente con métrica de Arial, en vez de caer en silencio
+  a DejaVu Sans, que es más ancha y desborda la maqueta en mm. Fig2 regenerada y subida al Drive;
+  Fig1/3/4 no cambian (sus pies son idénticos byte a byte).
 - Suite: 259/259 (13 tests nuevos en `tests/test_duplicate_patients.py`, incluido uno de
   regresión sobre los datos reales que fija las 129 parejas).
 
