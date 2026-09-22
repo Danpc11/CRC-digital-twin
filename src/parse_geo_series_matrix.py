@@ -25,7 +25,7 @@ RAW = Path(__file__).resolve().parents[1] / "data" / "raw_geo"
 MATRIX_PATH = RAW / "GSE39582_series_matrix.txt.gz"
 
 
-def parse_series_matrix(path):
+def parse_series_matrix(path, phenotype_only: bool = False):
     """
     Parsea el series_matrix por CELDA, no por posicion de fila, y en
     DOS PASADAS para no depender del orden de las lineas de cabecera.
@@ -50,6 +50,12 @@ def parse_series_matrix(path):
        public_all.txt usa 'col001', que solo aparece en Sample_title,
        no en el GSM). Corregido: dos pasadas, la primera solo para
        ubicar sample_ids sin importar donde este esa linea.
+
+    Con phenotype_only=True devuelve (phenotype, None) y ni siquiera
+    acumula la tabla de expresion en memoria. Es para consumidores que
+    solo necesitan el fenotipo (deteccion de pacientes duplicados por
+    clave clinica): parsear la matriz de GSE39582 cuesta ~1 GB de RAM
+    y varios segundos que ahi no sirven de nada.
     """
     # --- Pasada 1: leer todas las lineas de cabecera (no la tabla de
     #     expresion, que puede ser enorme) y localizar sample_ids sin
@@ -67,7 +73,8 @@ def parse_series_matrix(path):
                 in_table = False
                 continue
             if in_table:
-                table_lines.append(line)
+                if not phenotype_only:
+                    table_lines.append(line)
             else:
                 header_lines.append(line)
 
@@ -136,6 +143,9 @@ def parse_series_matrix(path):
         for c in phenotype.columns
     ]
     phenotype = phenotype.reindex(sample_ids)  # preservar orden original de muestras
+
+    if phenotype_only:
+        return phenotype, None
 
     from io import StringIO
     table_str = "\n".join(table_lines)

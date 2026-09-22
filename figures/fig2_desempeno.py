@@ -15,8 +15,10 @@ B. Información mutua gen–eje CMS (uno-contra-resto, estimador de Kraskov, TCG
    gse39582_feature_selection/gene_ranking_full.tsv. Cada gen se evalúa contra SU eje CMS.
    El AUC se dibuja desde 0.5: barras a la izquierda = marcador inverso (MLH1 baja en CMS1).
 C. Forest plot del Cox estratificado por cohorte ajustado por estadio categorico (III vs I+II), 4 cohortes
-   externas con etiqueta oficial, misma muestra (n=428, 95 eventos; analisis principal de PROJECT_STATUS.md).
-   Fuente: results_pooled_cox_mismamuestra/cox_summary_adjusted.tsv, cox_incremental_value.tsv.
+   externas con etiqueta oficial, misma muestra y deduplicada por paciente (analisis principal de
+   PROJECT_STATUS.md). La n y los eventos se leen de los archivos, no se fijan aqui.
+   Fuente: results_pooled_cox_mismamuestra/cox_summary_adjusted.tsv, cox_incremental_value.tsv,
+   cox_leave_one_cohort_out.tsv.
 
 Las cifras de resumen (kappa, exactitud, n, LRT, ΔC-index) NO se dibujan: van en el pie de figura
 (figuras/Fig2_pie_de_figura.md, generado por este script con las cifras leídas de los archivos).
@@ -79,6 +81,13 @@ def load_cox(repo: Path):
     d = repo / "results_pooled_cox_mismamuestra"
     s = pd.read_csv(d / "cox_summary_adjusted.tsv", sep="\t").set_index("covariate")
     inc = pd.read_csv(d / "cox_incremental_value.tsv", sep="\t").iloc[0]
+    # n y eventos del modelo ajustado: cada particion leave-one-cohort-out
+    # reparte la misma muestra entre entrenamiento y prueba, asi que sumarlas
+    # devuelve el total. Se leen en vez de fijarse a mano para que el pie de
+    # figura no se quede con las cifras de una corrida anterior.
+    loco = pd.read_csv(d / "cox_leave_one_cohort_out.tsv", sep="\t").iloc[0]
+    inc["n_modelo"] = int(loco["n_train"] + loco["n_test"])
+    inc["eventos_modelo"] = int(loco["events_train"] + loco["events_test"])
     def row(cov, label, color=GRAY_DARK):
         r = s.loc[cov]
         return {"label": label, "hr": r["exp(coef)"], "lo": r["exp(coef) lower 95%"], "hi": r["exp(coef) upper 95%"],
@@ -234,7 +243,8 @@ def main(argv=None):
         "del panel, agrupados por eje CMS; en gris, los tres genes sustituidos (FABP1, SI, TGFB1) como comparación. El AUC se dibuja "
         "desde 0.5: la barra hacia la izquierda de MLH1 corresponde a un marcador inverso (expresión baja en CMS1). "
         "(C) Forest plot (HR e IC95%, escala logarítmica) del modelo de Cox estratificado por cohorte y ajustado por estadio "
-        "en las cuatro cohortes externas con etiqueta oficial combinadas (n=428, 95 eventos; Tabla 2); referencia CMS2, estadio III frente a I+II. "
+        "en las cuatro cohortes externas con etiqueta oficial combinadas, deduplicadas por paciente "
+        f"(n={inc['n_modelo']:.0f} pacientes, {inc['eventos_modelo']:.0f} eventos; Tabla 2); referencia CMS2, estadio III frente a I+II. "
         f"Aporte del subtipo sobre el estadio: LRT χ²={inc['lr_chi2']:.1f}, {inc['df']:.0f} g.l., p={inc['p_incremental']:.4f}; "
         f"ΔC-index estratificado +{inc['delta_c_index_stratified']:.3f} (IC95% {inc['delta_c_index_stratified_bootstrap_low95']:.3f}–"
         f"{inc['delta_c_index_stratified_bootstrap_high95']:.3f})."

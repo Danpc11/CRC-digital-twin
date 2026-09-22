@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-**Última actualización:** 2026-09-15. Historial detallado en `CHANGELOG.md`.
+**Última actualización:** 2026-09-22. Historial detallado en `CHANGELOG.md`.
 
 ## Panel actual
 
@@ -54,6 +54,71 @@ reportar ese resultado tal cual salga.
 - La asimetría de umbrales V1 (CMS2 "inalcanzable") se puede diagnosticar con
   `src/pattern_norm_diagnostic.py` antes de atribuirla a biología.
 
+## Pacientes duplicados entre GSE14333 y GSE17536 (2026-09-22)
+
+**Las dos series incluyen la misma serie del H. Lee Moffitt Cancer Center y ninguna lo declara.**
+No es un problema de este pipeline sino de los repositorios: lo hereda cualquier proyecto que use
+esas dos series juntas. Lo reportó el proyecto `crc_mra` (INMEGEN) y aquí se reprodujo de forma
+independiente desde los `series_matrix` crudos.
+
+**Por qué no se ve.** Los identificadores no coinciden (`T5266A1` en GSE14333, `MCC Patient 1` en
+GSE17536) y la expresión sola tampoco delata nada: cada serie trae su propio RMA, así que sobre
+las matrices crudas dos arrays del mismo paciente correlacionan *menos* (r máx 0.796) que dos
+pacientes distintos dentro de una misma serie (hasta 0.96). Son hibridaciones independientes del
+mismo tumor, no el mismo CEL reprocesado.
+
+**Cómo se detecta.** Clave clínica: sexo + edad al diagnóstico + tiempo de seguimiento, que GEO
+reporta al centésimo de mes. `cli.py detect-duplicates` barre las seis series, todas contra todas:
+
+- **129 parejas confirmadas, todas entre GSE14333 y GSE17536.** El estadio, que no forma parte de
+  la clave, concuerda en 129/129 traduciendo Dukes↔AJCC — confirmación independiente.
+- Ningún otro par de series muestra solapamiento. Las coincidencias sueltas contra GSE39582 (3
+  con GSE17536, 1 con GSE17537, 2 con GSE37892) son ruido: esa serie reporta el seguimiento en
+  meses enteros y choca por azar cientos de veces. El detector lo cuantifica permutando la edad
+  dentro de una cohorte (rompe el vínculo edad–tiempo, conserva las marginales): 129 observadas
+  frente a 3.7 esperadas por azar en el par real, y ≤3 frente a 2–4 esperadas en todos los demás.
+- Esas ~3.7 esperadas implican que del orden de 4 de las 129 pueden ser coincidencia. En la
+  muestra del Cox son ~0.7 de 26: irrelevante para cualquier cifra reportada.
+
+**Qué se corrigió.** `pooled-cox` y `cox-diagnostics` aceptan `--duplicates` y retiran una copia
+por paciente **antes de ajustar**, conservando la de GSE17536 (trae OS, DSS y DFS; GSE14333 solo
+DFS, y su indicador es el `DFS_Cens` invertido). Solo se retira cuando las dos copias
+sobrevivieron a los filtros: si una ya cayó por falta de etiqueta, estadio o seguimiento, no hay
+duplicación que corregir. En la muestra principal son **26 pacientes** (428 muestras → 402
+pacientes); en la de 5 cohortes, 32 (518 → 486).
+
+**Por qué importaba corregirlo, y por qué el resultado no se mueve.** Un paciente duplicado aporta
+su evento dos veces y el error estándar sale demasiado pequeño; estratificar por cohorte **no** lo
+arregla, porque la estratificación permite riesgos base distintos por serie pero el mismo paciente
+sigue contribuyendo dos observaciones tratadas como independientes. Aquí el sesgo resultó
+minúsculo y en dirección contraria a la esperada: de las 26 parejas, 22 son censurado/censurado,
+3 evento/evento y 1 discordante. Los duplicados estaban enriquecidos en **no-eventos**, así que
+diluían la señal en vez de inflarla. Al deduplicar todo mejora un poco (LRT 0.0043→0.0026, ΔC
++0.060→+0.062, HR CMS4 2.32→2.42), y el IC de CMS4 se ensancha un 3% en escala log — la magnitud
+real del anticonservadurismo. Conservar la copia de GSE14333 en vez de la de GSE17536 da lo mismo
+(CMS4 2.60 [1.48–4.56], LRT 0.0019).
+
+**Lo no afectado**: κ y log-rank por cohorte, la calibración en GSE39582 y todo lo in-sample. Un
+paciente duplicado entre dos series no se duplica dentro de una; el barrido intra-serie tampoco
+encontró nada.
+
+**Salvedad sobre la selección del panel.** El cambio `TGFB1`→`EFEMP2` se decidió entre 8 variantes
+en parte con métricas de supervivencia agrupadas que incluían estos 26 duplicados. La comparación
+fue relativa y sobre la misma muestra para las 8, así que el orden difícilmente cambia, pero no se
+ha vuelto a correr deduplicado. Pendiente si se quiere cerrar del todo.
+
+**Dato colateral que vale por sí mismo**: entre las 26 parejas de la muestra analítica —dos
+hibridaciones independientes del mismo tumor— el panel v0.3 da **la misma llamada CMS en 25/26
+(96.2%)**. Es una cota interna de reproducibilidad técnica del clasificador, medida sin costo
+experimental. `crc_mra` mide 94% (109/116) con CMScaller sobre el conjunto completo de parejas.
+
+**TCGA no está afectado.** El segundo hallazgo del reporte (18 alícuotas repetidas en 582 muestras
+de TCGA-COAD/READ, más dos recurrencias y una metástasis) aplica a pipelines que consumen códigos
+de barras a nivel de muestra. `build_tcga_rnaseq_dataset.py` consume la matriz combinada del CRCSC
+(`TCGACRC_expression-merged.tsv`), cuyas 577 columnas son códigos de tres campos
+(`TCGA-F4-6461`), todos únicos: el consorcio ya colapsó las alícuotas. Además TCGA aquí solo
+alimenta la concordancia entre plataformas, nunca un Cox.
+
 ## Cambio de panel `TGFB1`→`EFEMP2` y validación vigente (2026-09-18)
 
 **Motivación.** El error dominante del panel v0.2.0 en las cohortes externas era CMS4 oficial →
@@ -101,42 +166,47 @@ eso difieren de la tabla del 15 (que reportaba cobertura <1). GSE17537 sigue sin
 ### Análisis principal: 4 cohortes etiquetadas, misma muestra (`results_pooled_cox_mismamuestra/`)
 
 Subtipo predicho, Cox estratificado por cohorte, estadio categórico (III vs I+II), referencia
-CMS2, pacientes con etiqueta del consorcio. **n=428, 95 eventos** (idéntico al del 15).
+CMS2, pacientes con etiqueta del consorcio. **n=402 pacientes, 92 eventos**, tras retirar las 26
+copias del solapamiento GSE14333/GSE17536 (ver la sección de pacientes duplicados). La n de
+muestras era 428/95; **la n que se reporta es de pacientes**.
 
-| Covariable | HR v0.3 | IC95% | p | (v0.2.0) |
+| Covariable | HR v0.3 | IC95% | p | (con duplicados) |
 |---|---|---|---|---|
-| estadio III (vs I+II) | 3.68 | 2.24–6.05 | <0.001 | 3.83 |
-| CMS1 | **2.26** | 1.27–4.04 | 0.006 | 2.06 |
-| CMS3 | 1.20 | 0.56–2.57 | 0.64 | 1.27 |
-| CMS4 | **2.32** | 1.35–3.98 | 0.002 | 2.03 |
+| estadio III (vs I+II) | 3.73 | 2.25–6.19 | <0.001 | 3.68 |
+| CMS1 | **2.36** | 1.31–4.25 | 0.004 | 2.26 |
+| CMS3 | 1.19 | 0.55–2.57 | 0.65 | 1.20 |
+| CMS4 | **2.42** | 1.39–4.22 | 0.002 | 2.32 |
 
-- Aporte incremental de CMS sobre estadio: LRT χ²=13.1, 3 gl, **p=0.0043** (antes 0.022).
-- **C-index estratificado** 0.649 → 0.709, **ΔC=+0.060 (IC95% bootstrap +0.030 a +0.096)**,
-  500/500 remuestreos (antes +0.048 [+0.021, +0.087]).
-- **Leave-one-cohort-out**: ΔC +0.017 a +0.066 en las cuatro particiones (antes +0.045 a +0.065);
-  HR CMS1 2.01–2.43, HR CMS4 1.80–2.87.
-- Contraste con la **etiqueta oficial** sobre los mismos 428 (`results_pooled_cox_oficial/`):
-  CMS1 2.25 (1.27–3.98), CMS3 0.87, CMS4 2.36 (1.41–3.94); ΔC estratificado **+0.075** [+0.039,
-  +0.109]. **El panel recupera ahora 0.060/0.075 = 80% del aporte pronóstico de la clasificación
-  completa** (antes dos tercios), y sus HR de CMS1/CMS4 (2.26/2.32) son ya indistinguibles de los
-  oficiales (2.25/2.36).
+- Aporte incremental de CMS sobre estadio: LRT χ²=14.2, 3 gl, **p=0.0026** (con duplicados
+  0.0043; con el panel v0.2.0, 0.022).
+- **C-index estratificado** 0.651 → 0.713, **ΔC=+0.062 (IC95% bootstrap +0.030 a +0.099)**,
+  500/500 remuestreos (con duplicados +0.060; con el panel v0.2.0 +0.048).
+- **Leave-one-cohort-out**: ΔC +0.050 a +0.087 en las cuatro particiones;
+  HR CMS1 2.13–2.53, HR CMS4 1.87–3.14.
+- Contraste con la **etiqueta oficial** sobre los mismos 402 (`results_pooled_cox_oficial/`):
+  CMS1 2.47 (1.39–4.41), CMS3 0.90, CMS4 2.49 (1.47–4.20); ΔC estratificado **+0.078** [+0.042,
+  +0.112]. **El panel recupera 0.062/0.078 = 79% del aporte pronóstico de la clasificación
+  completa**, y sus HR de CMS1/CMS4 (2.36/2.42) son indistinguibles de los oficiales (2.47/2.49).
 
 ### Sensibilidad
 
 | Análisis | n / eventos | LRT p | ΔC estratificado | HR CMS4 |
 |---|---|---|---|---|
-| Principal (4 etiquetadas) | 428 / 95 | 0.0043 | +0.060 [+0.030, +0.096] | 2.32 |
-| 5 cohortes, incluye no etiquetados | 518 / 117 | 0.0057 | +0.053 [+0.030, +0.087] | 2.33 |
+| Principal (4 etiquetadas) | 402 / 92 | 0.0026 | +0.062 [+0.030, +0.099] | 2.42 |
+| 5 cohortes, incluye no etiquetados | 486 / 111 | 0.0033 | +0.057 [+0.029, +0.088] | 2.48 |
 | Solo RFS real (GSE14333+33113+37892, etiquetados) | 308 / 70 | 0.028 | +0.079 [+0.040, +0.127] | 2.48 |
 
-En 5 cohortes CMS3 vuelve a subir (HR 1.80, p=0.07) por los no etiquetados, igual que en el
-rerun del 15; en la muestra igualada baja a 1.20.
+Todas deduplicadas. La de solo-RFS no cambia respecto a la corrida anterior: no incluye
+GSE17536, así que ninguna pareja tiene sus dos copias dentro y no hay nada que retirar.
 
-### Diagnósticos (`results_cox_diagnostics/`, 4 etiquetadas)
+En 5 cohortes CMS3 vuelve a subir (HR 1.82, p=0.07) por los no etiquetados, igual que en el
+rerun del 15; en la muestra igualada baja a 1.19.
 
-Riesgos proporcionales: ninguna covariable viola el supuesto (Holm), omnibus de Fisher p=0.84.
-Efecto tiempo-dependiente a 36 meses: sin diferencia early/late (p=0.26, 0.48, 0.54).
-Heterogeneidad entre cohortes: p=0.40 (CMS1), 0.65 (CMS3), 0.12 (CMS4). Delta-beta máximo 0.073.
+### Diagnósticos (`results_cox_diagnostics/`, 4 etiquetadas, deduplicadas)
+
+Riesgos proporcionales: ninguna covariable viola el supuesto (Holm), omnibus de Fisher p=0.72.
+Efecto tiempo-dependiente a 36 meses: sin diferencia early/late (p=0.24, 0.54, 0.39).
+Heterogeneidad entre cohortes: p=0.40 (CMS1), 0.64 (CMS3), 0.11 (CMS4). Delta-beta máximo 0.077.
 
 ### MMR con el panel v0.3 (`results_cox_clinical/`, GSE39582, n=449, 132 eventos)
 
@@ -687,6 +757,9 @@ En orden de prioridad, tras el rerun del 2026-09-15:
    cohorte confirmatoria.
 7. **`cms_margin` como covariable** en el Cox, para probar si la ambigüedad del perfil tiene
    valor pronóstico propia (lo sugieren los no-consenso).
+7b. **Repetir las 8 variantes de panel deduplicadas.** El cambio `TGFB1`→`EFEMP2` se eligió con
+   métricas agrupadas que incluían los 26 duplicados. Es una corrida barata y cierra la única
+   decisión del proyecto que todavía se tomó sobre muestras, no sobre pacientes.
 8. **Regenerar la tabla V1/V2** del motor dinámico con el calendario de forzamiento unificado
    (`compare_forcing_sweep_v1_v2`) y reescribirla según el diagnóstico de normas: la asimetría
    de umbrales seguía el orden exacto de las normas de los centroides (2.71/2.49/1.51/1.30

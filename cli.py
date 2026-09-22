@@ -12,6 +12,7 @@ USO:
     python3 cli.py validate-external --patterns P.tsv --input X.tsv --output results/
     python3 cli.py pooled-cox --cohort NOMBRE ruta.tsv [--cohort ...] --output results/
     python3 cli.py cox-diagnostics --input scored.tsv [--input ...] --adjust-stage --output results/
+    python3 cli.py detect-duplicates --output data/duplicate_patients_geo.tsv
     python3 cli.py cox-clinical --cohort NOMBRE scored.tsv --covariate msi_status=dMMR --output results/
     python3 cli.py cox-chemo --cohort GSE39582 scored.tsv --chemo-col adjuvant_chemo --chemo-yes Y --output results/
     python3 cli.py cms-split --input scored.tsv --split-cms CMS1_MSI_immune --by msi_status --output results/
@@ -118,6 +119,8 @@ def cmd_pooled_cox(args):
     argv += ["--bootstrap-iterations", str(args.bootstrap_iterations)]
     argv += ["--bootstrap-seed", str(args.bootstrap_seed)]
     argv += ["--calibration-horizons"] + [str(v) for v in args.calibration_horizons]
+    if args.duplicates:
+        argv += ["--duplicates", args.duplicates]
     if args.no_loco:
         argv.append("--no-loco")
     _run_module("pooled_cox_validation.py", argv)
@@ -137,9 +140,19 @@ def cmd_cox_diagnostics(args):
     argv += ["--time-cutoff", str(args.time_cutoff)]
     if args.no_time_varying_cms:
         argv.append("--no-time-varying-cms")
+    if args.duplicates:
+        argv += ["--duplicates", args.duplicates]
     if args.output:
         argv += ["--output", args.output]
     _run_module("cox_diagnostics.py", argv)
+
+
+def cmd_detect_duplicates(args):
+    argv = []
+    for cohort in args.cohort or []:
+        argv += ["--cohort", cohort]
+    argv += ["--raw-dir", args.raw_dir, "--output", args.output]
+    _run_module("detect_duplicate_patients.py", argv)
 
 
 def cmd_cox_clinical(args):
@@ -329,6 +342,8 @@ def build_parser():
     s.add_argument("--bootstrap-seed", type=int, default=2026)
     s.add_argument("--calibration-horizons", nargs="+", type=float, default=[36.0, 60.0])
     s.add_argument("--no-loco", action="store_true")
+    s.add_argument("--duplicates", metavar="TSV",
+                   help="Tabla de pacientes duplicados entre cohortes (detect-duplicates)")
     s.add_argument("--output", default="results_pooled_cox")
     s.set_defaults(func=cmd_pooled_cox)
 
@@ -345,8 +360,18 @@ def build_parser():
     s.add_argument("--time-cutoff", type=float, default=36.0)
     s.add_argument("--no-time-varying-cms", "--no-time-varying-cms4",
                    dest="no_time_varying_cms", action="store_true")
+    s.add_argument("--duplicates", metavar="TSV",
+                   help="Misma tabla de duplicados que se paso a pooled-cox")
     s.add_argument("--output")
     s.set_defaults(func=cmd_cox_diagnostics)
+
+    s = sub.add_parser("detect-duplicates",
+                       help="Busca pacientes depositados dos veces en series de GEO distintas")
+    s.add_argument("--cohort", action="append",
+                   help="Serie a incluir en el barrido; repetir. Sin esto, todas.")
+    s.add_argument("--raw-dir", default="data/raw_geo")
+    s.add_argument("--output", default="data/duplicate_patients_geo.tsv")
+    s.set_defaults(func=cmd_detect_duplicates)
 
     s = sub.add_parser("cox-clinical",
                         help="¿CMS conserva su HR tras ajustar por estadio + covariables clinicas de rutina (p. ej. MMR)?")

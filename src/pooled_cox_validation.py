@@ -37,6 +37,7 @@ from scipy.stats import chi2
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clinical_covariates import (STAGE_REFERENCE, collapse_sparse_stage_levels,
                                  expand_stage_categorical, prepare_covariates)
+from detect_duplicate_patients import drop_duplicate_patients, load_duplicate_pairs
 
 DEFAULT_CMS_REFERENCE = "CMS2_canonical_WNT"
 
@@ -342,6 +343,12 @@ def main():
     parser.add_argument("--calibration-horizons", nargs="+", type=float,
                         default=[36.0, 60.0],
                         help="Horizontes para calibracion aparente dentro de cada cohorte")
+    parser.add_argument("--duplicates", default=None,
+                        help="TSV de pacientes duplicados entre cohortes "
+                             "(de detect_duplicate_patients.py). Retira una copia por "
+                             "paciente antes de ajustar: GSE14333 y GSE17536 comparten "
+                             "la serie del Moffitt y sin esto el mismo paciente aporta "
+                             "dos observaciones tratadas como independientes.")
     parser.add_argument("--no-loco", action="store_true",
                         help="Omitir validacion leave-one-cohort-out")
     parser.add_argument("--output", default="results_pooled_cox")
@@ -362,6 +369,16 @@ def main():
 
     pooled = pd.concat(frames, ignore_index=True)
     pooled = pooled.dropna(subset=[args.duration_col, args.event_col, args.group_col])
+
+    # Deduplicar DESPUES de exigir datos completos y antes de modelar: si
+    # una de las dos copias ya cayo por falta de etiqueta, seguimiento o
+    # estadio, no hay duplicacion que corregir y quitar la otra seria
+    # perder un paciente real.
+    if args.duplicates:
+        if "sample_id" not in pooled.columns:
+            raise ValueError("--duplicates necesita la columna 'sample_id' en los TSV de entrada")
+        pooled = drop_duplicate_patients(pooled, load_duplicate_pairs(args.duplicates))
+
     if args.group_col == "modern_hopfield_cms":
         n_before = len(pooled)
         pooled = pooled[pooled[args.group_col] != "indeterminado"]

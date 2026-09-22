@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-259%20passing-brightgreen)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -27,7 +27,7 @@ Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (246 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (259 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
@@ -93,8 +93,8 @@ python3 cli.py test                  # suite de regresión
 ```
 
 Subcomandos disponibles: `demo`, `calibrate`, `classify`, `validate-external`, `pooled-cox`,
-`cox-diagnostics`, `cox-clinical`, `cms-split`, `reference-genes`, `dynamics-diagnostics`,
-`modern-hopfield`, `prognosis`,
+`cox-diagnostics`, `cox-clinical`, `cms-split`, `reference-genes`, `detect-duplicates`,
+`dynamics-diagnostics`, `modern-hopfield`, `prognosis`,
 `simulate-treatment`, `app`, `test`. Cada uno delega en el script correspondiente
 de `src/` — el CLI solo orquesta, no duplica lógica.
 
@@ -205,6 +205,7 @@ src/
   external_validation.py             aplica patrones YA calibrados a cohorte externa (sin recalibrar)
   pooled_cox_validation.py           Cox estratificado combinando múltiples cohortes externas
   cox_diagnostics.py                 diagnósticos formales del Cox (Schoenfeld, influyentes, heterogeneidad)
+  detect_duplicate_patients.py       pacientes depositados dos veces en series de GEO distintas
   dynamics_diagnostics.py            equilibrios/estabilidad reales de la dinámica no lineal
   modern_hopfield.py                  energía moderna, clasificación dinámica y barrido V1/V2
   concordance_analysis.py            matriz de concordancia modelo vs. etiqueta oficial
@@ -310,12 +311,24 @@ python3 src/external_validation.py \
   --input data/gse17536_cms_labeled.tsv \
   --output results_external_gse17536/
 
-# 3. Combinar múltiples cohortes externas en un solo análisis (más poder estadístico)
+# 3. Localizar pacientes depositados dos veces en dos series distintas
+python3 cli.py detect-duplicates --output data/duplicate_patients_geo.tsv
+
+# 4. Combinar múltiples cohortes externas en un solo análisis (más poder estadístico)
 python3 src/pooled_cox_validation.py \
   --cohort GSE17536 results_external_gse17536/scored_external_cohort.tsv \
   --cohort GSE17537 results_external_gse17537/scored_external_cohort.tsv \
+  --duplicates data/duplicate_patients_geo.tsv \
   --output results_pooled_cox/
 ```
+
+**El paso 3 no es opcional si el pool incluye a la vez GSE14333 y GSE17536**: las dos series
+contienen la serie del H. Lee Moffitt Cancer Center y ninguna lo declara en sus metadatos, así
+que 129 pacientes están depositados por duplicado. En supervivencia eso hace que el mismo
+paciente aporte su evento dos veces, con un error estándar demasiado pequeño — y estratificar
+por cohorte no lo arregla. `--duplicates` retira una copia por paciente (conserva la de
+GSE17536) y hace que la n reportada sea de pacientes, no de muestras. La tabla es regenerable
+en segundos desde `data/raw_geo/`, por eso no se versiona. Detalle en `PROJECT_STATUS.md`.
 
 Para ajustar el análisis por estadio clínico, indique primero `--stage-col` al construir cada
 cohorte y después use `--adjust-stage` en `pooled-cox`. Consulte la ayuda de ambos comandos
@@ -329,8 +342,12 @@ influyentes, heterogeneidad entre cohortes):
 python3 src/cox_diagnostics.py \
   --input results_external_gse17536/scored_external_cohort.tsv \
   --input results_external_gse17537/scored_external_cohort.tsv \
-  --adjust-stage --output results_cox_diagnostics/
+  --adjust-stage --duplicates data/duplicate_patients_geo.tsv \
+  --output results_cox_diagnostics/
 ```
+
+Pasarle a `cox-diagnostics` el mismo `--duplicates` que a `pooled-cox`: los diagnósticos deben
+correr sobre la misma muestra que el modelo que diagnostican.
 
 `--adjust-stage` agrega `stage_harmonized` como covariable adicional (requiere que las
 cohortes de entrada ya traigan columna `stage`). Por defecto el modelo se ajusta

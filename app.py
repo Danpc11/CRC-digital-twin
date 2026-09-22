@@ -1314,16 +1314,21 @@ with tab_metodo:
         st.markdown('<div class="eyebrow" style="margin-top:1.4rem">Cohortes</div>',
                     unsafe_allow_html=True)
         st.dataframe(pd.DataFrame({
-            "Cohorte": ["GSE39582", "GSE17536", "GSE17537", "GSE14333", "GSE33113"],
-            "Rol": ["Entrenamiento", "Externa (iterativa)", "Externa (intacta)",
-                    "Externa", "Externa (estadio II)"],
-            "n": [557, 145, 55, 126, 89],
-            "p": ["0.00039", "0.090", "0.71", "0.59", "0.031"],
+            "Cohorte": ["GSE39582", "GSE17536", "GSE17537", "GSE14333", "GSE33113", "GSE37892"],
+            "Rol": ["Entrenamiento", "Externa (iterativa)", "Externa (sin etiqueta oficial)",
+                    "Externa", "Externa (estadio II)", "Externa (metástasis a distancia)"],
+            "n": [557, 145, 55, 126, 89, 130],
+            "log-rank p": ["1.1e-05", "0.061", "0.72", "0.23", "0.0050", "0.11"],
         }), hide_index=True, use_container_width=True)
-        st.caption("Cox estratificado combinando las cuatro externas (n=415), ajustado por "
-                   "estadio (n=388): p < 0.001 global. CMS4 HR=2.06 (p=0.018), robusto al "
-                   "ajuste; CMS1 HR=2.09 (p=0.016), resultado nuevo por confirmar. "
-                   "Concordancia con la clasificación del consorcio: kappa = 0.679.")
+        st.caption("Cifras del panel v0.3 (`EFEMP2`), deduplicadas por paciente: GSE14333 y "
+                   "GSE17536 comparten 129 pacientes depositados en las dos series sin "
+                   "declararlo. Cox estratificado sobre las cuatro externas con etiqueta "
+                   "oficial, ajustado por estadio (n=402 pacientes, 92 eventos): CMS4 HR=2.42 "
+                   "(1.39–4.22), CMS1 HR=2.36 (1.31–4.25), CMS3 sin efecto. Aporte del subtipo "
+                   "sobre el estadio: LRT p=0.0026, ΔC-index estratificado +0.062 "
+                   "(IC95% +0.030 a +0.099). Concordancia con la clasificación del consorcio "
+                   "en la cohorte de calibración: kappa = 0.754 (n=519, exactitud 82.5%). "
+                   "Ninguna cohorte es confirmatoria: todas intervinieron en decisiones de panel.")
 
     with c2:
         st.markdown('<div class="eyebrow">Respaldo por atractor</div>', unsafe_allow_html=True)

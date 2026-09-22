@@ -448,6 +448,11 @@ def main():
     parser.add_argument("--no-time-varying-cms", "--no-time-varying-cms4",
                         dest="no_time_varying_cms", action="store_true",
                         help="Omitir el analisis temporal conjunto de los indicadores CMS")
+    parser.add_argument("--duplicates", default=None,
+                        help="TSV de pacientes duplicados entre cohortes (de "
+                             "detect_duplicate_patients.py). Usar el mismo que en "
+                             "pooled-cox: los diagnosticos deben correr sobre la misma "
+                             "muestra que el modelo que diagnostican.")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -459,6 +464,13 @@ def main():
         frames.append(d)
     df = pd.concat(frames, ignore_index=True)
     df = df.dropna(subset=[args.duration_col, args.event_col, args.group_col])
+
+    if args.duplicates:
+        if "sample_id" not in df.columns:
+            raise ValueError("--duplicates necesita la columna 'sample_id' en los TSV de entrada")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from detect_duplicate_patients import drop_duplicate_patients, load_duplicate_pairs
+        df = drop_duplicate_patients(df, load_duplicate_pairs(args.duplicates))
 
     reference = args.reference or df[args.group_col].value_counts().idxmax()
     dummies = pd.get_dummies(df[args.group_col], prefix="cms", dtype=float)

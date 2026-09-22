@@ -1,5 +1,47 @@
 # Historial de cambios
 
+## 2026-09-22 — Pacientes duplicados entre GSE14333 y GSE17536
+
+- **Hallazgo**: las dos series incluyen la serie del H. Lee Moffitt Cancer Center y ninguna lo
+  declara en sus metadatos. **129 pacientes están depositados dos veces.** No es un defecto de
+  este pipeline sino de los repositorios; lo reportó el proyecto `crc_mra` (INMEGEN) y aquí se
+  reprodujo de forma independiente desde los `series_matrix` crudos. En supervivencia un paciente
+  duplicado aporta su evento dos veces y el error estándar sale demasiado pequeño — y estratificar
+  por cohorte **no** lo arregla.
+- **Nuevo `src/detect_duplicate_patients.py`** (+ `cli.py detect-duplicates`): barre todas las
+  series contra todas usando sexo + edad + tiempo de seguimiento al centésimo de mes, con el
+  estadio (Dukes↔AJCC) como confirmación independiente. Incluye una prueba de azar por permutación
+  de la edad, necesaria porque GSE39582 reporta el seguimiento en meses enteros y colisiona por
+  azar cientos de veces: 129 observadas vs 3.7 esperadas en el par real, ≤3 vs 2–4 en todos los
+  demás pares. Resultado: el solapamiento existe solo entre GSE14333 y GSE17536, estadio
+  concordante 129/129.
+- **`pooled-cox` y `cox-diagnostics` aceptan `--duplicates`**: retiran una copia por paciente
+  antes de ajustar, conservando la de GSE17536 (trae OS/DSS/DFS y su indicador de recaída es
+  explícito, no el `DFS_Cens` invertido de GSE14333). Solo actúan cuando las dos copias
+  sobrevivieron a los filtros del análisis. Las copias se identifican por GSM, no por
+  (cohorte, GSM): `cox_diagnostics.py` nombra las cohortes por el directorio de entrada y
+  exigir que el nombre coincidiera hacía que la deduplicación se saltara en silencio ahí.
+- **`parse_series_matrix(..., phenotype_only=True)`**: evita parsear la matriz de expresión
+  cuando solo hace falta el fenotipo (~1 GB de RAM en GSE39582 que no sirven de nada aquí).
+- **Cifras vigentes recalculadas** (la n reportada pasa a ser de pacientes): principal 4 cohortes
+  **n=402, 92 eventos** (era 428/95); CMS1 HR 2.26→**2.36** (1.31–4.25), CMS4 2.32→**2.42**
+  (1.39–4.22), CMS3 1.19 n.s.; LRT 0.0043→**0.0026**; ΔC +0.060→**+0.062** [+0.030, +0.099];
+  LOCO +0.050 a +0.087. Etiqueta oficial sobre los mismos 402: ΔC **+0.078**, el panel recupera
+  el **79%**. Diagnósticos limpios (PH omnibus p=0.72, heterogeneidad p≥0.11, delta-beta 0.077).
+  5 cohortes: n=486/111, LRT 0.0033, ΔC +0.057. Solo-RFS sin cambio (no incluye GSE17536).
+- **El resultado no empeora, mejora**: de las 26 parejas de la muestra principal, 22 son
+  censurado/censurado y solo 3 evento/evento. Los duplicados estaban enriquecidos en no-eventos,
+  así que diluían la señal en vez de inflarla; el anticonservadurismo real del IC de CMS4 era del
+  3% en escala log. Conservar la copia de GSE14333 en vez de la de GSE17536 da lo mismo.
+- **TCGA no está afectado** por el segundo hallazgo del reporte (18 alícuotas repetidas): la
+  matriz combinada del CRCSC que consume `build_tcga_rnaseq_dataset.py` viene con códigos de
+  barras de tres campos, uno por paciente, ya colapsada por el consorcio.
+- **Dato colateral**: el panel v0.3 da la misma llamada CMS en 25/26 parejas (96.2%) — dos
+  hibridaciones independientes del mismo tumor. Cota interna de reproducibilidad del clasificador.
+- **Pendiente**: repetir deduplicadas las 8 variantes de panel con las que se eligió `EFEMP2`.
+- Suite: 259/259 (13 tests nuevos en `tests/test_duplicate_patients.py`, incluido uno de
+  regresión sobre los datos reales que fija las 129 parejas).
+
 ## 2026-09-18 — Cambio de panel CMS4: `TGFB1`→`EFEMP2` (aprobado por Daniel)
 
 - **Motivación**: el error dominante en las externas era CMS4 oficial → CMS1 predicho. `TGFB1`
