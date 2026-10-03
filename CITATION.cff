@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "Si usas este software, cítalo con los metadatos de este archivo."
+type: software
+title: "ColoQ (CRC-digital-twin): mechanistic digital twin for colorectal cancer molecular subtyping (CMS1–4) via Hopfield attractor dynamics on an RT-qPCR panel"
+abstract: >-
+  Mechanistic digital twin of colorectal cancer that models the four
+  Consensus Molecular Subtypes (CMS1–CMS4) as attractors of a continuous
+  Hopfield-type network, calibrated against real cohorts and designed to run
+  on a 10-gene RT-qPCR-only panel. Research tool only; not a medical device.
+authors:
+  - family-names: Perez-Calixto
+    given-names: Daniel
+    affiliation: "Facultad de Ciencias, UNAM; Instituto Nacional de Medicina Genómica (INMEGEN)"
+  - family-names: Tovar
+    given-names: Hugo
+    affiliation: "Facultad de Ciencias, UNAM; Instituto Nacional de Medicina Genómica (INMEGEN)"
+repository-code: "https://github.com/Danpc11/CRC-digital-twin"
+url: "https://danpc11.github.io/CRC-digital-twin/"
+license: PolyForm-Noncommercial-1.0.0
+keywords:
+  - colorectal cancer
+  - consensus molecular subtypes
+  - digital twin
+  - Hopfield network
+  - attractor dynamics
+  - RT-qPCR
+  - precision oncology
