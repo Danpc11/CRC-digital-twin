@@ -6,6 +6,9 @@ name: Web app (GitHub Pages)
 #
 # Requisito unico (una sola vez): Settings -> Pages -> Build and deployment
 # -> Source: "GitHub Actions".
+#
+# Runner fijado a ubuntu-24.04 (ubuntu-latest migra a Ubuntu 26 desde el
+# 19-oct-2026); actions en versiones que corren sobre Node 24.
 
 on:
   push:
@@ -23,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -46,20 +49,20 @@ jobs:
         run: python web/build_site.py --out _site
 
       - name: Configurar Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Subir artefacto
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Publicar en GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
