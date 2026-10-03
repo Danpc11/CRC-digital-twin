@@ -5,6 +5,7 @@
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
 ![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23126100.svg)](https://doi.org/10.5281/zenodo.23126100)
 [![Web app](https://img.shields.io/badge/app-abrir%20en%20el%20navegador-FF4B4B?logo=streamlit&logoColor=white)](https://danpc11.github.io/CRC-digital-twin/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-lightgrey)](LICENSE)
 
@@ -462,9 +463,15 @@ python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.ts
 
 ## Cómo citar
 
-Cada release de GitHub (`v*`) se archiva en Zenodo con un DOI propio; los metadatos están en
-`CITATION.cff` y `.zenodo.json`. Usa el botón **"Cite this repository"** de GitHub o el DOI
-del registro de Zenodo.
+Si usas ColoQ, cita el software archivado en Zenodo:
+
+> Perez-Calixto, D., & Tovar, H. (2026). *ColoQ (CRC-digital-twin): mechanistic digital twin for
+> colorectal cancer molecular subtyping (CMS1–4) via Hopfield attractor dynamics on an RT-qPCR
+> panel* (v0.4.0) [Software]. Zenodo. <https://doi.org/10.5281/zenodo.23126100>
+
+Cada release de GitHub (`v*`) se archiva automáticamente en Zenodo con su propio DOI; los
+metadatos están en `CITATION.cff` y `.zenodo.json`. El botón **"Cite this repository"** de
+GitHub genera la cita en APA o BibTeX.
 
 ## Licencia
 
