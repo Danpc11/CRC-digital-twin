@@ -5,6 +5,8 @@
 ![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
 ![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
+[![Web app](https://img.shields.io/badge/app-abrir%20en%20el%20navegador-FF4B4B?logo=streamlit&logoColor=white)](https://danpc11.github.io/CRC-digital-twin/)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-lightgrey)](LICENSE)
 
 Gemelo digital de cáncer colorrectal: modela los cuatro subtipos moleculares
 consensuados de cáncer colorrectal (*Consensus Molecular Subtypes*, CMS1–CMS4) como atractores de una red tipo Hopfield continua, calibrable contra
@@ -23,6 +25,9 @@ intervinieron en la selección del panel, así que sus cifras son validación re
 desarrollo, no confirmatoria.
 Para el historial de cambios, ver `CHANGELOG.md`. Para el fundamento matemático del modelo
 (la dinámica, por qué regla de proyección y no Hebb, cómo se calibra), ver `MODEL.md`.
+
+**Probar la app sin instalar nada:** <https://danpc11.github.io/CRC-digital-twin/> — la
+interfaz completa corre en el navegador (ver [Versión web](#versión-web-github-pages)).
 
 ## Instalación
 
@@ -161,6 +166,29 @@ correlación supera el umbral; las discordancias se muestran sin reemplazar el C
 Esta es una función distinta del motor dinámico de Pronóstico/Intervención: aquí sigue siendo
 experimental y opcional, mientras que el motor de trayectorias ya no lo es.
 
+### Versión web (GitHub Pages)
+
+La misma interfaz está publicada en <https://danpc11.github.io/CRC-digital-twin/>. Corre
+**completa en el navegador** con [stlite](https://github.com/whitphx/stlite) (Streamlit sobre
+Pyodide/WebAssembly): no hay servidor y los archivos que el usuario sube no salen de su
+computadora. La primera carga descarga el entorno de Python (~1 min); después queda en caché.
+
+- Se reconstruye sola en cada push a `main` (`.github/workflows/pages.yml`), usando
+  `web/build_site.py`, que monta `app.py` y `src/*.py` sin modificarlos.
+- **Patrones precargados**: si existe `web/calibrated_patterns.tsv` se usa ese archivo
+  (p. ej. copiar ahí `results_gse39582/calibrated_patterns.tsv`); si no, se generan patrones
+  DEMO con datos sintéticos (`cli.py demo`). El usuario siempre puede subir los suyos desde la
+  barra lateral.
+- En el navegador las versiones de numpy/scipy/pandas/matplotlib son las de la distribución
+  de Pyodide, no las fijadas en `requirements.txt`; para resultados reproducibles usar Docker
+  o el entorno fijado.
+- Probar localmente:
+
+```bash
+python3 web/build_site.py --out _site
+python3 -m http.server -d _site 8000      # http://localhost:8000
+```
+
 ### Ejecutable de un solo archivo (sin instalar Python)
 
 Para alguien que solo quiere abrir la app sin instalar nada — construye un ejecutable
@@ -191,6 +219,12 @@ run_pipeline.py                      calibración + validación (invocado por `c
 requirements.txt                     dependencias con versiones fijadas (pip)
 environment.yml                      entorno conda equivalente (mismas versiones)
 .dockerignore                        (en la raíz: Docker lo lee del contexto de build)
+CITATION.cff                         metadatos de cita (botón "Cite this repository")
+.zenodo.json                         metadatos para el archivo en Zenodo (DOI por release)
+
+web/
+  build_site.py                      arma la versión web (stlite) para GitHub Pages
+  calibrated_patterns.tsv            (opcional) patrones que la app web carga por defecto
 
 docker/
   Dockerfile                         imagen reproducible
@@ -426,6 +460,18 @@ atractor = alerta de recurrencia. Demo end-to-end con patrones calibrados reales
 python3 src/prognosis_demo.py --patterns results_gse39582/calibrated_patterns.tsv
 ```
 
+## Cómo citar
+
+Cada release de GitHub (`v*`) se archiva en Zenodo con un DOI propio; los metadatos están en
+`CITATION.cff` y `.zenodo.json`. Usa el botón **"Cite this repository"** de GitHub o el DOI
+del registro de Zenodo.
+
 ## Licencia
 
-MIT — ver [`LICENSE`](LICENSE).
+[PolyForm Noncommercial License 1.0.0](LICENSE) — uso libre para investigación, docencia,
+uso personal y por organizaciones sin fines de lucro (universidades, institutos públicos de
+investigación, hospitales públicos, etc.). **Cualquier uso comercial requiere un acuerdo de
+licencia aparte** con el autor.
+
+Las versiones publicadas hasta `v0.3.0` se distribuyeron bajo licencia MIT y conservan esa
+licencia; los cambios posteriores se rigen por PolyForm Noncommercial 1.0.0.
