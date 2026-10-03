@@ -46,3 +46,6 @@ Thumbs.db
 
 # --- figures/: los scripts se versionan; las salidas (PDF/PNG/pies) viven en el Drive (premio_Roche/figuras) ---
 figures/out/
+
+# --- Version web generada (web/build_site.py) ---
+_site/
