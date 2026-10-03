@@ -1,0 +1,42 @@
+{
+  "upload_type": "software",
+  "title": "ColoQ (CRC-digital-twin): mechanistic digital twin for colorectal cancer molecular subtyping (CMS1–4) via Hopfield attractor dynamics on an RT-qPCR panel",
+  "description": "<p>ColoQ is a mechanistic digital twin of colorectal cancer that models the four Consensus Molecular Subtypes (CMS1–CMS4) as attractors of a continuous Hopfield-type network. Patterns are calibrated against real labeled cohorts (GSE39582) and validated against external cohorts and survival outcomes. The model is designed to run on a 10-gene panel measurable by RT-qPCR alone (no ddPCR, NGS or exosome sequencing), and includes a longitudinal post-surgical prognosis module and counterfactual treatment simulation.</p><p>The release includes the full pipeline (calibration, external validation, stratified Cox analyses and diagnostics, dynamical diagnostics, Modern Hopfield V1/V2 comparison), a Streamlit web interface (also available in the browser via GitHub Pages: https://danpc11.github.io/CRC-digital-twin/), a Docker image and single-file executables.</p><p><strong>Research tool only — not a medical device or a validated clinical decision aid.</strong> Licensed for noncommercial use (PolyForm Noncommercial 1.0.0).</p>",
+  "creators": [
+    {
+      "name": "Perez-Calixto, Daniel",
+      "affiliation": "Facultad de Ciencias, Universidad Nacional Autónoma de México (UNAM); Instituto Nacional de Medicina Genómica (INMEGEN)"
+    },
+    {
+      "name": "Tovar, Hugo",
+      "affiliation": "Facultad de Ciencias, Universidad Nacional Autónoma de México (UNAM); Instituto Nacional de Medicina Genómica (INMEGEN)"
+    }
+  ],
+  "keywords": [
+    "colorectal cancer",
+    "consensus molecular subtypes",
+    "CMS",
+    "digital twin",
+    "Hopfield network",
+    "attractor dynamics",
+    "RT-qPCR",
+    "precision oncology",
+    "survival analysis"
+  ],
+  "license": "polyform-noncommercial-1.0.0",
+  "access_right": "open",
+  "language": "spa",
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Danpc11/CRC-digital-twin",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://danpc11.github.io/CRC-digital-twin/",
+      "relation": "isDocumentedBy",
+      "scheme": "url"
+    }
+  ]
+}
