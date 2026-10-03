@@ -14,6 +14,7 @@ authors:
   - family-names: Tovar
     given-names: Hugo
     affiliation: "Facultad de Ciencias, UNAM; Instituto Nacional de Medicina Genómica (INMEGEN)"
+doi: 10.5281/zenodo.23126100
 repository-code: "https://github.com/Danpc11/CRC-digital-twin"
 url: "https://danpc11.github.io/CRC-digital-twin/"
 license: PolyForm-Noncommercial-1.0.0
