@@ -1,5 +1,22 @@
 # Historial de cambios
 
+## 2026-10-03 — `v0.4.0`: licencia PolyForm Noncommercial, app web y DOI (sin cambios de modelo)
+
+- **Licencia**: MIT → **PolyForm Noncommercial 1.0.0** (`LICENSE`, con `Required Notice` a nombre
+  de Daniel Perez-Calixto y Hugo Tovar). Uso libre para investigación, docencia y organizaciones sin
+  fines de lucro; el uso comercial requiere licencia aparte. `v0.1.0`–`v0.3.0` conservan MIT.
+- **App web**: la interfaz de Streamlit se publica en GitHub Pages
+  (<https://danpc11.github.io/CRC-digital-twin/>) con stlite (Pyodide/WebAssembly), sin servidor.
+  `web/build_site.py` monta `app.py` y `src/*.py` sin modificarlos; usa `web/calibrated_patterns.tsv`
+  si existe y, si no, patrones DEMO sintéticos. Workflow nuevo `.github/workflows/pages.yml`
+  (actions sobre Node 24, runner fijado a `ubuntu-24.04`).
+- **Cita**: `CITATION.cff` y `.zenodo.json` (autores: Daniel Perez-Calixto y Hugo Tovar; Facultad de
+  Ciencias, UNAM; INMEGEN). Cada release se archiva en Zenodo con DOI.
+- **Docs**: README con enlace a la app, sección "Versión web", "Cómo citar" y licencia; `.gitignore`
+  excluye `_site/`.
+- **Sin cambios** en panel, calibración, dinámica ni resultados respecto a `v0.3.0`.
+- Suite: 246/246.
+
 ## 2026-09-18 — Cambio de panel CMS4: `TGFB1`→`EFEMP2` (aprobado por Daniel)
 
 - **Motivación**: el error dominante en las externas era CMS4 oficial → CMS1 predicho. `TGFB1`
