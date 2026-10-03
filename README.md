@@ -2,7 +2,6 @@
 
 [![Tests](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml/badge.svg)](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-app-FF4B4B?logo=streamlit&logoColor=white)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
 ![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23126100.svg)](https://doi.org/10.5281/zenodo.23126100)
