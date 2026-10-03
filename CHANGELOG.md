@@ -17,7 +17,7 @@
 - **Sin cambios** en panel, calibración, dinámica ni resultados respecto a `v0.3.0`.
 - Suite: 246/246.
 
-## 2026-09-18 — Cambio de panel CMS4: `TGFB1`→`EFEMP2` (aprobado por Daniel)
+## 2026-09-18 — Cambio de panel CMS4: `TGFB1`→`EFEMP2`
 
 - **Motivación**: el error dominante en las externas era CMS4 oficial → CMS1 predicho. `TGFB1`
   casi no separa CMS4 de CMS1 (AUC 0.58/0.57 en GSE39582/TCGA) y `VIM` sigue al infiltrado
