@@ -3,7 +3,7 @@
 [![Tests](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml/badge.svg)](https://github.com/Danpc11/CRC-digital-twin/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 [![Docker](https://img.shields.io/badge/Docker-pipelinesinmegen%2Fcoloq-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/pipelinesinmegen/coloq)
-![Tests count](https://img.shields.io/badge/tests-246%20passing-brightgreen)
+![Tests count](https://img.shields.io/badge/tests-265%20passing-brightgreen)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23126100.svg)](https://doi.org/10.5281/zenodo.23126100)
 [![Web app](https://img.shields.io/badge/app-abrir%20en%20el%20navegador-FF4B4B?logo=streamlit&logoColor=white)](https://danpc11.github.io/CRC-digital-twin/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-lightgrey)](LICENSE)
@@ -32,7 +32,7 @@ interfaz completa corre en el navegador (ver [Versión web](#versión-web-github
 ## Instalación
 
 Tres opciones equivalentes — todas con las mismas versiones fijadas, verificadas con la suite
-completa de regresión (246 pruebas). Se recomienda Python 3.12; la aplicación admite Python
+completa de regresión (265 pruebas). Se recomienda Python 3.12; la aplicación admite Python
 3.11 o versiones posteriores.
 
 ### pip
