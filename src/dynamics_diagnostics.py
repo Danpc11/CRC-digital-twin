@@ -645,7 +645,10 @@ def continuation_search(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--patterns", required=True)
-    parser.add_argument("--beta", type=float, default=2.0)
+    parser.add_argument("--beta", type=float, default=2.0,
+                        help="Nitidez de la dinamica LEGACY (W tanh). Se mantiene en 2.0 por "
+                             "la recomendacion explicita de MODEL.md; el DEFAULT_BETA=3.0 de "
+                             "modern_hopfield.py es de OTRA dinamica y no aplica aqui.")
     parser.add_argument("--n-samples", type=int, default=300)
     parser.add_argument("--find-interval", action="store_true",
                          help="Buscar automaticamente un intervalo de beta donde los 4 "
