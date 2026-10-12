@@ -1,5 +1,41 @@
 # Historial de cambios
 
+## 2026-10-12 — β crítico en la dinámica Modern Hopfield
+
+### Corregido
+- **El atractor de CMS2 no existía a β=2.0**, el valor por defecto del subcomando
+  `modern-hopfield`. Su equilibrio no convergía (residuo del campo 6.6×10⁻³), el autovalor
+  máximo era −0.0004 (marginal) y su cuenca empírica salía vacía (0/300), lo que hacía
+  parecer que el subtipo era inalcanzable. No era un problema de CMS2: el umbral de
+  existencia de los cuatro atractores está en **β ≈ 2.03** con el panel vigente, y β=2.0
+  caía 1.5 % por debajo. A β=3.0 los cuatro son genuinos (cuencas 33/31/25/11 %).
+- **Causa**: la norma del centroide. El `softmax` satura según β por la brecha de logit,
+  que vale 7.5 para CMS1 y 1.9 para CMS2 (normas 2.66 y 1.27); a β=2.0 el softmax asigna
+  0.968 a CMS2 en vez de ~1.000 y no hay punto fijo autoconsistente cerca de su centroide.
+- **`modern_hopfield.DEFAULT_BETA = 3.0`**, unificado con el valor que ya usaban el
+  clasificador y la app. La discrepancia entre ambos (2.0 en dinámica, 3.0 en clasificación)
+  era la raíz del problema. La dinámica legacy (`W·tanh`) conserva β=2.0 por la
+  recomendación de `MODEL.md`: son ecuaciones distintas y sus β no son intercambiables.
+
+### Añadido
+- `find_critical_beta()`: calcula por bisección el β mínimo con los cuatro atractores
+  genuinos. El umbral depende del panel y se mueve al cambiar un gen, así que se calcula
+  en vez de fijarse de memoria.
+- `report_beta_validity()`: se ejecuta al inicio de `modern-hopfield` e imprime el umbral,
+  el margen del β en uso y un aviso explícito cuando algún centroide no sostiene su
+  atractor. Antes esto aparecía sólo como un `False` en una columna de la tabla y pasaba
+  inadvertido.
+- `tests/test_critical_beta.py` (6 pruebas): el β por defecto sostiene los cuatro
+  atractores con margen ≥15 %, por debajo del umbral falla y por encima no, el subtipo de
+  menor norma es el primero en perderse, y sin atractor la cuenca empírica queda vacía.
+  Suite: 259 → 265.
+
+### Pendiente
+- Regenerar `results_modern_hopfield/` con el β por defecto nuevo: las tablas de equilibrios
+  y cuencas calculadas a β=2.0 muestran CMS2 sin converger y no describen un paisaje de
+  cuatro atractores.
+
+
 ## 2026-10-03 — `v0.4.0`: licencia PolyForm Noncommercial, app web y DOI (sin cambios de modelo)
 
 - **Licencia**: MIT → **PolyForm Noncommercial 1.0.0** (`LICENSE`, con `Required Notice` a nombre
