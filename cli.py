@@ -412,7 +412,7 @@ def build_parser():
     s = sub.add_parser("dynamics-diagnostics",
                         help="Equilibrios y estabilidad reales de la dinamica no lineal (jacobiano, cuencas de atraccion)")
     s.add_argument("--patterns", required=True)
-    s.add_argument("--beta", type=float, default=2.0)
+    s.add_argument("--beta", type=float, default=2.0)  # dinamica legacy (W tanh): ver MODEL.md
     s.add_argument("--n-samples", type=int, default=300)
     s.add_argument("--find-interval", action="store_true",
                     help="Buscar automaticamente un intervalo de beta con 4 atractores CMS genuinos")
@@ -435,7 +435,7 @@ def build_parser():
                              "Ramsauer et al. 2020) -- flujo de gradiente genuino, alternativa a "
                              "dynamics-diagnostics/attractor_model.py")
     s.add_argument("--patterns", required=True)
-    s.add_argument("--beta", type=float, default=2.0)
+    s.add_argument("--beta", type=float, default=3.0)
     s.add_argument("--n-samples", type=int, default=300)
     s.add_argument("--sweep", action="store_true",
                     help="Barrer varios valores de beta ademas del especificado")
