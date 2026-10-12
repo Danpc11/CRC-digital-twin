@@ -137,6 +137,84 @@ def validate_modern_pattern_matrix(
     return matrix
 
 
+DEFAULT_BETA = 3.0
+"""Nitidez por defecto de la dinamica.
+
+Era 2.0 en los subcomandos de dinamica y 3.0 en el clasificador, y esa
+discrepancia escondia un problema real: con el panel vigente el
+atractor de CMS2 solo existe por encima de beta ~ 2.03 (ver
+find_critical_beta), asi que la tabla de equilibrios a beta=2.0 daba
+CMS2 sin converger, con autovalor maximo -0.0004 y cuenca empirica
+vacia. No era un defecto de CMS2: beta=2.0 caia 1.5% por debajo del
+umbral de existencia de ese equilibrio.
+
+La causa es la norma del centroide. softmax(beta X^T x) satura cuando
+beta * (logit propio - mejor rival) es grande; con el panel actual esa
+brecha vale 7.5 para CMS1 y 1.9 para CMS2, de modo que a beta=2.0 el
+softmax asigna 0.968 a CMS2 en vez de ~1.000 y no hay punto fijo
+autoconsistente cerca de su centroide. El umbral depende del panel y
+se mueve cada vez que se cambia un gen, por eso conviene calcularlo en
+vez de fijarlo de memoria.
+"""
+
+
+def find_critical_beta(
+    patterns: dict, beta_min: float = 0.5, beta_max: float = 12.0,
+    tolerance: float = 1e-3, correlation_threshold: float = 0.9,
+) -> dict:
+    """
+    Beta minimo con el que los CUATRO centroides son atractores genuinos.
+
+    Biseccion sobre validate_modern_hopfield_beta. Devuelve el umbral y
+    el margen relativo del beta en uso, para que el reporte diga cuanta
+    holgura hay antes de que un subtipo deje de existir como atractor.
+    """
+    if not validate_modern_hopfield_beta(patterns, beta_max, correlation_threshold)["valid"]:
+        return {"beta_critico": float("nan"), "beta_max_probado": float(beta_max),
+                "nota": f"Ningun beta <= {beta_max} da los 4 atractores; revisar la calibracion."}
+    lo, hi = float(beta_min), float(beta_max)
+    if validate_modern_hopfield_beta(patterns, lo, correlation_threshold)["valid"]:
+        return {"beta_critico": lo, "beta_max_probado": float(beta_max),
+                "nota": f"Validos ya en beta={lo}; el umbral esta por debajo del rango probado."}
+    while hi - lo > tolerance:
+        mid = (lo + hi) / 2.0
+        if validate_modern_hopfield_beta(patterns, mid, correlation_threshold)["valid"]:
+            hi = mid
+        else:
+            lo = mid
+    return {"beta_critico": float(hi), "beta_max_probado": float(beta_max), "nota": ""}
+
+
+def report_beta_validity(patterns: dict, beta: float,
+                         correlation_threshold: float = 0.9) -> dict:
+    """Imprime si el beta en uso sostiene los cuatro atractores y con que margen.
+
+    Se llama al inicio de los subcomandos de dinamica: antes, que un
+    centroide no fuera atractor aparecia solo como un False en una
+    columna de la tabla y pasaba inadvertido.
+    """
+    v = validate_modern_hopfield_beta(patterns, beta, correlation_threshold)
+    crit = find_critical_beta(patterns, correlation_threshold=correlation_threshold)
+    bc = crit["beta_critico"]
+    if np.isfinite(bc):
+        print(f"Beta en uso: {beta}. Umbral de existencia de los 4 atractores: "
+              f"beta >= {bc:.3f}.")
+        if v["valid"]:
+            margen = (beta - bc) / bc * 100
+            print(f"  Los 4 centroides son atractores genuinos (margen {margen:+.0f}% sobre el umbral).")
+            if margen < 15:
+                print("  AVISO: margen estrecho; un cambio de panel puede dejar algun subtipo "
+                      "sin atractor. Considerar un beta mayor.")
+        else:
+            print(f"  AVISO: a beta={beta} NO son atractores genuinos: {', '.join(v['invalid_patterns'])}.")
+            print(f"  Sus equilibrios no convergen y su cuenca empirica sale vacia. "
+                  f"Las tablas de abajo NO describen un paisaje de 4 atractores. "
+                  f"Usar --beta >= {bc:.2f} (sugerido {max(DEFAULT_BETA, bc * 1.2):.1f}).")
+    else:
+        print(f"AVISO: {crit['nota']}")
+    return {"validacion": v, "critico": crit}
+
+
 def validate_modern_hopfield_beta(
     patterns: dict, beta: float, correlation_threshold: float = 0.9,
 ) -> dict:
@@ -1173,7 +1251,9 @@ def main():
         description="Verifica si los patrones calibrados son atractores genuinos "
                     "bajo la dinamica de Hopfield moderno (rediseno de attractor_model.py)")
     parser.add_argument("--patterns", required=True)
-    parser.add_argument("--beta", type=float, default=2.0)
+    parser.add_argument("--beta", type=float, default=DEFAULT_BETA,
+                        help=f"Nitidez de la dinamica (default {DEFAULT_BETA}; "
+                             "por debajo del umbral critico algun subtipo deja de ser atractor)")
     parser.add_argument("--n-samples", type=int, default=300)
     parser.add_argument("--sweep", action="store_true",
                          help="Barrer varios valores de beta en vez de solo el especificado")
@@ -1235,6 +1315,8 @@ def main():
     print("\n" + "=" * 78)
     print(f"2. EQUILIBRIOS Y ESTABILIDAD (beta={args.beta})")
     print("=" * 78)
+    report_beta_validity(patterns, args.beta)
+    print()
     tabla = verify_all_patterns_hopfield(patterns, args.beta)
     print(tabla.to_string(index=False))
 
