@@ -182,7 +182,12 @@ def save_figure(fig, stem: str, outdir: Path, also_svg: bool = False) -> list[Pa
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORK_ROOT = REPO_ROOT.parent  # CRC-dt/ (contiene CRC-digital-twin/ y network_analysis/)
 
-DRIVE_PREMIO = Path.home() / "Library/CloudStorage/GoogleDrive-hachepunto@gmail.com/Mi unidad/premio_Roche"
+_DRIVE = Path.home() / "Library/CloudStorage/GoogleDrive-hachepunto@gmail.com/Mi unidad"
+# premio_Roche se movio el 2026-10-16 bajo Claude-remote/crc-dt/; se conserva la
+# ruta anterior como respaldo para no romper una copia local sin sincronizar.
+DRIVE_PREMIO = next(
+    (c for c in (_DRIVE / "Claude-remote/crc-dt/premio_Roche", _DRIVE / "premio_Roche") if c.exists()),
+    _DRIVE / "Claude-remote/crc-dt/premio_Roche")
 
 RESPALDO_CANDIDATES = [
     DRIVE_PREMIO / "respaldo_v0.2.0",
