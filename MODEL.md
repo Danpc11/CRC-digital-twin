@@ -75,7 +75,8 @@ $$\frac{dx}{dt} = -x + W \tanh(\beta x) + I(t)$$
 - $-x$: término de relajación lineal hacia el origen (decaimiento natural, en ausencia de
   cualquier señal, el sistema vuelve a "sin enfermedad residual")
 - $W\tanh(\beta x)$: acoplamiento no lineal entre componentes, con $\beta$ controlando la
-  nitidez de la no linealidad ($\beta=2.0$ de forma predeterminada)
+  nitidez de la no linealidad ($\beta=2.0$ de forma predeterminada en esta dinámica legacy;
+  el motor Modern Hopfield usa $\beta=3.0$ — ver "Umbral crítico de β" más abajo)
 - $I(t)$: término de forzamiento externo — representa un proceso biológico que empuja el
   estado en una dirección particular (recaída, tratamiento; ver secciones 6–7)
 
@@ -212,6 +213,31 @@ hay gradientes); no es una red neuronal en el sentido de tener pesos aprendidos 
 capa (los "pesos" $W$ son una proyección algebraica cerrada, determinística dados los
 patrones); no predice magnitud de respuesta a tratamiento (solo dirección); y el riesgo que
 produce es ordinal, no una probabilidad de supervivencia calibrada.
+
+### Umbral crítico de β en la dinámica Modern Hopfield (2026-10-12)
+
+En el motor Modern Hopfield ($\dot x = -x + X\,\mathrm{softmax}(\beta X^Tx)$) la
+existencia de cada atractor depende de β a través de la **norma del centroide**. El
+`softmax` satura cuando $\beta\,(\text{logit propio} - \text{mejor rival})$ es grande, y
+con el panel vigente esa brecha vale 7.5 para CMS1 y 1.9 para CMS2 (normas 2.66 y 1.27).
+Por debajo de un umbral, el centroide de menor norma deja de tener un punto fijo
+autoconsistente cerca: su equilibrio no converge, el autovalor máximo cruza el cero
+(bifurcación silla-nodo) y su cuenca empírica queda vacía.
+
+Con la calibración actual el umbral está en **β ≈ 2.03**. A β=2.0 —valor que usaban por
+defecto los subcomandos de dinámica— CMS2 no era un atractor (residuo del campo
+6.6×10⁻³, autovalor máximo −0.0004, cuenca 0/300). A β=3.0 los cuatro son genuinos, con
+cuencas de 33 % (CMS1), 31 % (CMS3), 25 % (CMS4) y 11 % (CMS2).
+
+Por eso `modern_hopfield.DEFAULT_BETA = 3.0`, unificado con el valor que ya usaba el
+clasificador (`external_validation.py`, app). El umbral depende del panel y se mueve al
+cambiar un gen, así que **no se fija de memoria**: `find_critical_beta()` lo calcula por
+bisección y `report_beta_validity()` lo imprime con el margen del β en uso, avisando
+cuando algún subtipo no sostiene su atractor.
+
+**Esto no aplica a la dinámica legacy** ($\dot x = -x + W\tanh(\beta x)$, `attractor_model.py`
+y `dynamics_diagnostics.py`), que conserva β=2.0 por la recomendación de la sección
+siguiente. Son ecuaciones distintas y sus β no son intercambiables.
 
 **Sobre la palabra "atractor" específicamente**: $Wp^\mu = p^\mu$ solo está probado para el
 sistema **linealizado** ($dx/dt = -x + Wx$). Verificado con `dynamics_diagnostics.py`
